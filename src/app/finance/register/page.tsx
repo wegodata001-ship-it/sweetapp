@@ -12,6 +12,8 @@ import {
   User,
 } from "lucide-react";
 import { useMemo, useState } from "react";
+import { uploadFinancePdfAndInsert } from "@/lib/finance/db";
+import { buildRegisterPdfBlob } from "@/lib/finance/register-pdf";
 import { formatShekel, parseNum } from "@/lib/format-shekel";
 
 const DOCUMENT_TYPES = [
@@ -109,6 +111,104 @@ export default function FinanceRegisterPage() {
   );
 
   const [orderSentNotice, setOrderSentNotice] = useState(false);
+  const [archiveFeedback, setArchiveFeedback] = useState<string | null>(null);
+  const [publishing, setPublishing] = useState(false);
+
+  const publishIncomeDoc = async () => {
+    setPublishing(true);
+    setArchiveFeedback(null);
+    try {
+      const linesPdf = lines.map((row, i) => ({
+        itemName: row.itemName,
+        quantity: row.quantity,
+        price: row.price,
+        lineTotal: lineTotals[i] ?? 0,
+      }));
+      const blob = await buildRegisterPdfBlob({
+        kind: "income",
+        customerName,
+        incomeDate,
+        documentType,
+        depositAmount,
+        trayQty,
+        returnDate,
+        showEvent: showEventFields,
+        lines: linesPdf,
+        grandTotal: grandTotalIncome,
+      });
+      const title = `${documentType}${customerName ? ` — ${customerName}` : ""}`;
+      const res = await uploadFinancePdfAndInsert({
+        blob,
+        title,
+        category: "הכנסה",
+        docDate: incomeDate || null,
+      });
+      setArchiveFeedback(res.ok ? "המסמך פורסם ונשמר בארכיון כ-PDF." : res.error ?? "שגיאה בשמירה");
+    } catch (e) {
+      setArchiveFeedback(e instanceof Error ? e.message : "שגיאה ביצירת PDF");
+    } finally {
+      setPublishing(false);
+    }
+  };
+
+  const publishZDoc = async () => {
+    setPublishing(true);
+    setArchiveFeedback(null);
+    try {
+      const blob = await buildRegisterPdfBlob({
+        kind: "zreport",
+        zDate,
+        zNumber,
+        cashTaxable: parseNum(cashTaxable),
+        cashExempt: parseNum(cashExempt),
+        creditTaxable: parseNum(creditTaxable),
+        creditExempt: parseNum(creditExempt),
+        transfers: parseNum(transfers),
+        grandTotal: zGrandTotal,
+      });
+      const title = `דוח Z${zNumber ? ` ${zNumber}` : ""}`;
+      const res = await uploadFinancePdfAndInsert({
+        blob,
+        title,
+        category: "דוח Z",
+        docDate: zDate || null,
+      });
+      setArchiveFeedback(res.ok ? "דוח Z נשמר בארכיון כ-PDF." : res.error ?? "שגיאה בשמירה");
+    } catch (e) {
+      setArchiveFeedback(e instanceof Error ? e.message : "שגיאה ביצירת PDF");
+    } finally {
+      setPublishing(false);
+    }
+  };
+
+  const publishExpenseDoc = async () => {
+    setPublishing(true);
+    setArchiveFeedback(null);
+    try {
+      const blob = await buildRegisterPdfBlob({
+        kind: "expense",
+        supplier,
+        category,
+        expenseDate,
+        docNumber,
+        amountBeforeVat: parseNum(amountBeforeVat),
+        vatAmount: parseNum(vatAmount),
+        expenseTotal,
+      });
+      const title = `הוצאה${supplier ? ` — ${supplier}` : ""}`;
+      const res = await uploadFinancePdfAndInsert({
+        blob,
+        title,
+        category: "הוצאה",
+        docDate: expenseDate || null,
+      });
+      setArchiveFeedback(res.ok ? "ההוצאה נשמרה בארכיון כ-PDF." : res.error ?? "שגיאה בשמירה");
+    } catch (e) {
+      setArchiveFeedback(e instanceof Error ? e.message : "שגיאה ביצירת PDF");
+    } finally {
+      setPublishing(false);
+    }
+  };
 
   const inputClass =
     "mt-1 block w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-right text-slate-900 shadow-sm outline-none transition focus:border-cyan-500 focus:ring-2 focus:ring-cyan-200";
@@ -130,6 +230,19 @@ export default function FinanceRegisterPage() {
             </p>
           </div>
         </div>
+
+        {archiveFeedback && (
+          <div
+            className={`mt-4 rounded-xl border px-4 py-3 text-sm font-bold ${
+              archiveFeedback.includes("שגיאה") || archiveFeedback.includes("לא מוגדר")
+                ? "border-rose-200 bg-rose-50 text-rose-900"
+                : "border-emerald-200 bg-emerald-50 text-emerald-900"
+            }`}
+            role="status"
+          >
+            {archiveFeedback}
+          </div>
+        )}
 
         <div className="mt-6 grid gap-2 sm:grid-cols-3">
           {tabs.map((tab) => {
@@ -323,8 +436,13 @@ export default function FinanceRegisterPage() {
             <button type="button" className="rounded-xl bg-cyan-600 px-5 py-3 font-bold text-white hover:bg-cyan-700">
               שמירת טיוטה
             </button>
-            <button type="button" className="rounded-xl border border-slate-300 px-5 py-3 font-bold text-slate-800 hover:bg-slate-50">
-              פרסום מסמך
+            <button
+              type="button"
+              disabled={publishing}
+              onClick={() => void publishIncomeDoc()}
+              className="rounded-xl border border-slate-300 px-5 py-3 font-bold text-slate-800 hover:bg-slate-50 disabled:opacity-50"
+            >
+              {publishing ? "מפרסם…" : "פרסום מסמך"}
             </button>
           </div>
         </section>
@@ -422,8 +540,13 @@ export default function FinanceRegisterPage() {
             </div>
           </div>
 
-          <button type="button" className="mt-6 rounded-xl bg-slate-900 px-5 py-3 font-bold text-white hover:bg-slate-800">
-            שמירת דוח Z
+          <button
+            type="button"
+            disabled={publishing}
+            onClick={() => void publishZDoc()}
+            className="mt-6 rounded-xl bg-slate-900 px-5 py-3 font-bold text-white hover:bg-slate-800 disabled:opacity-50"
+          >
+            {publishing ? "שומר…" : "שמירת דוח Z"}
           </button>
         </section>
       )}
@@ -526,8 +649,13 @@ export default function FinanceRegisterPage() {
             </div>
           </div>
 
-          <button type="button" className="mt-6 rounded-xl bg-slate-900 px-5 py-3 font-bold text-white hover:bg-slate-800">
-            שמירת הוצאה
+          <button
+            type="button"
+            disabled={publishing}
+            onClick={() => void publishExpenseDoc()}
+            className="mt-6 rounded-xl bg-slate-900 px-5 py-3 font-bold text-white hover:bg-slate-800 disabled:opacity-50"
+          >
+            {publishing ? "שומר…" : "שמירת הוצאה"}
           </button>
         </section>
       )}
