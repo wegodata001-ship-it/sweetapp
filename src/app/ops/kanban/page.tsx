@@ -1,6 +1,6 @@
 export default function KanbanTasksPage() {
   return (
-    <div className="mx-auto max-w-7xl rounded-[2rem] border border-slate-200 bg-white p-8 shadow-sm">
+    <div className="mx-auto max-w-7xl app-panel p-8">
       <p className="text-sm font-bold uppercase tracking-[0.2em] text-indigo-600">
         Operations / Kanban Tasks
       </p>

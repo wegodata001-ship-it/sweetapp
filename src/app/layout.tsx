@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Geist, Geist_Mono, Noto_Sans_Arabic } from "next/font/google";
 import { AppShell } from "@/components/app-shell";
 import "./globals.css";
 
@@ -13,8 +13,14 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+const notoArabic = Noto_Sans_Arabic({
+  variable: "--font-noto-arabic",
+  subsets: ["arabic"],
+  weight: ["500", "600", "700"],
+});
+
 export const metadata: Metadata = {
-  title: "WEGO ERP",
+  title: "WEGO BUSINESS",
   description: "מערכת ניהול כספים, תפעול ומשימות בארגון.",
 };
 
@@ -27,9 +33,9 @@ export default function RootLayout({
     <html
       lang="he"
       dir="rtl"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      className={`${geistSans.variable} ${geistMono.variable} ${notoArabic.variable} h-full antialiased`}
     >
-      <body className="min-h-full bg-slate-100 text-slate-950">
+      <body className="min-h-full bg-white text-slate-950">
         <AppShell>{children}</AppShell>
       </body>
     </html>

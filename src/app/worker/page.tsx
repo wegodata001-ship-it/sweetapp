@@ -43,7 +43,7 @@ export default function WorkerPortalPage() {
 
   return (
     <div className="mx-auto max-w-xl space-y-5">
-      <section className="rounded-[2rem] border border-slate-200 bg-white p-8 shadow-sm">
+      <section className="app-panel p-8">
         <p className="flex items-center gap-2 text-sm font-bold tracking-[0.12em] text-emerald-700">
           <ClipboardList className="h-4 w-4" aria-hidden />
           פורטל עובד אישי
@@ -54,7 +54,7 @@ export default function WorkerPortalPage() {
         </p>
       </section>
 
-      <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+      <section className="app-panel p-6">
         <h2 className="text-lg font-black leading-7 text-slate-950">{MOCK_TASK_TITLE}</h2>
 
         <div className="mt-6 flex flex-wrap items-center gap-4">
@@ -70,7 +70,7 @@ export default function WorkerPortalPage() {
             type="button"
             onClick={toggleTimer}
             className={`inline-flex flex-1 items-center justify-center gap-2 rounded-2xl px-6 py-4 text-base font-black text-white shadow-lg transition sm:flex-none min-w-[160px] ${
-              running ? "bg-slate-900 hover:bg-slate-800 shadow-slate-200" : "bg-emerald-600 hover:bg-emerald-700 shadow-emerald-200"
+              running ? "bg-luxury-navy-rich hover:bg-luxury-charcoal shadow-luxury-sm" : "bg-emerald-600 hover:bg-emerald-700 shadow-emerald-200"
             }`}
           >
             {running ? (
@@ -92,7 +92,7 @@ export default function WorkerPortalPage() {
           <textarea
             value={notes}
             onChange={(event) => setNotes(event.target.value)}
-            className="mt-2 min-h-28 w-full rounded-2xl border border-slate-300 bg-white p-4 text-right text-sm font-semibold text-slate-900 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200"
+            className="mt-2 min-h-28 w-full rounded-xl border border-slate-300 bg-white p-4 text-right text-sm font-semibold text-slate-900 outline-none focus:border-luxury-gold focus:ring-2 focus:ring-luxury-gold/25"
             placeholder="תיעוד בעיות במדף, חוסרים, או הערות למנהל משמרת..."
           />
         </label>

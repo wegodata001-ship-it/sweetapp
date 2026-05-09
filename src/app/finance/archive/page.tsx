@@ -44,7 +44,7 @@ export default function FinanceArchivePage() {
   };
 
   return (
-    <div className="mx-auto max-w-7xl rounded-[2rem] border border-slate-200 bg-white p-8 shadow-sm">
+    <div className="mx-auto max-w-7xl app-panel p-8">
       <p className="flex items-center gap-2 text-sm font-bold tracking-[0.12em] text-cyan-700">
         <FileStack className="h-4 w-4" aria-hidden />
         ארכיון מסמכים

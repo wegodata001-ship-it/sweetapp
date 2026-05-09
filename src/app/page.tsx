@@ -3,8 +3,8 @@ import Link from "next/link";
 export default function Home() {
   return (
     <div className="mx-auto max-w-5xl space-y-6">
-      <section className="rounded-[2rem] border border-slate-200 bg-white p-8 shadow-sm">
-        <p className="text-sm font-bold tracking-[0.14em] text-indigo-600">
+      <section className="app-panel p-8">
+        <p className="text-sm font-bold tracking-[0.14em] text-luxury-gold">
           מרכז הבקרה
         </p>
         <h1 className="mt-4 text-4xl font-black tracking-tight text-slate-950">
@@ -17,13 +17,13 @@ export default function Home() {
         <div className="mt-6 flex flex-wrap gap-3">
           <Link
             href="/finance/register"
-            className="rounded-full bg-slate-950 px-5 py-3 text-sm font-bold text-white transition hover:bg-slate-800"
+            className="rounded-full bg-luxury-gold px-5 py-3 text-sm font-bold text-luxury-charcoal shadow-luxury-sm transition hover:bg-luxury-gold-hover"
           >
             מעבר לרישום כספי
           </Link>
           <Link
             href="/worker"
-            className="rounded-full border border-emerald-500 px-5 py-3 text-sm font-bold text-emerald-700 transition hover:bg-emerald-50"
+            className="rounded-full border border-luxury-gold/70 px-5 py-3 text-sm font-bold text-luxury-charcoal transition hover:bg-luxury-gold/10"
           >
             כניסה לפורטל עובד אישי
           </Link>

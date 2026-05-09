@@ -34,7 +34,7 @@ export default function InventoryPage() {
   );
 
   return (
-    <div className="mx-auto max-w-7xl rounded-[2rem] border border-slate-200 bg-white p-8 shadow-sm">
+    <div className="mx-auto max-w-7xl app-panel p-8">
       <p className="flex items-center gap-2 text-sm font-bold tracking-[0.12em] text-indigo-700">
         <Package className="h-4 w-4" aria-hidden />
         ספירת מלאי
@@ -71,7 +71,7 @@ export default function InventoryPage() {
                         [row.id]: e.target.value,
                       }))
                     }
-                    className="w-36 rounded-xl border border-slate-300 bg-white px-3 py-2 text-right font-bold text-slate-900 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200"
+                    className="w-36 rounded-xl border border-slate-300 bg-white px-3 py-2 text-right font-bold text-slate-900 outline-none focus:border-luxury-gold focus:ring-2 focus:ring-luxury-gold/25"
                     placeholder="הזן כמות"
                   />
                 </td>
@@ -102,7 +102,7 @@ export default function InventoryPage() {
 
       <button
         type="button"
-        className="mt-6 inline-flex items-center gap-2 rounded-xl bg-slate-900 px-5 py-3 font-bold text-white hover:bg-slate-800"
+        className="mt-6 inline-flex items-center gap-2 rounded-xl bg-luxury-gold px-5 py-3 font-bold text-luxury-charcoal shadow-luxury-sm hover:bg-luxury-gold-hover"
       >
         <ClipboardCheck className="h-4 w-4" aria-hidden />
         שמירת ספירת משמרת

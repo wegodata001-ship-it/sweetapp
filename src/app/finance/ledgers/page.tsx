@@ -95,7 +95,7 @@ export default function LedgersPage() {
   );
 
   return (
-    <div className="mx-auto max-w-7xl rounded-[2rem] border border-slate-200 bg-white p-8 shadow-sm">
+    <div className="mx-auto max-w-7xl app-panel p-8">
       <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <div>
           <p className="flex items-center gap-2 text-sm font-bold tracking-[0.12em] text-cyan-700">
@@ -118,7 +118,7 @@ export default function LedgersPage() {
           <select
             value={entityType}
             onChange={(event) => setEntityType(event.target.value as EntityType)}
-            className="mt-1 block w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-right font-semibold text-slate-900 shadow-sm outline-none focus:border-cyan-500 focus:ring-2 focus:ring-cyan-200"
+            className="mt-1 block w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-right font-semibold text-slate-900 shadow-sm outline-none focus:border-luxury-gold focus:ring-2 focus:ring-luxury-gold/25"
           >
             <option value="supplier">ספק</option>
             <option value="customer">לקוח</option>
@@ -132,7 +132,7 @@ export default function LedgersPage() {
             value={entityId}
             onChange={(event) => setEntityId(event.target.value)}
             disabled={!entities.length}
-            className="mt-1 block w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-right font-semibold text-slate-900 shadow-sm outline-none focus:border-cyan-500 focus:ring-2 focus:ring-cyan-200 disabled:opacity-50"
+            className="mt-1 block w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-right font-semibold text-slate-900 shadow-sm outline-none focus:border-luxury-gold focus:ring-2 focus:ring-luxury-gold/25 disabled:opacity-50"
           >
             {entities.length === 0 ? (
               <option value="">אין גופים בטווח</option>
@@ -152,7 +152,7 @@ export default function LedgersPage() {
             type="date"
             value={dateFrom}
             onChange={(e) => setRange((r) => ({ ...r, dateFrom: e.target.value }))}
-            className="mt-1 block w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-right font-semibold text-slate-900 shadow-sm outline-none focus:border-cyan-500 focus:ring-2 focus:ring-cyan-200"
+            className="mt-1 block w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-right font-semibold text-slate-900 shadow-sm outline-none focus:border-luxury-gold focus:ring-2 focus:ring-luxury-gold/25"
           />
         </label>
 
@@ -162,7 +162,7 @@ export default function LedgersPage() {
             type="date"
             value={dateTo}
             onChange={(e) => setRange((r) => ({ ...r, dateTo: e.target.value }))}
-            className="mt-1 block w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-right font-semibold text-slate-900 shadow-sm outline-none focus:border-cyan-500 focus:ring-2 focus:ring-cyan-200"
+            className="mt-1 block w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-right font-semibold text-slate-900 shadow-sm outline-none focus:border-luxury-gold focus:ring-2 focus:ring-luxury-gold/25"
           />
         </label>
       </div>

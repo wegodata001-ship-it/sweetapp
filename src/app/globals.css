@@ -1,21 +1,42 @@
 @import "tailwindcss";
+@config "../../tailwind.config.ts";
 
 :root {
-  --background: #f1f5f9;
+  --background: #ffffff;
   --foreground: #0f172a;
+  --primary: #d4af37;
+  --primary-foreground: #1a1508;
+  --nav-surface: #1a2332;
+  --nav-surface-elevated: #243044;
+  --nav-border: rgba(255, 255, 255, 0.09);
+  --content-surface: #ffffff;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --font-sans: var(--font-geist-sans), var(--font-noto-arabic), system-ui,
+    sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+}
+
+/* ~17px root for clearer RTL Hebrew / Arabic reading */
+html {
+  font-size: 106.25%;
 }
 
 body {
-  background: var(--background);
+  background: var(--content-surface);
   color: var(--foreground);
-  font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
+  font-family: var(--font-geist-sans), var(--font-noto-arabic), system-ui,
+    sans-serif;
+}
+
+.font-arabic-brand {
+  font-family: var(--font-noto-arabic), "Noto Sans Arabic", system-ui,
+    sans-serif;
 }
 
 button,
@@ -23,4 +44,34 @@ input,
 select,
 textarea {
   font: inherit;
+}
+
+/* Premium surfaces: rounded-xl + soft elevation */
+@layer components {
+  .app-panel {
+    @apply rounded-xl border border-slate-200/90 bg-white shadow-luxury;
+  }
+
+  .app-panel-muted {
+    @apply rounded-xl border border-slate-200/80 bg-slate-50/90 shadow-luxury-sm;
+  }
+}
+
+/* Form controls — rounded-xl, soft shadow; focus uses luxury gold */
+@layer base {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not(
+      [type="file"]
+    ):not([type="hidden"]),
+  select,
+  textarea {
+    @apply rounded-xl border border-slate-200/90 bg-white px-3 py-2.5 text-base shadow-luxury-sm outline-none transition;
+  }
+
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not(
+      [type="file"]
+    ):not([type="hidden"]):focus,
+  select:focus,
+  textarea:focus {
+    @apply border-luxury-gold ring-2 ring-luxury-gold/25;
+  }
 }

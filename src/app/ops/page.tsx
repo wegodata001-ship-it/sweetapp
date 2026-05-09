@@ -19,7 +19,7 @@ const workstreams = [
 export default function OperationsPortalPage() {
   return (
     <div className="mx-auto max-w-7xl space-y-8">
-      <section className="rounded-[2rem] border border-slate-200 bg-white p-8 shadow-sm">
+      <section className="app-panel p-8">
         <p className="text-sm font-bold uppercase tracking-[0.2em] text-indigo-600">
           Operations Portal
         </p>
@@ -36,7 +36,7 @@ export default function OperationsPortalPage() {
         {workstreams.map((workstream) => (
           <div
             key={workstream.title}
-            className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm"
+            className="app-panel p-6"
           >
             <p className="text-xs font-bold uppercase tracking-[0.18em] text-slate-400">
               Operations

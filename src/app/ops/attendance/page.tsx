@@ -147,7 +147,7 @@ export default function TimeAttendancePage() {
 
   return (
     <main className="mx-auto w-full max-w-md px-4 py-5 sm:py-8">
-      <section className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
+      <section className="app-panel p-4 sm:p-6">
         <p className="text-xs font-bold uppercase tracking-[0.2em] text-indigo-600">
           Operations / Attendance
         </p>
@@ -204,7 +204,7 @@ export default function TimeAttendancePage() {
         ) : null}
       </section>
 
-      <section className="mt-4 rounded-3xl border border-slate-200 bg-white p-4 shadow-sm sm:p-6">
+      <section className="mt-4 app-panel p-4 sm:p-6">
         <h2 className="text-lg font-extrabold text-slate-900">Today&apos;s Log</h2>
         {todayLogs.length === 0 ? (
           <p className="mt-3 text-sm text-slate-500">

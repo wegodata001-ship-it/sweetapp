@@ -10,7 +10,7 @@ const currencyFormatter = new Intl.NumberFormat("en-US", {
 export default function FinancePortalPage() {
   return (
     <div className="mx-auto max-w-7xl space-y-8">
-      <section className="rounded-[2rem] border border-slate-200 bg-white p-8 shadow-sm">
+      <section className="app-panel p-8">
         <p className="text-sm font-bold uppercase tracking-[0.2em] text-cyan-600">
           Finance Portal
         </p>
@@ -27,7 +27,7 @@ export default function FinancePortalPage() {
           </div>
           <Link
             href="/finance/income"
-            className="rounded-full bg-slate-950 px-5 py-3 text-center text-sm font-bold text-white transition hover:bg-slate-800"
+            className="rounded-full bg-luxury-gold px-5 py-3 text-center text-sm font-bold text-luxury-charcoal shadow-luxury-sm transition hover:bg-luxury-gold-hover"
           >
             New income document
           </Link>
@@ -35,19 +35,19 @@ export default function FinancePortalPage() {
       </section>
 
       <section className="grid gap-4 md:grid-cols-3">
-        <div className="rounded-3xl border border-slate-200 bg-white p-6">
+        <div className="app-panel p-6">
           <p className="text-sm font-semibold text-slate-500">Total income</p>
           <p className="mt-3 text-3xl font-black">
             {currencyFormatter.format(dashboardStats.income)}
           </p>
         </div>
-        <div className="rounded-3xl border border-slate-200 bg-white p-6">
+        <div className="app-panel p-6">
           <p className="text-sm font-semibold text-slate-500">Total expenses</p>
           <p className="mt-3 text-3xl font-black">
             {currencyFormatter.format(dashboardStats.expenses)}
           </p>
         </div>
-        <div className="rounded-3xl border border-slate-200 bg-white p-6">
+        <div className="app-panel p-6">
           <p className="text-sm font-semibold text-slate-500">Cashflow</p>
           <p className="mt-3 text-3xl font-black">
             {currencyFormatter.format(dashboardStats.cashflow)}
@@ -55,7 +55,7 @@ export default function FinancePortalPage() {
         </div>
       </section>
 
-      <section className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
+      <section className="app-panel p-6">
         <div className="flex items-center justify-between">
           <div>
             <p className="text-sm font-bold uppercase tracking-[0.18em] text-slate-400">

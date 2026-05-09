@@ -98,10 +98,10 @@ export default function CashflowPage() {
   };
 
   const inputClass =
-    "w-full min-w-0 rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-right text-sm font-semibold text-slate-900 outline-none focus:border-cyan-500 focus:ring-1 focus:ring-cyan-200";
+    "w-full min-w-0 rounded-xl border border-slate-200 bg-white px-2 py-1.5 text-right text-sm font-semibold text-slate-900 outline-none focus:border-luxury-gold focus:ring-1 focus:ring-luxury-gold/25";
 
   return (
-    <div className="mx-auto max-w-7xl rounded-[2rem] border border-slate-200 bg-white p-8 shadow-sm">
+    <div className="mx-auto max-w-7xl app-panel p-8">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <p className="flex items-center gap-2 text-sm font-bold tracking-[0.12em] text-cyan-700">
@@ -121,7 +121,7 @@ export default function CashflowPage() {
             setDirectDate(`${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`);
             setDirectOpen(true);
           }}
-          className="inline-flex items-center justify-center gap-2 self-start rounded-2xl bg-slate-900 px-5 py-3 text-sm font-black text-white shadow-md hover:bg-slate-800"
+          className="inline-flex items-center justify-center gap-2 self-start rounded-xl bg-luxury-gold px-5 py-3 text-sm font-black text-luxury-charcoal shadow-luxury-sm hover:bg-luxury-gold-hover"
         >
           <CirclePlus className="h-5 w-5" aria-hidden />
           רישום ישירות
@@ -236,7 +236,7 @@ export default function CashflowPage() {
 
       {directOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4" role="dialog" aria-modal="true">
-          <div className="w-full max-w-md rounded-3xl border border-slate-200 bg-white p-6 shadow-xl">
+          <div className="w-full max-w-md app-panel p-6 shadow-xl">
             <h2 className="text-lg font-black text-slate-950">רישום ישירות</h2>
             <p className="mt-1 text-sm text-slate-600">זכות = כניסה לקופה, חובה = יציאה מהקופה.</p>
             <form className="mt-4 space-y-4" onSubmit={handleDirectSubmit}>

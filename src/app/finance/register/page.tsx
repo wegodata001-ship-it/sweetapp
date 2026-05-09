@@ -279,7 +279,7 @@ function FinanceRegisterPageInner() {
   };
 
   const inputClass =
-    "mt-1 block w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-right text-slate-900 shadow-sm outline-none transition focus:border-cyan-500 focus:ring-2 focus:ring-cyan-200";
+    "mt-1 block w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-right text-slate-900 shadow-sm outline-none transition focus:border-luxury-gold focus:ring-2 focus:ring-luxury-gold/25";
 
   const labelClass = "block text-sm font-bold text-slate-700";
 
@@ -304,7 +304,7 @@ function FinanceRegisterPageInner() {
 
   return (
     <div className="mx-auto max-w-7xl space-y-6">
-      <section className="rounded-[2rem] border border-slate-200 bg-white p-8 shadow-sm">
+      <section className="app-panel p-8">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <p className="flex items-center gap-2 text-sm font-bold tracking-[0.12em] text-cyan-700">
@@ -348,9 +348,9 @@ function FinanceRegisterPageInner() {
                 key={tab.id}
                 type="button"
                 onClick={() => setActiveTab(tab.id)}
-                className={`rounded-2xl border px-4 py-3 text-sm font-bold transition ${
+                className={`rounded-xl border px-4 py-3 text-sm font-bold transition ${
                   isActive
-                    ? "border-slate-900 bg-slate-900 text-white shadow-md"
+                    ? "border-luxury-gold bg-luxury-gold text-luxury-charcoal shadow-md"
                     : "border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100"
                 }`}
               >
@@ -391,7 +391,7 @@ function FinanceRegisterPageInner() {
       )}
 
       {activeTab === "zreport" && (
-        <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm md:p-8">
+        <section className="app-panel p-6 md:p-8">
           <div className="flex flex-wrap items-center gap-2">
             <FileText className="h-5 w-5 text-cyan-600" aria-hidden />
             <h2 className="text-xl font-black text-slate-950">דוח Z קופה</h2>
@@ -488,7 +488,7 @@ function FinanceRegisterPageInner() {
               type="button"
               disabled={publishing}
               onClick={() => void publishZDoc()}
-              className="rounded-xl bg-slate-900 px-5 py-3 font-bold text-white hover:bg-slate-800 disabled:opacity-50"
+              className="rounded-xl bg-luxury-gold px-5 py-3 font-bold text-luxury-charcoal shadow-luxury-sm hover:bg-luxury-gold-hover disabled:opacity-50"
             >
               {publishing ? "שומר…" : editingDocId ? "עדכון דוח Z" : "שמירת דוח Z"}
             </button>
@@ -519,7 +519,7 @@ function FinanceRegisterPageInner() {
               type="button"
               disabled={publishing}
               onClick={() => void publishExpenseDoc()}
-              className="rounded-xl bg-slate-900 px-5 py-3 font-bold text-white hover:bg-slate-800 disabled:opacity-50"
+              className="rounded-xl bg-luxury-gold px-5 py-3 font-bold text-luxury-charcoal shadow-luxury-sm hover:bg-luxury-gold-hover disabled:opacity-50"
             >
               {publishing ? "שומר…" : editingDocId ? "עדכון מסמך" : "פרסום מסמך"}
             </button>

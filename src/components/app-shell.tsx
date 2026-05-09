@@ -19,19 +19,28 @@ export function AppShell({ children }: AppShellProps) {
   return (
     <div className="flex min-h-screen">
       <Sidebar />
-      <div className="flex min-w-0 flex-1 flex-col">
-        <header className="border-b border-slate-200 bg-white/85 px-5 py-4 backdrop-blur lg:hidden">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm font-black tracking-[0.12em]">WEGO</p>
-              <p className="text-xs font-semibold text-slate-500">מערכת ניהול ERP</p>
+      <div className="flex min-w-0 flex-1 flex-col bg-white">
+        <header className="border-b border-white/10 bg-luxury-navy-rich px-5 py-4 shadow-luxury-sm lg:hidden">
+          <div className="flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-sm font-black tracking-[0.14em] text-white">
+                WEGO BUSINESS
+              </p>
+              <p className="font-arabic-brand mt-1 text-lg font-bold leading-snug text-luxury-gold">
+                حلويات القدس
+              </p>
+              <p className="mt-0.5 text-xs font-semibold text-slate-400">
+                מערכת ניהול ארגונית
+              </p>
             </div>
-            <span className="rounded-full bg-slate-950 px-3 py-1 text-xs font-bold text-white">
+            <span className="shrink-0 rounded-full bg-luxury-gold px-3 py-1.5 text-xs font-bold text-luxury-charcoal shadow-sm">
               פורטל אדמין
             </span>
           </div>
         </header>
-        <main className="flex-1 px-5 py-6 sm:px-8 lg:px-10 lg:py-10">{children}</main>
+        <main className="flex-1 bg-white px-5 py-6 sm:px-8 lg:px-10 lg:py-10">
+          {children}
+        </main>
       </div>
     </div>
   );

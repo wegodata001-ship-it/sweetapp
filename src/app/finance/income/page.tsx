@@ -5,7 +5,7 @@ const sampleInvoice = incomeDocuments[0];
 export default function IncomeDocumentPage() {
   return (
     <div className="mx-auto max-w-7xl space-y-8">
-      <section className="rounded-[2rem] border border-slate-200 bg-white p-8 shadow-sm">
+      <section className="app-panel p-8">
         <p className="text-sm font-bold uppercase tracking-[0.2em] text-cyan-600">
           Finance / Income
         </p>
@@ -19,14 +19,14 @@ export default function IncomeDocumentPage() {
               becomes the origin record for any future cashflow or ledger rows.
             </p>
           </div>
-          <span className="w-fit rounded-full bg-slate-950 px-4 py-2 text-xs font-bold uppercase tracking-[0.18em] text-white">
+          <span className="w-fit rounded-full bg-luxury-gold px-4 py-2 text-xs font-bold uppercase tracking-[0.18em] text-luxury-charcoal">
             Source_Type: INVOICE
           </span>
         </div>
       </section>
 
       <div className="grid gap-6 xl:grid-cols-[1fr_360px]">
-        <form className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
+        <form className="app-panel p-6">
           <div className="grid gap-5 md:grid-cols-2">
             <label className="space-y-2">
               <span className="text-sm font-bold text-slate-700">
@@ -35,7 +35,7 @@ export default function IncomeDocumentPage() {
               <input
                 name="documentNumber"
                 defaultValue="INV-2026-1009"
-                className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-cyan-500 focus:bg-white focus:ring-4 focus:ring-cyan-100"
+                className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-luxury-gold focus:bg-white focus:ring-4 focus:ring-luxury-gold/15"
               />
             </label>
 
@@ -47,7 +47,7 @@ export default function IncomeDocumentPage() {
                 name="sourceId"
                 defaultValue="inv_1009"
                 readOnly
-                className="w-full rounded-2xl border border-slate-200 bg-slate-100 px-4 py-3 font-mono text-sm text-slate-500 outline-none"
+                className="w-full rounded-xl border border-slate-200 bg-slate-100 px-4 py-3 font-mono text-sm text-slate-500 outline-none"
               />
             </label>
 
@@ -58,7 +58,7 @@ export default function IncomeDocumentPage() {
               <input
                 name="counterparty"
                 placeholder="Customer legal name"
-                className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-cyan-500 focus:bg-white focus:ring-4 focus:ring-cyan-100"
+                className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-luxury-gold focus:bg-white focus:ring-4 focus:ring-luxury-gold/15"
               />
             </label>
 
@@ -70,7 +70,7 @@ export default function IncomeDocumentPage() {
                 type="date"
                 name="issuedAt"
                 defaultValue="2026-05-08"
-                className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-cyan-500 focus:bg-white focus:ring-4 focus:ring-cyan-100"
+                className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-luxury-gold focus:bg-white focus:ring-4 focus:ring-luxury-gold/15"
               />
             </label>
 
@@ -80,7 +80,7 @@ export default function IncomeDocumentPage() {
                 type="date"
                 name="dueAt"
                 defaultValue="2026-06-07"
-                className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-cyan-500 focus:bg-white focus:ring-4 focus:ring-cyan-100"
+                className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-luxury-gold focus:bg-white focus:ring-4 focus:ring-luxury-gold/15"
               />
             </label>
 
@@ -91,7 +91,7 @@ export default function IncomeDocumentPage() {
               <input
                 name="description"
                 placeholder="Implementation services, subscription, goods sold..."
-                className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-cyan-500 focus:bg-white focus:ring-4 focus:ring-cyan-100"
+                className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-luxury-gold focus:bg-white focus:ring-4 focus:ring-luxury-gold/15"
               />
             </label>
 
@@ -102,7 +102,7 @@ export default function IncomeDocumentPage() {
                 name="quantity"
                 min="1"
                 defaultValue="1"
-                className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-cyan-500 focus:bg-white focus:ring-4 focus:ring-cyan-100"
+                className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-luxury-gold focus:bg-white focus:ring-4 focus:ring-luxury-gold/15"
               />
             </label>
 
@@ -116,7 +116,7 @@ export default function IncomeDocumentPage() {
                 min="0"
                 step="0.01"
                 placeholder="0.00"
-                className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-cyan-500 focus:bg-white focus:ring-4 focus:ring-cyan-100"
+                className="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none transition focus:border-luxury-gold focus:bg-white focus:ring-4 focus:ring-luxury-gold/15"
               />
             </label>
           </div>
@@ -143,7 +143,7 @@ export default function IncomeDocumentPage() {
             </button>
             <button
               type="button"
-              className="rounded-full bg-slate-950 px-5 py-3 text-sm font-bold text-white transition hover:bg-slate-800"
+              className="rounded-full bg-luxury-gold px-5 py-3 text-sm font-bold text-luxury-charcoal shadow-luxury-sm transition hover:bg-luxury-gold-hover"
             >
               Create invoice
             </button>
@@ -151,11 +151,11 @@ export default function IncomeDocumentPage() {
         </form>
 
         <aside className="space-y-6">
-          <div className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
+          <div className="app-panel p-6">
             <p className="text-sm font-bold uppercase tracking-[0.18em] text-slate-400">
               Mock Record Shape
             </p>
-            <pre className="mt-4 overflow-auto rounded-2xl bg-slate-950 p-4 text-xs leading-6 text-cyan-100">
+            <pre className="mt-4 overflow-auto rounded-xl bg-luxury-charcoal p-4 text-xs leading-6 text-luxury-gold/90">
 {`{
   "id": "inv_1009",
   "sourceType": "INVOICE",
@@ -165,7 +165,7 @@ export default function IncomeDocumentPage() {
             </pre>
           </div>
 
-          <div className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm">
+          <div className="app-panel p-6">
             <p className="text-sm font-bold uppercase tracking-[0.18em] text-slate-400">
               Existing Example
             </p>

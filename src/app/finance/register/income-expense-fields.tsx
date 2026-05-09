@@ -12,7 +12,7 @@ import {
 import { formatShekel } from "@/lib/format-shekel";
 
 const inputClass =
-  "mt-1 block w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-right text-slate-900 shadow-sm outline-none transition focus:border-cyan-500 focus:ring-2 focus:ring-cyan-200";
+  "mt-1 block w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-right text-slate-900 shadow-sm outline-none transition focus:border-luxury-gold focus:ring-2 focus:ring-luxury-gold/25";
 
 const labelClass = "block text-sm font-bold text-slate-700";
 
@@ -62,7 +62,7 @@ export function IncomeExpenseFields({ heading, headingClass = "text-slate-950", 
   };
 
   return (
-    <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm md:p-8">
+    <section className="app-panel p-6 md:p-8">
       <div className="flex flex-wrap items-center gap-2">
         <Receipt className={`h-5 w-5 ${iconClass}`} aria-hidden />
         <h2 className={`text-xl font-black ${headingClass}`}>{heading}</h2>
@@ -75,9 +75,9 @@ export function IncomeExpenseFields({ heading, headingClass = "text-slate-950", 
           <button
             type="button"
             onClick={() => setPatch({ clientMode: "general" })}
-            className={`rounded-2xl border px-4 py-3 text-sm font-bold transition ${
+            className={`rounded-xl border px-4 py-3 text-sm font-bold transition ${
               value.clientMode === "general"
-                ? "border-slate-900 bg-slate-900 text-white shadow-md"
+                ? "border-luxury-gold bg-luxury-gold text-luxury-charcoal shadow-md"
                 : "border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100"
             }`}
           >
@@ -86,7 +86,7 @@ export function IncomeExpenseFields({ heading, headingClass = "text-slate-950", 
           <button
             type="button"
             onClick={() => setPatch({ clientMode: "event" })}
-            className={`rounded-2xl border px-4 py-3 text-sm font-bold transition ${
+            className={`rounded-xl border px-4 py-3 text-sm font-bold transition ${
               value.clientMode === "event"
                 ? "border-amber-700 bg-amber-700 text-white shadow-md"
                 : "border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100"
@@ -188,7 +188,7 @@ export function IncomeExpenseFields({ heading, headingClass = "text-slate-950", 
           <button
             type="button"
             onClick={addLine}
-            className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2 text-sm font-bold text-white hover:bg-slate-800"
+            className="inline-flex items-center gap-2 rounded-xl bg-luxury-gold px-4 py-2 text-sm font-bold text-luxury-charcoal shadow-luxury-sm hover:bg-luxury-gold-hover"
           >
             <Plus className="h-4 w-4" aria-hidden />
             הוספת שורה

@@ -110,13 +110,13 @@ export default function AdminTasksPage() {
   };
 
   const inputClass =
-    "mt-1 block w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-right text-sm font-semibold text-slate-900 outline-none focus:border-violet-500 focus:ring-2 focus:ring-violet-200";
+    "mt-1 block w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-right text-sm font-semibold text-slate-900 outline-none focus:border-luxury-gold focus:ring-2 focus:ring-luxury-gold/25";
 
   const labelClass = "block text-sm font-bold text-slate-700";
 
   return (
     <div className="mx-auto max-w-7xl space-y-6">
-      <section className="rounded-[2rem] border border-slate-200 bg-white p-8 shadow-sm">
+      <section className="app-panel p-8">
         <p className="flex items-center gap-2 text-sm font-bold tracking-[0.12em] text-violet-700">
           <ClipboardList className="h-4 w-4" aria-hidden />
           ניהול משימות וטפסים
@@ -127,7 +127,7 @@ export default function AdminTasksPage() {
         </p>
       </section>
 
-      <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm md:p-8">
+      <section className="app-panel p-6 md:p-8">
         <div className="flex flex-wrap items-center gap-2">
           <Send className="h-5 w-5 text-violet-600" aria-hidden />
           <h2 className="text-xl font-black text-slate-950">הקצאת משימה לעובד</h2>
@@ -167,7 +167,7 @@ export default function AdminTasksPage() {
             <button
               type="button"
               onClick={assignTask}
-              className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-slate-900 px-5 py-3 text-sm font-black text-white hover:bg-slate-800 md:w-auto"
+              className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-luxury-gold px-5 py-3 text-sm font-black text-luxury-charcoal shadow-luxury-sm hover:bg-luxury-gold-hover md:w-auto"
             >
               <Plus className="h-4 w-4" aria-hidden />
               הקצאת משימה
@@ -176,7 +176,7 @@ export default function AdminTasksPage() {
         </div>
       </section>
 
-      <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm md:p-8">
+      <section className="app-panel p-6 md:p-8">
         <div className="flex flex-wrap items-center gap-2">
           <LayoutGrid className="h-5 w-5 text-indigo-600" aria-hidden />
           <h2 className="text-xl font-black text-slate-950">לוח משימות פעילות</h2>
@@ -210,7 +210,7 @@ export default function AdminTasksPage() {
         </div>
       </section>
 
-      <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm md:p-8">
+      <section className="app-panel p-6 md:p-8">
         <div className="flex flex-wrap items-center gap-2">
           <LayoutGrid className="h-5 w-5 text-indigo-600" aria-hidden />
           <h2 className="text-xl font-black text-slate-950">בונה טפסים (Form Builder)</h2>
@@ -223,7 +223,7 @@ export default function AdminTasksPage() {
           <input
             value={newFieldLabel}
             onChange={(event) => setNewFieldLabel(event.target.value)}
-            className="flex-1 rounded-xl border border-slate-300 px-3 py-3 text-right font-semibold text-slate-900 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200"
+            className="flex-1 rounded-xl border border-slate-300 px-3 py-3 text-right font-semibold text-slate-900 outline-none focus:border-luxury-gold focus:ring-2 focus:ring-luxury-gold/25"
             placeholder="שם שדה חדש בעברית"
           />
           <button
