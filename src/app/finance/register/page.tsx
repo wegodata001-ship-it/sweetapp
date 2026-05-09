@@ -1,31 +1,21 @@
 "use client";
 
+import { FileSpreadsheet, FileText } from "lucide-react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import {
-  Calculator,
-  Calendar,
-  FileSpreadsheet,
-  FileText,
-  Plus,
-  Receipt,
-  Send,
-  Trash2,
-  User,
-} from "lucide-react";
-import { useMemo, useState } from "react";
-import { uploadFinancePdfAndInsert } from "@/lib/finance/db";
-import { buildRegisterPdfBlob } from "@/lib/finance/register-pdf";
+  fetchFinanceDocumentById,
+  insertFinanceDocument,
+  updateFinanceDocument,
+} from "@/lib/finance/db";
+import {
+  emptyIncomeExpensePayload,
+  emptyZReportPayload,
+  type IncomeExpensePayload,
+  type ZReportPayload,
+} from "@/lib/finance/document-payload";
+import { IncomeExpenseFields } from "@/app/finance/register/income-expense-fields";
 import { formatShekel, parseNum } from "@/lib/format-shekel";
-
-const DOCUMENT_TYPES = [
-  "חשבונית מס קבלה",
-  "חשבונית מס",
-  "הצעת מחיר",
-  "תעודת משלוח",
-  "חשבונית זיכוי",
-  "הזמנת אירוע עם פיקדון",
-] as const;
-
-const EVENT_DOC_TYPE = "הזמנת אירוע עם פיקדון";
 
 type TabId = "income" | "zreport" | "expenses";
 
@@ -35,50 +25,17 @@ const tabs: { id: TabId; label: string }[] = [
   { id: "expenses", label: "רישום הוצאות" },
 ];
 
-type LineRow = { id: string; itemName: string; quantity: string; price: string };
+function FinanceRegisterPageInner() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const editId = searchParams.get("edit");
 
-function newLineId(): string {
-  return `line-${Math.random().toString(36).slice(2, 10)}`;
-}
-
-export default function FinanceRegisterPage() {
   const [activeTab, setActiveTab] = useState<TabId>("income");
+  const [editingDocId, setEditingDocId] = useState<string | null>(null);
+  const [editingKind, setEditingKind] = useState<"income" | "expense" | "zreport" | null>(null);
 
-  const [customerName, setCustomerName] = useState("");
-  const [incomeDate, setIncomeDate] = useState("");
-  const [documentType, setDocumentType] = useState<string>(DOCUMENT_TYPES[0]);
-  const [depositAmount, setDepositAmount] = useState("");
-  const [trayQty, setTrayQty] = useState("");
-  const [returnDate, setReturnDate] = useState("");
-  const [lines, setLines] = useState<LineRow[]>([
-    { id: newLineId(), itemName: "", quantity: "1", price: "" },
-  ]);
-
-  const lineTotals = useMemo(
-    () =>
-      lines.map((row) => {
-        const q = parseNum(row.quantity);
-        const p = parseNum(row.price);
-        return q * p;
-      }),
-    [lines],
-  );
-
-  const grandTotalIncome = useMemo(() => lineTotals.reduce((a, b) => a + b, 0), [lineTotals]);
-
-  const showEventFields = documentType === EVENT_DOC_TYPE;
-
-  const addLine = () => {
-    setLines((prev) => [...prev, { id: newLineId(), itemName: "", quantity: "1", price: "" }]);
-  };
-
-  const removeLine = (id: string) => {
-    setLines((prev) => (prev.length <= 1 ? prev : prev.filter((row) => row.id !== id)));
-  };
-
-  const updateLine = (id: string, patch: Partial<Omit<LineRow, "id">>) => {
-    setLines((prev) => prev.map((row) => (row.id === id ? { ...row, ...patch } : row)));
-  };
+  const [incomeForm, setIncomeForm] = useState<IncomeExpensePayload>(() => emptyIncomeExpensePayload("income"));
+  const [expenseForm, setExpenseForm] = useState<IncomeExpensePayload>(() => emptyIncomeExpensePayload("expense"));
 
   const [zDate, setZDate] = useState("");
   const [zNumber, setZNumber] = useState("");
@@ -87,6 +44,84 @@ export default function FinanceRegisterPage() {
   const [creditTaxable, setCreditTaxable] = useState("");
   const [creditExempt, setCreditExempt] = useState("");
   const [transfers, setTransfers] = useState("");
+
+  const fixIncomeExpense = useCallback((p: IncomeExpensePayload): IncomeExpensePayload => {
+    return {
+      ...p,
+      kind: p.kind,
+      lines: p.lines.map((l) => ({
+        ...l,
+        vatMode: l.vatMode === "before_vat" || l.vatMode === "exempt" ? l.vatMode : "includes_vat",
+      })),
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!editId) {
+      queueMicrotask(() => {
+        setEditingDocId(null);
+        setEditingKind(null);
+      });
+      return;
+    }
+
+    let cancelled = false;
+
+    void (async () => {
+      const row = await fetchFinanceDocumentById(editId);
+      if (cancelled || !row) return;
+
+      setEditingDocId(row.id);
+
+      const raw = row.payload;
+      if (raw?.kind === "zreport") {
+        setEditingKind("zreport");
+        const z = raw;
+        setZDate(z.zDate);
+        setZNumber(z.zNumber);
+        setCashTaxable(z.cashTaxable ? String(z.cashTaxable) : "");
+        setCashExempt(z.cashExempt ? String(z.cashExempt) : "");
+        setCreditTaxable(z.creditTaxable ? String(z.creditTaxable) : "");
+        setCreditExempt(z.creditExempt ? String(z.creditExempt) : "");
+        setTransfers(z.transfers ? String(z.transfers) : "");
+        setActiveTab("zreport");
+        return;
+      }
+
+      if (raw?.kind === "income") {
+        setEditingKind("income");
+        setIncomeForm(fixIncomeExpense({ ...raw, kind: "income" }));
+        setActiveTab("income");
+        return;
+      }
+
+      if (raw?.kind === "expense") {
+        setEditingKind("expense");
+        setExpenseForm(fixIncomeExpense({ ...raw, kind: "expense" }));
+        setActiveTab("expenses");
+        return;
+      }
+
+      if (row.category === "דוח Z") {
+        setEditingKind("zreport");
+        setActiveTab("zreport");
+        return;
+      }
+      if (row.category === "הוצאה") {
+        setEditingKind("expense");
+        setActiveTab("expenses");
+        return;
+      }
+      if (row.category === "הכנסה") {
+        setEditingKind("income");
+        setActiveTab("income");
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [editId, fixIncomeExpense]);
 
   const zGrandTotal = useMemo(() => {
     return (
@@ -98,54 +133,64 @@ export default function FinanceRegisterPage() {
     );
   }, [cashTaxable, cashExempt, creditTaxable, creditExempt, transfers]);
 
-  const [supplier, setSupplier] = useState("");
-  const [category, setCategory] = useState("");
-  const [expenseDate, setExpenseDate] = useState("");
-  const [docNumber, setDocNumber] = useState("");
-  const [amountBeforeVat, setAmountBeforeVat] = useState("");
-  const [vatAmount, setVatAmount] = useState("");
-
-  const expenseTotal = useMemo(
-    () => parseNum(amountBeforeVat) + parseNum(vatAmount),
-    [amountBeforeVat, vatAmount],
-  );
-
-  const [orderSentNotice, setOrderSentNotice] = useState(false);
   const [archiveFeedback, setArchiveFeedback] = useState<string | null>(null);
   const [publishing, setPublishing] = useState(false);
+
+  const clearEditMode = useCallback(() => {
+    setEditingDocId(null);
+    setEditingKind(null);
+    router.replace("/finance/register");
+  }, [router]);
+
+  const buildZPayload = useCallback((): ZReportPayload => {
+    return {
+      kind: "zreport",
+      zDate,
+      zNumber,
+      cashTaxable: parseNum(cashTaxable),
+      cashExempt: parseNum(cashExempt),
+      creditTaxable: parseNum(creditTaxable),
+      creditExempt: parseNum(creditExempt),
+      transfers: parseNum(transfers),
+    };
+  }, [cashTaxable, cashExempt, creditTaxable, creditExempt, transfers, zDate, zNumber]);
 
   const publishIncomeDoc = async () => {
     setPublishing(true);
     setArchiveFeedback(null);
     try {
-      const linesPdf = lines.map((row, i) => ({
-        itemName: row.itemName,
-        quantity: row.quantity,
-        price: row.price,
-        lineTotal: lineTotals[i] ?? 0,
-      }));
-      const blob = await buildRegisterPdfBlob({
-        kind: "income",
-        customerName,
-        incomeDate,
-        documentType,
-        depositAmount,
-        trayQty,
-        returnDate,
-        showEvent: showEventFields,
-        lines: linesPdf,
-        grandTotal: grandTotalIncome,
-      });
-      const title = `${documentType}${customerName ? ` — ${customerName}` : ""}`;
-      const res = await uploadFinancePdfAndInsert({
-        blob,
+      const payload: IncomeExpensePayload = { ...incomeForm, kind: "income" };
+      const title = `${incomeForm.documentType}${incomeForm.counterpartyName ? ` — ${incomeForm.counterpartyName}` : ""}`;
+
+      if (editingDocId) {
+        if (editingKind !== "income") {
+          setArchiveFeedback("עריכה פעילה למסמך אחר — עברו לטאב המתאים או בטלו עריכה.");
+          return;
+        }
+        if (editingDocId.startsWith("demo-arch")) {
+          setArchiveFeedback("מצב דמו: עריכה מוצגת בלבד — חיבור ל-Supabase נדרש לשמירה.");
+          return;
+        }
+        const res = await updateFinanceDocument(editingDocId, {
+          title,
+          category: "הכנסה",
+          doc_date: incomeForm.docDate || null,
+          payload,
+        });
+        setArchiveFeedback(res.ok ? "המסמך עודכן בהצלחה." : res.error ?? "שגיאה בעדכון");
+        if (res.ok) clearEditMode();
+        return;
+      }
+
+      const res = await insertFinanceDocument({
         title,
         category: "הכנסה",
-        docDate: incomeDate || null,
+        docDate: incomeForm.docDate || null,
+        payload,
       });
-      setArchiveFeedback(res.ok ? "המסמך פורסם ונשמר בארכיון כ-PDF." : res.error ?? "שגיאה בשמירה");
+      setArchiveFeedback(res.ok ? "המסמך נשמר במערכת." : res.error ?? "שגיאה בשמירה");
     } catch (e) {
-      setArchiveFeedback(e instanceof Error ? e.message : "שגיאה ביצירת PDF");
+      setArchiveFeedback(e instanceof Error ? e.message : "שגיאה בשמירה");
     } finally {
       setPublishing(false);
     }
@@ -155,27 +200,38 @@ export default function FinanceRegisterPage() {
     setPublishing(true);
     setArchiveFeedback(null);
     try {
-      const blob = await buildRegisterPdfBlob({
-        kind: "zreport",
-        zDate,
-        zNumber,
-        cashTaxable: parseNum(cashTaxable),
-        cashExempt: parseNum(cashExempt),
-        creditTaxable: parseNum(creditTaxable),
-        creditExempt: parseNum(creditExempt),
-        transfers: parseNum(transfers),
-        grandTotal: zGrandTotal,
-      });
+      const payload = buildZPayload();
       const title = `דוח Z${zNumber ? ` ${zNumber}` : ""}`;
-      const res = await uploadFinancePdfAndInsert({
-        blob,
+
+      if (editingDocId) {
+        if (editingKind !== "zreport") {
+          setArchiveFeedback("עריכה פעילה למסמך אחר — עברו לטאב המתאים או בטלו עריכה.");
+          return;
+        }
+        if (editingDocId.startsWith("demo-arch")) {
+          setArchiveFeedback("מצב דמו: עריכה מוצגת בלבד — חיבור ל-Supabase נדרש לשמירה.");
+          return;
+        }
+        const res = await updateFinanceDocument(editingDocId, {
+          title,
+          category: "דוח Z",
+          doc_date: zDate || null,
+          payload,
+        });
+        setArchiveFeedback(res.ok ? "דוח Z עודכן בהצלחה." : res.error ?? "שגיאה בעדכון");
+        if (res.ok) clearEditMode();
+        return;
+      }
+
+      const res = await insertFinanceDocument({
         title,
         category: "דוח Z",
         docDate: zDate || null,
+        payload,
       });
-      setArchiveFeedback(res.ok ? "דוח Z נשמר בארכיון כ-PDF." : res.error ?? "שגיאה בשמירה");
+      setArchiveFeedback(res.ok ? "דוח Z נשמר במערכת." : res.error ?? "שגיאה בשמירה");
     } catch (e) {
-      setArchiveFeedback(e instanceof Error ? e.message : "שגיאה ביצירת PDF");
+      setArchiveFeedback(e instanceof Error ? e.message : "שגיאה בשמירה");
     } finally {
       setPublishing(false);
     }
@@ -185,26 +241,38 @@ export default function FinanceRegisterPage() {
     setPublishing(true);
     setArchiveFeedback(null);
     try {
-      const blob = await buildRegisterPdfBlob({
-        kind: "expense",
-        supplier,
-        category,
-        expenseDate,
-        docNumber,
-        amountBeforeVat: parseNum(amountBeforeVat),
-        vatAmount: parseNum(vatAmount),
-        expenseTotal,
-      });
-      const title = `הוצאה${supplier ? ` — ${supplier}` : ""}`;
-      const res = await uploadFinancePdfAndInsert({
-        blob,
+      const payload: IncomeExpensePayload = { ...expenseForm, kind: "expense" };
+      const title = `${expenseForm.documentType}${expenseForm.counterpartyName ? ` — ${expenseForm.counterpartyName}` : ""}`;
+
+      if (editingDocId) {
+        if (editingKind !== "expense") {
+          setArchiveFeedback("עריכה פעילה למסמך אחר — עברו לטאב המתאים או בטלו עריכה.");
+          return;
+        }
+        if (editingDocId.startsWith("demo-arch")) {
+          setArchiveFeedback("מצב דמו: עריכה מוצגת בלבד — חיבור ל-Supabase נדרש לשמירה.");
+          return;
+        }
+        const res = await updateFinanceDocument(editingDocId, {
+          title,
+          category: "הוצאה",
+          doc_date: expenseForm.docDate || null,
+          payload,
+        });
+        setArchiveFeedback(res.ok ? "המסמך עודכן בהצלחה." : res.error ?? "שגיאה בעדכון");
+        if (res.ok) clearEditMode();
+        return;
+      }
+
+      const res = await insertFinanceDocument({
         title,
         category: "הוצאה",
-        docDate: expenseDate || null,
+        docDate: expenseForm.docDate || null,
+        payload,
       });
-      setArchiveFeedback(res.ok ? "ההוצאה נשמרה בארכיון כ-PDF." : res.error ?? "שגיאה בשמירה");
+      setArchiveFeedback(res.ok ? "המסמך נשמר במערכת." : res.error ?? "שגיאה בשמירה");
     } catch (e) {
-      setArchiveFeedback(e instanceof Error ? e.message : "שגיאה ביצירת PDF");
+      setArchiveFeedback(e instanceof Error ? e.message : "שגיאה בשמירה");
     } finally {
       setPublishing(false);
     }
@@ -214,6 +282,25 @@ export default function FinanceRegisterPage() {
     "mt-1 block w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-right text-slate-900 shadow-sm outline-none transition focus:border-cyan-500 focus:ring-2 focus:ring-cyan-200";
 
   const labelClass = "block text-sm font-bold text-slate-700";
+
+  const resetIncome = () => {
+    setIncomeForm(emptyIncomeExpensePayload("income"));
+  };
+
+  const resetExpense = () => {
+    setExpenseForm(emptyIncomeExpensePayload("expense"));
+  };
+
+  const resetZ = () => {
+    const z = emptyZReportPayload();
+    setZDate(z.zDate);
+    setZNumber(z.zNumber);
+    setCashTaxable("");
+    setCashExempt("");
+    setCreditTaxable("");
+    setCreditExempt("");
+    setTransfers("");
+  };
 
   return (
     <div className="mx-auto max-w-7xl space-y-6">
@@ -226,15 +313,24 @@ export default function FinanceRegisterPage() {
             </p>
             <h1 className="mt-3 text-3xl font-black text-slate-950">ניהול מסמכים ורישומים</h1>
             <p className="mt-2 max-w-2xl text-sm text-slate-600">
-              טפסים חיים עם חישובי סיכומים, פירוט תשלומים בדוח Z והוצאות לפי מע״מ.
+              רישום מסמכים נשמר כרשומות במערכת; פירוט תשלומים בדוח Z ושורות פריט עם מע״מ.
             </p>
           </div>
         </div>
 
+        {editingDocId && (
+          <div className="mt-4 rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm font-bold text-indigo-900" role="status">
+            עריכת מסמך שמור — פרסום יעדכן את הרשומה במסד הנתונים.
+            <button type="button" onClick={clearEditMode} className="me-4 mt-2 block text-xs underline sm:mt-0 sm:inline sm:me-0">
+              ביטול עריכה
+            </button>
+          </div>
+        )}
+
         {archiveFeedback && (
           <div
             className={`mt-4 rounded-xl border px-4 py-3 text-sm font-bold ${
-              archiveFeedback.includes("שגיאה") || archiveFeedback.includes("לא מוגדר")
+              archiveFeedback.includes("שגיאה") || archiveFeedback.includes("לא מוגדר") || archiveFeedback.includes("נדרש")
                 ? "border-rose-200 bg-rose-50 text-rose-900"
                 : "border-emerald-200 bg-emerald-50 text-emerald-900"
             }`}
@@ -266,197 +362,41 @@ export default function FinanceRegisterPage() {
       </section>
 
       {activeTab === "income" && (
-        <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm md:p-8">
-          <div className="flex flex-wrap items-center gap-2">
-            <Receipt className="h-5 w-5 text-cyan-600" aria-hidden />
-            <h2 className="text-xl font-black text-slate-950">מסמכי הכנסה ואירועים</h2>
-          </div>
-          <p className="mt-2 text-sm text-slate-600">
-            רישום חשבוניות ומסמכים מסחריים; בהזמנת אירוע יוצגו שדות פיקדון ומגשים.
-          </p>
+        <>
+          <IncomeExpenseFields
+            heading="מסמכי הכנסה ואירועים"
+            intro="רישום חשבוניות ומסמכים מסחריים; בלקוח אירועים יוצגו שדות פיקדון ומגשים."
+            value={incomeForm}
+            onChange={(next) => setIncomeForm(next.kind === "income" ? next : { ...next, kind: "income" })}
+          />
 
-          <div className="mt-6 grid gap-4 md:grid-cols-2">
-            <label className={labelClass}>
-              <span className="flex items-center gap-2">
-                <User className="h-4 w-4 text-slate-500" aria-hidden />
-                שם לקוח
-              </span>
-              <input
-                type="text"
-                value={customerName}
-                onChange={(e) => setCustomerName(e.target.value)}
-                className={inputClass}
-                placeholder="לדוגמה: קייטרינג גולן"
-              />
-            </label>
-            <label className={labelClass}>
-              <span className="flex items-center gap-2">
-                <Calendar className="h-4 w-4 text-slate-500" aria-hidden />
-                תאריך
-              </span>
-              <input type="date" value={incomeDate} onChange={(e) => setIncomeDate(e.target.value)} className={inputClass} />
-            </label>
-            <label className={`md:col-span-2 ${labelClass}`}>
-              <span className="flex items-center gap-2">
-                <FileText className="h-4 w-4 text-slate-500" aria-hidden />
-                סוג מסמך
-              </span>
-              <select
-                value={documentType}
-                onChange={(e) => setDocumentType(e.target.value)}
-                className={inputClass}
-              >
-                {DOCUMENT_TYPES.map((opt) => (
-                  <option key={opt} value={opt}>
-                    {opt}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
-
-          {showEventFields && (
-            <div className="mt-6 rounded-2xl border border-amber-200 bg-amber-50/80 p-4 md:p-5">
-              <p className="text-sm font-black text-amber-900">פרטי אירוע עם פיקדון</p>
-              <div className="mt-4 grid gap-4 md:grid-cols-3">
-                <label className={labelClass}>
-                  סכום פיקדון
-                  <input
-                    type="number"
-                    min={0}
-                    step="0.01"
-                    value={depositAmount}
-                    onChange={(e) => setDepositAmount(e.target.value)}
-                    className={inputClass}
-                    placeholder="0"
-                  />
-                </label>
-                <label className={labelClass}>
-                  כמות מגשים / כלים
-                  <input
-                    type="number"
-                    min={0}
-                    value={trayQty}
-                    onChange={(e) => setTrayQty(e.target.value)}
-                    className={inputClass}
-                    placeholder="0"
-                  />
-                </label>
-                <label className={labelClass}>
-                  תאריך החזרה
-                  <input type="date" value={returnDate} onChange={(e) => setReturnDate(e.target.value)} className={inputClass} />
-                </label>
-              </div>
-            </div>
-          )}
-
-          <div className="mt-8">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <p className="text-base font-black text-slate-900">שורות פריטים</p>
-              <button
-                type="button"
-                onClick={addLine}
-                className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-4 py-2 text-sm font-bold text-white hover:bg-slate-800"
-              >
-                <Plus className="h-4 w-4" aria-hidden />
-                הוספת שורה
-              </button>
-            </div>
-
-            <div className="mt-4 overflow-x-auto rounded-2xl border border-slate-200">
-              <table className="min-w-[640px] w-full divide-y divide-slate-200 text-right text-sm">
-                <thead className="bg-slate-50">
-                  <tr>
-                    <th className="px-3 py-3 font-bold text-slate-600">שם פריט</th>
-                    <th className="px-3 py-3 font-bold text-slate-600">כמות</th>
-                    <th className="px-3 py-3 font-bold text-slate-600">מחיר יחידה</th>
-                    <th className="px-3 py-3 font-bold text-slate-600">סה״כ שורה</th>
-                    <th className="w-14 px-3 py-3 font-bold text-slate-600" />
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 bg-white">
-                  {lines.map((row, index) => (
-                    <tr key={row.id}>
-                      <td className="px-3 py-2">
-                        <input
-                          type="text"
-                          value={row.itemName}
-                          onChange={(e) => updateLine(row.id, { itemName: e.target.value })}
-                          className="w-full rounded-lg border border-slate-200 px-2 py-2 text-right"
-                          placeholder={`פריט ${index + 1}`}
-                        />
-                      </td>
-                      <td className="px-3 py-2">
-                        <input
-                          type="number"
-                          min={0}
-                          step="0.001"
-                          value={row.quantity}
-                          onChange={(e) => updateLine(row.id, { quantity: e.target.value })}
-                          className="w-full rounded-lg border border-slate-200 px-2 py-2 text-right"
-                        />
-                      </td>
-                      <td className="px-3 py-2">
-                        <input
-                          type="number"
-                          min={0}
-                          step="0.01"
-                          value={row.price}
-                          onChange={(e) => updateLine(row.id, { price: e.target.value })}
-                          className="w-full rounded-lg border border-slate-200 px-2 py-2 text-right"
-                        />
-                      </td>
-                      <td className="px-3 py-3 font-bold text-slate-900">{formatShekel(lineTotals[index] ?? 0)}</td>
-                      <td className="px-3 py-2">
-                        <button
-                          type="button"
-                          onClick={() => removeLine(row.id)}
-                          className="rounded-lg p-2 text-rose-600 hover:bg-rose-50"
-                          aria-label="מחיקת שורה"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-
-            <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-cyan-200 bg-cyan-50/60 px-4 py-4">
-              <span className="flex items-center gap-2 text-sm font-bold text-cyan-900">
-                <Calculator className="h-5 w-5" aria-hidden />
-                סה״כ כולל שורות
-              </span>
-              <span className="text-2xl font-black text-slate-950">{formatShekel(grandTotalIncome)}</span>
-            </div>
-          </div>
-
-          <div className="mt-6 flex flex-wrap gap-3">
-            <button type="button" className="rounded-xl bg-cyan-600 px-5 py-3 font-bold text-white hover:bg-cyan-700">
-              שמירת טיוטה
+          <div className="flex flex-wrap gap-3 px-1">
+            <button
+              type="button"
+              onClick={resetIncome}
+              className="rounded-xl border border-slate-300 px-5 py-3 font-bold text-slate-800 hover:bg-slate-50"
+            >
+              איפוס טופס
             </button>
             <button
               type="button"
               disabled={publishing}
               onClick={() => void publishIncomeDoc()}
-              className="rounded-xl border border-slate-300 px-5 py-3 font-bold text-slate-800 hover:bg-slate-50 disabled:opacity-50"
+              className="rounded-xl bg-cyan-600 px-5 py-3 font-bold text-white hover:bg-cyan-700 disabled:opacity-50"
             >
-              {publishing ? "מפרסם…" : "פרסום מסמך"}
+              {publishing ? "שומר…" : editingDocId ? "עדכון מסמך" : "פרסום מסמך"}
             </button>
           </div>
-        </section>
+        </>
       )}
 
       {activeTab === "zreport" && (
         <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm md:p-8">
           <div className="flex flex-wrap items-center gap-2">
-            <Calculator className="h-5 w-5 text-cyan-600" aria-hidden />
+            <FileText className="h-5 w-5 text-cyan-600" aria-hidden />
             <h2 className="text-xl font-black text-slate-950">דוח Z קופה</h2>
           </div>
-          <p className="mt-2 text-sm text-slate-600">
-            פירוט סיכומי תשלום יומי; הסכום הכולל מחושב אוטומטית.
-          </p>
+          <p className="mt-2 text-sm text-slate-600">פירוט סיכומי תשלום יומי; הסכום הכולל מחושב אוטומטית.</p>
 
           <div className="mt-6 grid gap-4 md:grid-cols-2">
             <label className={labelClass}>
@@ -540,125 +480,60 @@ export default function FinanceRegisterPage() {
             </div>
           </div>
 
-          <button
-            type="button"
-            disabled={publishing}
-            onClick={() => void publishZDoc()}
-            className="mt-6 rounded-xl bg-slate-900 px-5 py-3 font-bold text-white hover:bg-slate-800 disabled:opacity-50"
-          >
-            {publishing ? "שומר…" : "שמירת דוח Z"}
-          </button>
+          <div className="mt-6 flex flex-wrap gap-3">
+            <button type="button" onClick={resetZ} className="rounded-xl border border-slate-300 px-5 py-3 font-bold text-slate-800 hover:bg-slate-50">
+              איפוס טופס
+            </button>
+            <button
+              type="button"
+              disabled={publishing}
+              onClick={() => void publishZDoc()}
+              className="rounded-xl bg-slate-900 px-5 py-3 font-bold text-white hover:bg-slate-800 disabled:opacity-50"
+            >
+              {publishing ? "שומר…" : editingDocId ? "עדכון דוח Z" : "שמירת דוח Z"}
+            </button>
+          </div>
         </section>
       )}
 
       {activeTab === "expenses" && (
-        <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm md:p-8">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-            <div>
-              <div className="flex flex-wrap items-center gap-2">
-                <Receipt className="h-5 w-5 text-rose-600" aria-hidden />
-                <h2 className="text-xl font-black text-slate-950">רישום הוצאות</h2>
-              </div>
-              <p className="mt-2 text-sm text-slate-600">
-                תיעוד הוצאה כולל בסיס למע״מ וסכום כולל מחושב.
-              </p>
-            </div>
+        <>
+          <IncomeExpenseFields
+            heading="רישום הוצאות"
+            headingClass="text-slate-950"
+            iconClass="text-rose-600"
+            intro="מבנה זהה לטופס ההכנסה — רישום הוצאות עם אותם שדות ומע״מ לפי שורה."
+            value={expenseForm}
+            onChange={(next) => setExpenseForm(next.kind === "expense" ? next : { ...next, kind: "expense" })}
+          />
+
+          <div className="flex flex-wrap gap-3 px-1">
             <button
               type="button"
-              onClick={() => {
-                setOrderSentNotice(true);
-                window.setTimeout(() => setOrderSentNotice(false), 3500);
-              }}
-              className="inline-flex items-center justify-center gap-2 rounded-2xl bg-rose-600 px-6 py-4 text-base font-black text-white shadow-lg shadow-rose-200 transition hover:bg-rose-700"
+              onClick={resetExpense}
+              className="rounded-xl border border-slate-300 px-5 py-3 font-bold text-slate-800 hover:bg-slate-50"
             >
-              <Send className="h-5 w-5" aria-hidden />
-              שליחת הזמנה לספק
+              איפוס טופס
+            </button>
+            <button
+              type="button"
+              disabled={publishing}
+              onClick={() => void publishExpenseDoc()}
+              className="rounded-xl bg-slate-900 px-5 py-3 font-bold text-white hover:bg-slate-800 disabled:opacity-50"
+            >
+              {publishing ? "שומר…" : editingDocId ? "עדכון מסמך" : "פרסום מסמך"}
             </button>
           </div>
-
-          {orderSentNotice && (
-            <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-bold text-emerald-900">
-              ההזמנה נשלחה לספק (דמו).
-            </div>
-          )}
-
-          <div className="mt-6 grid gap-4 md:grid-cols-2">
-            <label className={labelClass}>
-              ספק
-              <input
-                type="text"
-                value={supplier}
-                onChange={(e) => setSupplier(e.target.value)}
-                className={inputClass}
-                placeholder="שם הספק"
-              />
-            </label>
-            <label className={labelClass}>
-              קטגוריה
-              <select value={category} onChange={(e) => setCategory(e.target.value)} className={inputClass}>
-                <option value="">בחר קטגוריה</option>
-                <option value="חומרי גלם">חומרי גלם</option>
-                <option value="אריזות">אריזות</option>
-                <option value="שירותים">שירותים</option>
-                <option value="שילוח">שילוח</option>
-                <option value="אחר">אחר</option>
-              </select>
-            </label>
-            <label className={labelClass}>
-              תאריך
-              <input type="date" value={expenseDate} onChange={(e) => setExpenseDate(e.target.value)} className={inputClass} />
-            </label>
-            <label className={labelClass}>
-              מספר מסמך
-              <input
-                type="text"
-                value={docNumber}
-                onChange={(e) => setDocNumber(e.target.value)}
-                className={inputClass}
-                placeholder="חשבונית ספק / תעודה"
-              />
-            </label>
-            <label className={labelClass}>
-              סכום לפני מע״מ
-              <input
-                type="number"
-                min={0}
-                step="0.01"
-                value={amountBeforeVat}
-                onChange={(e) => setAmountBeforeVat(e.target.value)}
-                className={inputClass}
-              />
-            </label>
-            <label className={labelClass}>
-              סכום מע״מ
-              <input
-                type="number"
-                min={0}
-                step="0.01"
-                value={vatAmount}
-                onChange={(e) => setVatAmount(e.target.value)}
-                className={inputClass}
-              />
-            </label>
-          </div>
-
-          <div className="mt-6 rounded-2xl border border-slate-200 bg-slate-50 px-5 py-4">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <span className="text-sm font-bold text-slate-700">סה״כ לתשלום (כולל מע״מ)</span>
-              <span className="text-2xl font-black text-slate-950">{formatShekel(expenseTotal)}</span>
-            </div>
-          </div>
-
-          <button
-            type="button"
-            disabled={publishing}
-            onClick={() => void publishExpenseDoc()}
-            className="mt-6 rounded-xl bg-slate-900 px-5 py-3 font-bold text-white hover:bg-slate-800 disabled:opacity-50"
-          >
-            {publishing ? "שומר…" : "שמירת הוצאה"}
-          </button>
-        </section>
+        </>
       )}
     </div>
+  );
+}
+
+export default function FinanceRegisterPage() {
+  return (
+    <Suspense fallback={<div className="mx-auto max-w-7xl p-12 text-center text-sm font-semibold text-slate-500">טוען…</div>}>
+      <FinanceRegisterPageInner />
+    </Suspense>
   );
 }

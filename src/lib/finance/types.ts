@@ -1,3 +1,5 @@
+import type { FinanceDocumentPayload } from "@/lib/finance/document-payload";
+
 export type EntityType = "supplier" | "customer" | "employee";
 
 export type FinanceEntityRow = {
@@ -36,7 +38,9 @@ export type FinanceDocumentRow = {
   title: string;
   category: string;
   doc_date: string | null;
-  pdf_storage_path: string;
+  /** Legacy PDF path; may be empty when document is DB-only. */
+  pdf_storage_path: string | null;
   sent_to_cpa: boolean;
   created_at: string;
+  payload: FinanceDocumentPayload | null;
 };

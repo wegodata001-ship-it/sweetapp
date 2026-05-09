@@ -1,7 +1,5 @@
 import type { NextConfig } from "next";
 
-const nextConfig: NextConfig = {
-  transpilePackages: ["@react-pdf/renderer"],
-};
+const nextConfig: NextConfig = {};
 
 export default nextConfig;

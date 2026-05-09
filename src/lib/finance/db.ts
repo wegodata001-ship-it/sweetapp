@@ -1,4 +1,5 @@
 import { getSupabaseBrowserClient } from "@/lib/supabase/client";
+import { emptyIncomeExpensePayload, parsePayload, type FinanceDocumentPayload } from "@/lib/finance/document-payload";
 import type {
   CashFlowRow,
   EntityType,
@@ -297,18 +298,32 @@ const FALLBACK_FINANCE_DOCS: FinanceDocumentRow[] = [
     title: "חשבונית מס 9044",
     category: "הכנסה",
     doc_date: "2026-05-09",
-    pdf_storage_path: "",
+    pdf_storage_path: null,
     sent_to_cpa: true,
     created_at: new Date().toISOString(),
+    payload: {
+      ...emptyIncomeExpensePayload("income"),
+      counterpartyName: "רשת דרום",
+      docDate: "2026-05-09",
+      documentType: "חשבונית מס",
+      paymentMethod: "העברה בנקאית",
+    },
   },
   {
     id: "demo-arch-2",
     title: "קבלה 3017",
     category: "הכנסה",
     doc_date: "2026-05-08",
-    pdf_storage_path: "",
+    pdf_storage_path: null,
     sent_to_cpa: false,
     created_at: new Date().toISOString(),
+    payload: {
+      ...emptyIncomeExpensePayload("income"),
+      counterpartyName: "גן אירועים שמשון",
+      docDate: "2026-05-08",
+      documentType: "חשבונית מס קבלה",
+      paymentMethod: "מזומן",
+    },
   },
 ];
 
@@ -318,31 +333,62 @@ export async function fetchFinanceDocuments(): Promise<FinanceDocumentRow[]> {
 
   const { data, error } = await supabase
     .from("finance_documents")
-    .select("id, title, category, doc_date, pdf_storage_path, sent_to_cpa, created_at")
+    .select("id, title, category, doc_date, pdf_storage_path, sent_to_cpa, created_at, payload")
     .order("created_at", { ascending: false });
 
   if (error) return FALLBACK_FINANCE_DOCS;
   if (!data?.length) return [];
 
-  return data.map((row) => ({
+  return data.map((row) => mapFinanceDocumentRow(row));
+}
+
+function mapFinanceDocumentRow(row: Record<string, unknown>): FinanceDocumentRow {
+  const rawPayload = row.payload;
+  const payload = rawPayload == null ? null : parsePayload(rawPayload);
+
+  return {
     id: row.id as string,
     title: row.title as string,
     category: (row.category as string) ?? "",
     doc_date: (row.doc_date as string) ?? null,
-    pdf_storage_path: row.pdf_storage_path as string,
+    pdf_storage_path: (row.pdf_storage_path as string | null) ?? null,
     sent_to_cpa: Boolean(row.sent_to_cpa),
     created_at: row.created_at as string,
-  }));
+    payload,
+  };
+}
+
+export async function fetchFinanceDocumentById(id: string): Promise<FinanceDocumentRow | null> {
+  if (id.startsWith("demo-arch")) {
+    return FALLBACK_FINANCE_DOCS.find((r) => r.id === id) ?? null;
+  }
+
+  const supabase = getSupabaseBrowserClient();
+  if (!supabase) return null;
+
+  const { data, error } = await supabase.from("finance_documents").select("*").eq("id", id).maybeSingle();
+
+  if (error || !data) return null;
+  return mapFinanceDocumentRow(data as Record<string, unknown>);
 }
 
 export async function updateFinanceDocument(
   id: string,
-  patch: Partial<Pick<FinanceDocumentRow, "title" | "category" | "doc_date" | "sent_to_cpa">>,
+  patch: Partial<
+    Pick<FinanceDocumentRow, "title" | "category" | "doc_date" | "sent_to_cpa" | "payload">
+  >,
 ): Promise<{ ok: boolean; error?: string }> {
   const supabase = getSupabaseBrowserClient();
   if (!supabase) return { ok: false, error: "Supabase is not configured." };
 
-  const { error } = await supabase.from("finance_documents").update(patch).eq("id", id);
+  const updatePayload: Record<string, unknown> = {};
+  if (patch.title !== undefined) updatePayload.title = patch.title;
+  if (patch.category !== undefined) updatePayload.category = patch.category;
+  if (patch.doc_date !== undefined) updatePayload.doc_date = patch.doc_date;
+  if (patch.sent_to_cpa !== undefined) updatePayload.sent_to_cpa = patch.sent_to_cpa;
+  if (patch.payload !== undefined) updatePayload.payload = patch.payload;
+
+  const { error } = await supabase.from("finance_documents").update(updatePayload).eq("id", id);
   if (error) return { ok: false, error: error.message };
   return { ok: true };
 }
@@ -352,8 +398,9 @@ export async function deleteFinanceDocument(id: string): Promise<{ ok: boolean; 
   if (!supabase) return { ok: false, error: "Supabase is not configured." };
 
   const { data: row } = await supabase.from("finance_documents").select("pdf_storage_path").eq("id", id).maybeSingle();
-  if (row?.pdf_storage_path) {
-    await supabase.storage.from(STORAGE_BUCKET).remove([row.pdf_storage_path as string]);
+  const path = row?.pdf_storage_path as string | null | undefined;
+  if (path) {
+    await supabase.storage.from(STORAGE_BUCKET).remove([path]);
   }
 
   const { error } = await supabase.from("finance_documents").delete().eq("id", id);
@@ -361,45 +408,27 @@ export async function deleteFinanceDocument(id: string): Promise<{ ok: boolean; 
   return { ok: true };
 }
 
-export function getPdfPublicUrl(storagePath: string): string | null {
-  const supabase = getSupabaseBrowserClient();
-  if (!supabase) return null;
-  const { data } = supabase.storage.from(STORAGE_BUCKET).getPublicUrl(storagePath);
-  return data.publicUrl;
-}
-
-export async function uploadFinancePdfAndInsert(params: {
-  blob: Blob;
+export async function insertFinanceDocument(params: {
   title: string;
   category: string;
   docDate: string | null;
+  payload: FinanceDocumentPayload;
 }): Promise<{ ok: boolean; error?: string; id?: string }> {
   const supabase = getSupabaseBrowserClient();
   if (!supabase) return { ok: false, error: "Supabase is not configured." };
 
   const id = crypto.randomUUID();
-  const path = `${id}.pdf`;
-
-  const { error: upErr } = await supabase.storage.from(STORAGE_BUCKET).upload(path, params.blob, {
-    contentType: "application/pdf",
-    upsert: false,
-  });
-
-  if (upErr) return { ok: false, error: upErr.message };
 
   const { error: insErr } = await supabase.from("finance_documents").insert({
     id,
     title: params.title,
     category: params.category,
     doc_date: params.docDate,
-    pdf_storage_path: path,
+    pdf_storage_path: "",
     sent_to_cpa: false,
+    payload: params.payload,
   });
 
-  if (insErr) {
-    await supabase.storage.from(STORAGE_BUCKET).remove([path]);
-    return { ok: false, error: insErr.message };
-  }
-
+  if (insErr) return { ok: false, error: insErr.message };
   return { ok: true, id };
 }
