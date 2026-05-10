@@ -2,7 +2,7 @@
 
 import { FileSpreadsheet, FileText } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   fetchFinanceDocumentById,
   insertFinanceDocument,
@@ -11,6 +11,10 @@ import {
 import {
   emptyIncomeExpensePayload,
   emptyZReportPayload,
+  incomeExpenseGrandTotal,
+  PAYMENT_METHOD_LABELS,
+  PAYMENT_INSTRUMENT_OPTIONS,
+  newPaymentId,
   type IncomeExpensePayload,
   type ZReportPayload,
 } from "@/lib/finance/document-payload";
@@ -29,10 +33,18 @@ function FinanceRegisterPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const editId = searchParams.get("edit");
+  const paymentDocumentId = searchParams.get("paymentDocumentId");
+  const paymentCustomerId = searchParams.get("paymentCustomerId");
 
   const [activeTab, setActiveTab] = useState<TabId>("income");
   const [editingDocId, setEditingDocId] = useState<string | null>(null);
   const [editingKind, setEditingKind] = useState<"income" | "expense" | "zreport" | null>(null);
+  const [paymentDoc, setPaymentDoc] = useState<Awaited<ReturnType<typeof fetchFinanceDocumentById>>>(null);
+  const [paymentAmount, setPaymentAmount] = useState("");
+  const [paymentMethod, setPaymentMethod] = useState<string>(PAYMENT_INSTRUMENT_OPTIONS[0]);
+  const [paymentNotes, setPaymentNotes] = useState("");
+  const [savingPayment, setSavingPayment] = useState(false);
+  const [paymentCustomer, setPaymentCustomer] = useState<{ id: string; name: string } | null>(null);
 
   const [incomeForm, setIncomeForm] = useState<IncomeExpensePayload>(() => emptyIncomeExpensePayload("income"));
   const [expenseForm, setExpenseForm] = useState<IncomeExpensePayload>(() => emptyIncomeExpensePayload("expense"));
@@ -49,6 +61,20 @@ function FinanceRegisterPageInner() {
     return {
       ...p,
       kind: p.kind,
+      paymentPaidAmount: p.paymentPaidAmount ?? "",
+      paymentInstrument: p.paymentInstrument ?? PAYMENT_INSTRUMENT_OPTIONS[0],
+      paymentNotes: p.paymentNotes ?? "",
+      payments:
+        p.payments?.length > 0
+          ? p.payments
+          : [
+              {
+                id: newPaymentId(),
+                instrument: p.paymentInstrument ?? PAYMENT_INSTRUMENT_OPTIONS[0],
+                amount: p.paymentPaidAmount ?? "",
+                notes: p.paymentNotes ?? "",
+              },
+            ],
       lines: p.lines.map((l) => ({
         ...l,
         vatMode: l.vatMode === "before_vat" || l.vatMode === "exempt" ? l.vatMode : "includes_vat",
@@ -123,6 +149,61 @@ function FinanceRegisterPageInner() {
     };
   }, [editId, fixIncomeExpense]);
 
+  useEffect(() => {
+    if (!paymentDocumentId) {
+      queueMicrotask(() => {
+        setPaymentDoc(null);
+        setPaymentAmount("");
+        setPaymentNotes("");
+      });
+      return;
+    }
+
+    let cancelled = false;
+    void (async () => {
+      const row = await fetchFinanceDocumentById(paymentDocumentId);
+      if (cancelled) return;
+      setPaymentDoc(row);
+      setPaymentAmount(row?.remaining_amount && row.remaining_amount > 0 ? String(row.remaining_amount) : "");
+      setPaymentMethod(PAYMENT_INSTRUMENT_OPTIONS[0]);
+      setPaymentNotes("");
+      setActiveTab("income");
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [paymentDocumentId]);
+
+  useEffect(() => {
+    if (!paymentCustomerId) {
+      queueMicrotask(() => {
+        setPaymentCustomer(null);
+      });
+      return;
+    }
+
+    let cancelled = false;
+    void (async () => {
+      const res = await fetch(`/api/customers/${encodeURIComponent(paymentCustomerId)}`, { credentials: "same-origin" });
+      try {
+        const j = (await res.json()) as { ok?: boolean; data?: { id: string; name: string } };
+        if (cancelled || !j.ok || !j.data) return;
+        setPaymentCustomer({ id: j.data.id, name: j.data.name });
+        setPaymentAmount("");
+        setPaymentMethod(PAYMENT_INSTRUMENT_OPTIONS[0]);
+        setPaymentNotes("");
+        setActiveTab("income");
+      } catch {
+        if (!cancelled) setPaymentCustomer(null);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [paymentCustomerId]);
+
   const zGrandTotal = useMemo(() => {
     return (
       parseNum(cashTaxable) +
@@ -133,7 +214,14 @@ function FinanceRegisterPageInner() {
     );
   }, [cashTaxable, cashExempt, creditTaxable, creditExempt, transfers]);
 
-  const [archiveFeedback, setArchiveFeedback] = useState<string | null>(null);
+  const [archiveFeedback, setArchiveFeedback] = useState<ReactNode>(null);
+
+  const feedbackIsError = (node: ReactNode) =>
+    typeof node === "string" &&
+    (node.includes("שגיאה") ||
+      node.includes("לא מוגדר") ||
+      node.includes("נדרש") ||
+      node.includes("לא יכול"));
   const [publishing, setPublishing] = useState(false);
 
   const clearEditMode = useCallback(() => {
@@ -155,10 +243,33 @@ function FinanceRegisterPageInner() {
     };
   }, [cashTaxable, cashExempt, creditTaxable, creditExempt, transfers, zDate, zNumber]);
 
+  const triggerPdfForDocument = async (documentId: string): Promise<string | null> => {
+    try {
+      const res = await fetch("/api/pdfs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ documentId }),
+        credentials: "same-origin",
+      });
+      const j = (await res.json()) as { ok?: boolean; pdfUrl?: string };
+      if (j.ok && j.pdfUrl && /^https?:\/\//.test(j.pdfUrl)) return j.pdfUrl;
+      return null;
+    } catch {
+      return null;
+    }
+  };
+
   const publishIncomeDoc = async () => {
     setPublishing(true);
     setArchiveFeedback(null);
     try {
+      const docTotal = incomeExpenseGrandTotal(incomeForm);
+      const paidVal = incomeForm.payments.reduce((sum, p) => sum + parseNum(p.amount), 0);
+      if (paidVal > docTotal + 1e-6) {
+        setArchiveFeedback("סכום התשלום לא יכול לעלות על סה״כ המסמך.");
+        return;
+      }
+
       const payload: IncomeExpensePayload = { ...incomeForm, kind: "income" };
       const title = `${incomeForm.documentType}${incomeForm.counterpartyName ? ` — ${incomeForm.counterpartyName}` : ""}`;
 
@@ -167,18 +278,30 @@ function FinanceRegisterPageInner() {
           setArchiveFeedback("עריכה פעילה למסמך אחר — עברו לטאב המתאים או בטלו עריכה.");
           return;
         }
-        if (editingDocId.startsWith("demo-arch")) {
-          setArchiveFeedback("מצב דמו: עריכה מוצגת בלבד — חיבור ל-Supabase נדרש לשמירה.");
-          return;
-        }
         const res = await updateFinanceDocument(editingDocId, {
           title,
           category: "הכנסה",
           doc_date: incomeForm.docDate || null,
           payload,
         });
-        setArchiveFeedback(res.ok ? "המסמך עודכן בהצלחה." : res.error ?? "שגיאה בעדכון");
-        if (res.ok) clearEditMode();
+        if (!res.ok) {
+          setArchiveFeedback(res.error ?? "שגיאה בעדכון");
+          return;
+        }
+        const pdfUrl = await triggerPdfForDocument(editingDocId);
+        setArchiveFeedback(
+          pdfUrl ? (
+            <>
+              המסמך עודכן בהצלחה.{" "}
+              <a href={pdfUrl} target="_blank" rel="noopener noreferrer" className="underline">
+                הפק PDF / הורדה
+              </a>
+            </>
+          ) : (
+            "המסמך עודכן בהצלחה."
+          ),
+        );
+        clearEditMode();
         return;
       }
 
@@ -188,7 +311,23 @@ function FinanceRegisterPageInner() {
         docDate: incomeForm.docDate || null,
         payload,
       });
-      setArchiveFeedback(res.ok ? "המסמך נשמר במערכת." : res.error ?? "שגיאה בשמירה");
+      if (!res.ok || !res.id) {
+        setArchiveFeedback(res.error ?? "שגיאה בשמירה");
+        return;
+      }
+      const pdfUrl = await triggerPdfForDocument(res.id);
+      setArchiveFeedback(
+        pdfUrl ? (
+          <>
+            המסמך נשמר במערכת.{" "}
+            <a href={pdfUrl} target="_blank" rel="noopener noreferrer" className="underline">
+              הפק PDF / הורדה
+            </a>
+          </>
+        ) : (
+          "המסמך נשמר במערכת."
+        ),
+      );
     } catch (e) {
       setArchiveFeedback(e instanceof Error ? e.message : "שגיאה בשמירה");
     } finally {
@@ -206,10 +345,6 @@ function FinanceRegisterPageInner() {
       if (editingDocId) {
         if (editingKind !== "zreport") {
           setArchiveFeedback("עריכה פעילה למסמך אחר — עברו לטאב המתאים או בטלו עריכה.");
-          return;
-        }
-        if (editingDocId.startsWith("demo-arch")) {
-          setArchiveFeedback("מצב דמו: עריכה מוצגת בלבד — חיבור ל-Supabase נדרש לשמירה.");
           return;
         }
         const res = await updateFinanceDocument(editingDocId, {
@@ -249,10 +384,6 @@ function FinanceRegisterPageInner() {
           setArchiveFeedback("עריכה פעילה למסמך אחר — עברו לטאב המתאים או בטלו עריכה.");
           return;
         }
-        if (editingDocId.startsWith("demo-arch")) {
-          setArchiveFeedback("מצב דמו: עריכה מוצגת בלבד — חיבור ל-Supabase נדרש לשמירה.");
-          return;
-        }
         const res = await updateFinanceDocument(editingDocId, {
           title,
           category: "הוצאה",
@@ -275,6 +406,97 @@ function FinanceRegisterPageInner() {
       setArchiveFeedback(e instanceof Error ? e.message : "שגיאה בשמירה");
     } finally {
       setPublishing(false);
+    }
+  };
+
+  const submitCustomerOnlyPayment = async () => {
+    if (!paymentCustomer) {
+      setArchiveFeedback("לא ניתן לקלוט תשלום.");
+      return;
+    }
+
+    const amount = parseNum(paymentAmount);
+    if (amount <= 0) {
+      setArchiveFeedback("נא להזין סכום תשלום חיובי.");
+      return;
+    }
+
+    setSavingPayment(true);
+    setArchiveFeedback(null);
+    try {
+      const res = await fetch("/api/payments", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          customerId: paymentCustomer.id,
+          amount,
+          paymentMethod,
+          notes: paymentNotes.trim() || null,
+        }),
+        credentials: "same-origin",
+      });
+      const json = (await res.json()) as { ok?: boolean; error?: string };
+      if (!json.ok) {
+        setArchiveFeedback(json.error ?? "שגיאה בקליטת תשלום");
+        return;
+      }
+      setPaymentAmount("");
+      setPaymentNotes("");
+      setArchiveFeedback("התשלום נקלט ועודכן בתזרים ובכרטסת.");
+    } catch (e) {
+      setArchiveFeedback(e instanceof Error ? e.message : "שגיאה בקליטת תשלום");
+    } finally {
+      setSavingPayment(false);
+    }
+  };
+
+  const submitDocumentPayment = async () => {
+    if (!paymentDoc?.customer_id) {
+      setArchiveFeedback("לא ניתן לקלוט תשלום ללא לקוח מקושר למסמך.");
+      return;
+    }
+
+    const amount = parseNum(paymentAmount);
+    if (amount <= 0) {
+      setArchiveFeedback("נא להזין סכום תשלום חיובי.");
+      return;
+    }
+
+    if (amount > paymentDoc.remaining_amount + 1e-6) {
+      setArchiveFeedback("סכום התשלום לא יכול לעלות על היתרה הפתוחה.");
+      return;
+    }
+
+    setSavingPayment(true);
+    setArchiveFeedback(null);
+    try {
+      const res = await fetch("/api/payments", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          customerId: paymentDoc.customer_id,
+          documentId: paymentDoc.id,
+          amount,
+          paymentMethod,
+          notes: paymentNotes.trim() || null,
+        }),
+        credentials: "same-origin",
+      });
+      const json = (await res.json()) as { ok?: boolean; error?: string };
+      if (!json.ok) {
+        setArchiveFeedback(json.error ?? "שגיאה בקליטת תשלום");
+        return;
+      }
+
+      const updated = await fetchFinanceDocumentById(paymentDoc.id);
+      setPaymentDoc(updated);
+      setPaymentAmount(updated?.remaining_amount && updated.remaining_amount > 0 ? String(updated.remaining_amount) : "");
+      setPaymentNotes("");
+      setArchiveFeedback("התשלום נקלט ועודכן במסמך, בתזרים ובכרטסת.");
+    } catch (e) {
+      setArchiveFeedback(e instanceof Error ? e.message : "שגיאה בקליטת תשלום");
+    } finally {
+      setSavingPayment(false);
     }
   };
 
@@ -327,16 +549,129 @@ function FinanceRegisterPageInner() {
           </div>
         )}
 
-        {archiveFeedback && (
+        {archiveFeedback != null && (
           <div
             className={`mt-4 rounded-xl border px-4 py-3 text-sm font-bold ${
-              archiveFeedback.includes("שגיאה") || archiveFeedback.includes("לא מוגדר") || archiveFeedback.includes("נדרש")
+              feedbackIsError(archiveFeedback)
                 ? "border-rose-200 bg-rose-50 text-rose-900"
                 : "border-emerald-200 bg-emerald-50 text-emerald-900"
             }`}
             role="status"
           >
             {archiveFeedback}
+          </div>
+        )}
+
+        {paymentCustomerId && paymentCustomer && (
+          <div className="mt-4 rounded-xl border border-cyan-200 bg-cyan-50 px-4 py-4 text-sm font-bold text-cyan-950">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+              <div>
+                <p className="text-xs font-black text-cyan-800">קליטת תשלום ללקוח</p>
+                <p className="mt-1 text-slate-900">{paymentCustomer.name}</p>
+              </div>
+              <div className="grid gap-2 sm:grid-cols-3 lg:min-w-[620px]">
+                <label className="text-xs font-bold text-slate-700">
+                  אמצעי תשלום
+                  <select
+                    value={paymentMethod}
+                    onChange={(event) => setPaymentMethod(event.target.value)}
+                    className="mt-1 block w-full rounded-xl border border-cyan-200 bg-white px-3 py-2 text-right text-sm font-semibold text-slate-900 outline-none focus:border-luxury-gold focus:ring-1 focus:ring-luxury-gold/25"
+                  >
+                    {PAYMENT_INSTRUMENT_OPTIONS.map((method) => (
+                      <option key={method} value={method}>
+                        {PAYMENT_METHOD_LABELS[method]}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="text-xs font-bold text-slate-700">
+                  סכום
+                  <input
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    value={paymentAmount}
+                    onChange={(event) => setPaymentAmount(event.target.value)}
+                    className="mt-1 block w-full rounded-xl border border-cyan-200 bg-white px-3 py-2 text-right text-sm font-semibold text-slate-900 outline-none focus:border-luxury-gold focus:ring-1 focus:ring-luxury-gold/25"
+                  />
+                </label>
+                <label className="text-xs font-bold text-slate-700">
+                  הערה
+                  <input
+                    type="text"
+                    value={paymentNotes}
+                    onChange={(event) => setPaymentNotes(event.target.value)}
+                    className="mt-1 block w-full rounded-xl border border-cyan-200 bg-white px-3 py-2 text-right text-sm font-semibold text-slate-900 outline-none focus:border-luxury-gold focus:ring-1 focus:ring-luxury-gold/25"
+                  />
+                </label>
+              </div>
+              <button
+                type="button"
+                disabled={savingPayment}
+                onClick={() => void submitCustomerOnlyPayment()}
+                className="rounded-xl bg-cyan-600 px-5 py-3 text-sm font-black text-white hover:bg-cyan-700 disabled:opacity-50"
+              >
+                {savingPayment ? "שומר…" : "קליטת תשלום"}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {paymentDocumentId && paymentDoc && (
+          <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-4 text-sm font-bold text-amber-900">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+              <div>
+                <p className="text-xs font-black text-amber-800">קליטת תשלום למסמך פתוח</p>
+                <p className="mt-1 text-slate-900">
+                  {paymentDoc.title} · {paymentDoc.customer_name ?? "לקוח"} · יתרה פתוחה{" "}
+                  <span className="font-black">{formatShekel(paymentDoc.remaining_amount)}</span>
+                </p>
+              </div>
+              <div className="grid gap-2 sm:grid-cols-3 lg:min-w-[620px]">
+                <label className="text-xs font-bold text-slate-700">
+                  אמצעי תשלום
+                  <select
+                    value={paymentMethod}
+                    onChange={(event) => setPaymentMethod(event.target.value)}
+                    className="mt-1 block w-full rounded-xl border border-amber-200 bg-white px-3 py-2 text-right text-sm font-semibold text-slate-900 outline-none focus:border-luxury-gold focus:ring-1 focus:ring-luxury-gold/25"
+                  >
+                    {PAYMENT_INSTRUMENT_OPTIONS.map((method) => (
+                      <option key={method} value={method}>
+                        {PAYMENT_METHOD_LABELS[method]}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="text-xs font-bold text-slate-700">
+                  סכום
+                  <input
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    value={paymentAmount}
+                    onChange={(event) => setPaymentAmount(event.target.value)}
+                    className="mt-1 block w-full rounded-xl border border-amber-200 bg-white px-3 py-2 text-right text-sm font-semibold text-slate-900 outline-none focus:border-luxury-gold focus:ring-1 focus:ring-luxury-gold/25"
+                  />
+                </label>
+                <label className="text-xs font-bold text-slate-700">
+                  הערה
+                  <input
+                    type="text"
+                    value={paymentNotes}
+                    onChange={(event) => setPaymentNotes(event.target.value)}
+                    className="mt-1 block w-full rounded-xl border border-amber-200 bg-white px-3 py-2 text-right text-sm font-semibold text-slate-900 outline-none focus:border-luxury-gold focus:ring-1 focus:ring-luxury-gold/25"
+                  />
+                </label>
+              </div>
+              <button
+                type="button"
+                disabled={savingPayment || paymentDoc.remaining_amount <= 0}
+                onClick={() => void submitDocumentPayment()}
+                className="rounded-xl bg-cyan-600 px-5 py-3 text-sm font-black text-white hover:bg-cyan-700 disabled:opacity-50"
+              >
+                {paymentDoc.remaining_amount <= 0 ? "שולם מלא" : savingPayment ? "שומר…" : "קליטת תשלום"}
+              </button>
+            </div>
           </div>
         )}
 

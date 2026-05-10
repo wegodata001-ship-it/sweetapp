@@ -1,13 +1,59 @@
-import Link from "next/link";
-import { dashboardStats, incomeDocuments } from "@/lib/mock-data";
+"use client";
 
-const currencyFormatter = new Intl.NumberFormat("en-US", {
+import Link from "next/link";
+import { useCallback, useEffect, useState } from "react";
+import type { FinanceDocumentRow } from "@/lib/finance/types";
+
+const currencyFormatter = new Intl.NumberFormat("he-IL", {
   style: "currency",
-  currency: "USD",
+  currency: "ILS",
   maximumFractionDigits: 0,
 });
 
+type Stats = {
+  income: number;
+  expenses: number;
+  cashflow: number;
+  openInvoices: number;
+  overdueInvoices: number;
+};
+
 export default function FinancePortalPage() {
+  const [stats, setStats] = useState<Stats | null>(null);
+  const [recent, setRecent] = useState<FinanceDocumentRow[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [sRes, dRes] = await Promise.all([
+        fetch("/api/finance/stats", { credentials: "same-origin" }),
+        fetch("/api/documents", { credentials: "same-origin" }),
+      ]);
+      const sj = (await sRes.json()) as { ok?: boolean; data?: Stats };
+      if (sj.ok && sj.data) setStats(sj.data);
+      if (dRes.ok) {
+        const dj = (await dRes.json()) as { ok?: boolean; data?: FinanceDocumentRow[] };
+        const list = dj.data ?? [];
+        setRecent(
+          list
+            .filter((r) => r.category === "הכנסה")
+            .slice(0, 12),
+        );
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const income = stats?.income ?? 0;
+  const expenses = stats?.expenses ?? 0;
+  const cashflow = stats?.cashflow ?? 0;
+
   return (
     <div className="mx-auto max-w-7xl space-y-8">
       <section className="app-panel p-8">
@@ -38,19 +84,19 @@ export default function FinancePortalPage() {
         <div className="app-panel p-6">
           <p className="text-sm font-semibold text-slate-500">Total income</p>
           <p className="mt-3 text-3xl font-black">
-            {currencyFormatter.format(dashboardStats.income)}
+            {loading ? "…" : currencyFormatter.format(income)}
           </p>
         </div>
         <div className="app-panel p-6">
           <p className="text-sm font-semibold text-slate-500">Total expenses</p>
           <p className="mt-3 text-3xl font-black">
-            {currencyFormatter.format(dashboardStats.expenses)}
+            {loading ? "…" : currencyFormatter.format(expenses)}
           </p>
         </div>
         <div className="app-panel p-6">
           <p className="text-sm font-semibold text-slate-500">Cashflow</p>
           <p className="mt-3 text-3xl font-black">
-            {currencyFormatter.format(dashboardStats.cashflow)}
+            {loading ? "…" : currencyFormatter.format(cashflow)}
           </p>
         </div>
       </section>
@@ -64,34 +110,35 @@ export default function FinancePortalPage() {
             <h2 className="mt-2 text-2xl font-black">Recent invoices</h2>
           </div>
           <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-700">
-            {incomeDocuments.length} active
+            {recent.length} active
           </span>
         </div>
 
         <div className="mt-6 grid gap-3">
-          {incomeDocuments.map((document) => (
+          {recent.map((document) => (
             <div
               key={document.id}
               className="rounded-2xl border border-slate-200 bg-slate-50 p-4"
             >
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div>
-                  <p className="font-bold text-slate-950">
-                    {document.documentNumber}
-                  </p>
-                  <p className="text-sm text-slate-500">{document.counterparty}</p>
+                  <p className="font-bold text-slate-950">{document.title}</p>
+                  <p className="text-sm text-slate-500">{document.category}</p>
                 </div>
                 <div className="flex flex-wrap gap-2">
                   <span className="rounded-full bg-white px-3 py-1 text-xs font-bold text-slate-600">
-                    Source_Type: {document.sourceType}
+                    תאריך: {document.doc_date ?? "—"}
                   </span>
                   <span className="rounded-full bg-white px-3 py-1 text-xs font-bold text-slate-600">
-                    Source_ID: {document.id}
+                    ID: {document.id}
                   </span>
                 </div>
               </div>
             </div>
           ))}
+          {!loading && recent.length === 0 && (
+            <p className="text-sm font-semibold text-slate-500">אין מסמכי הכנסה להצגה.</p>
+          )}
         </div>
       </section>
     </div>

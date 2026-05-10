@@ -13,12 +13,12 @@ export function withCashRunningBalances<T extends CashRow>(rows: T[], opening: n
   ).items;
 }
 
-type LedgerRow = { debit: number; credit: number };
+type LedgerRow = { debit: number; credit: number; balance_delta?: number };
 
 export function withLedgerRunningBalances<T extends LedgerRow>(rows: T[], opening: number): (T & { balance: number })[] {
   return rows.reduce<{ items: (T & { balance: number })[]; balance: number }>(
     (acc, row) => {
-      const balance = acc.balance + row.debit - row.credit;
+      const balance = acc.balance + (row.balance_delta ?? row.debit - row.credit);
       return {
         balance,
         items: [...acc.items, { ...row, balance }],

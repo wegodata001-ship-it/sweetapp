@@ -1,8 +1,31 @@
-import { incomeDocuments } from "@/lib/mock-data";
+"use client";
 
-const sampleInvoice = incomeDocuments[0];
+import Link from "next/link";
+import { useCallback, useEffect, useState } from "react";
+import type { FinanceDocumentRow } from "@/lib/finance/types";
 
 export default function IncomeDocumentPage() {
+  const [docs, setDocs] = useState<FinanceDocumentRow[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch("/api/documents", { credentials: "same-origin" });
+      const j = (await res.json()) as { data?: FinanceDocumentRow[] };
+      const list = j.data ?? [];
+      setDocs(list.filter((r) => r.category === "הכנסה"));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const sampleInvoice = docs[0];
+
   return (
     <div className="mx-auto max-w-7xl space-y-8">
       <section className="app-panel p-8">
@@ -135,12 +158,12 @@ export default function IncomeDocumentPage() {
           </div>
 
           <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-            <button
-              type="button"
-              className="rounded-full border border-slate-200 px-5 py-3 text-sm font-bold text-slate-700 transition hover:bg-slate-50"
+            <Link
+              href="/finance/register"
+              className="rounded-full border border-slate-200 px-5 py-3 text-center text-sm font-bold text-slate-700 transition hover:bg-slate-50"
             >
-              Save draft
-            </button>
+              רישום מלא במערכת
+            </Link>
             <button
               type="button"
               className="rounded-full bg-luxury-gold px-5 py-3 text-sm font-bold text-luxury-charcoal shadow-luxury-sm transition hover:bg-luxury-gold-hover"
@@ -153,15 +176,10 @@ export default function IncomeDocumentPage() {
         <aside className="space-y-6">
           <div className="app-panel p-6">
             <p className="text-sm font-bold uppercase tracking-[0.18em] text-slate-400">
-              Mock Record Shape
+              Database records
             </p>
             <pre className="mt-4 overflow-auto rounded-xl bg-luxury-charcoal p-4 text-xs leading-6 text-luxury-gold/90">
-{`{
-  "id": "inv_1009",
-  "sourceType": "INVOICE",
-  "documentNumber": "INV-2026-1009",
-  "status": "DRAFT"
-}`}
+              {loading ? "טוען…" : `${docs.length} income rows`}
             </pre>
           </div>
 
@@ -170,15 +188,17 @@ export default function IncomeDocumentPage() {
               Existing Example
             </p>
             <div className="mt-4 rounded-2xl bg-slate-50 p-4">
-              <p className="font-bold text-slate-950">
-                {sampleInvoice.documentNumber}
-              </p>
-              <p className="mt-1 text-sm text-slate-500">
-                {sampleInvoice.counterparty}
-              </p>
-              <p className="mt-3 font-mono text-xs text-slate-500">
-                Source_ID: {sampleInvoice.id}
-              </p>
+              {sampleInvoice ? (
+                <>
+                  <p className="font-bold text-slate-950">{sampleInvoice.title}</p>
+                  <p className="mt-1 text-sm text-slate-500">{sampleInvoice.category}</p>
+                  <p className="mt-3 font-mono text-xs text-slate-500">
+                    Source_ID: {sampleInvoice.id}
+                  </p>
+                </>
+              ) : (
+                <p className="text-sm text-slate-500">אין עדיין מסמכי הכנסה במסד.</p>
+              )}
             </div>
           </div>
         </aside>

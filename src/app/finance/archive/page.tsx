@@ -2,13 +2,11 @@
 
 import { ExternalLink, FileStack, PencilLine, Trash2 } from "lucide-react";
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { deleteFinanceDocument, fetchFinanceDocuments, updateFinanceDocument } from "@/lib/finance/db";
 import type { FinanceDocumentRow } from "@/lib/finance/types";
-import { getSupabaseBrowserClient } from "@/lib/supabase/client";
 
 export default function FinanceArchivePage() {
-  const supabase = useMemo(() => getSupabaseBrowserClient(), []);
   const [rows, setRows] = useState<FinanceDocumentRow[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -26,19 +24,11 @@ export default function FinanceArchivePage() {
   }, [refresh]);
 
   const toggleSent = async (id: string, sent: boolean) => {
-    if (id.startsWith("demo-arch")) {
-      setRows((prev) => prev.map((row) => (row.id === id ? { ...row, sent_to_cpa: !sent } : row)));
-      return;
-    }
     const res = await updateFinanceDocument(id, { sent_to_cpa: !sent });
     if (res.ok) await refresh();
   };
 
   const deleteRow = async (id: string) => {
-    if (id.startsWith("demo-arch")) {
-      setRows((prev) => prev.filter((row) => row.id !== id));
-      return;
-    }
     const res = await deleteFinanceDocument(id);
     if (res.ok) await refresh();
   };
@@ -52,7 +42,6 @@ export default function FinanceArchivePage() {
       <h1 className="mt-3 text-3xl font-black text-slate-950">ניהול מסמכים היסטוריים</h1>
       <p className="mt-2 text-sm text-slate-600">
         כל מסמך שפורסם נשמר כרשומה במערכת (כולל פירוט שדות הטופס). עריכה מלאה מתבצעת במסך רישום כספי.
-        {!supabase && " במצב דמו ללא Supabase מוצגות רק רשומות לדוגמה."}
       </p>
 
       {loading && <p className="mt-6 text-sm font-semibold text-slate-500">טוען…</p>}

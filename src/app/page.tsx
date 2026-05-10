@@ -22,7 +22,7 @@ export default function Home() {
             מעבר לרישום כספי
           </Link>
           <Link
-            href="/worker"
+            href="/worker/tasks"
             className="rounded-full border border-luxury-gold/70 px-5 py-3 text-sm font-bold text-luxury-charcoal transition hover:bg-luxury-gold/10"
           >
             כניסה לפורטל עובד אישי

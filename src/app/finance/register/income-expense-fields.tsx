@@ -1,12 +1,22 @@
 "use client";
 
-import { Calculator, Calendar, FileText, Plus, Receipt, Trash2, User } from "lucide-react";
+import { Calculator, Calendar, CreditCard, FileText, Plus, Receipt, Trash2, User } from "lucide-react";
+import { useEffect, useState } from "react";
 import {
   DOCUMENT_TYPE_OPTIONS,
   incomeExpenseGrandTotal,
+  incomeExpenseNetTotal,
+  incomeExpenseVatTotal,
   lineGrossTotal,
+  lineNetTotal,
+  lineVatTotal,
+  newPaymentId,
+  paymentLinesTotal,
+  PAYMENT_METHOD_LABELS,
+  PAYMENT_INSTRUMENT_OPTIONS,
   VAT_MODE_LABELS,
   type IncomeExpensePayload,
+  type PaymentLinePayload,
   type VatMode,
 } from "@/lib/finance/document-payload";
 import { formatShekel } from "@/lib/format-shekel";
@@ -25,10 +35,23 @@ type Props = {
   onChange: (next: IncomeExpensePayload) => void;
 };
 
-export function IncomeExpenseFields({ heading, headingClass = "text-slate-950", iconClass = "text-cyan-600", intro, value, onChange }: Props) {
+export function IncomeExpenseFields({
+  heading,
+  headingClass = "text-slate-950",
+  iconClass = "text-cyan-600",
+  intro,
+  value,
+  onChange,
+}: Props) {
   const showEventFields = value.clientMode === "event";
+  const [productSuggestions, setProductSuggestions] = useState<string[]>([]);
+  const [customerSuggestions, setCustomerSuggestions] = useState<string[]>([]);
 
   const lineTotals = value.lines.map((row) => lineGrossTotal(row.quantity, row.price, row.vatMode));
+  const netLineTotals = value.lines.map((row) => lineNetTotal(row.quantity, row.price, row.vatMode));
+  const vatLineTotals = value.lines.map((row) => lineVatTotal(row.quantity, row.price, row.vatMode));
+  const netTotal = incomeExpenseNetTotal(value);
+  const vatTotal = incomeExpenseVatTotal(value);
   const grandTotal = incomeExpenseGrandTotal(value);
 
   const setPatch = (patch: Partial<IncomeExpensePayload>) => onChange({ ...value, ...patch });
@@ -60,6 +83,87 @@ export function IncomeExpenseFields({ heading, headingClass = "text-slate-950", 
       lines: value.lines.map((row) => (row.id === id ? { ...row, ...patch } : row)),
     });
   };
+
+  const updatePayment = (id: string, patch: Partial<PaymentLinePayload>) => {
+    onChange({
+      ...value,
+      payments: value.payments.map((row) => (row.id === id ? { ...row, ...patch } : row)),
+    });
+  };
+
+  const addPayment = () => {
+    onChange({
+      ...value,
+      payments: [
+        ...value.payments,
+        {
+          id: newPaymentId(),
+          instrument: PAYMENT_INSTRUMENT_OPTIONS[0],
+          amount: "",
+          notes: "",
+        },
+      ],
+    });
+  };
+
+  const removePayment = (id: string) => {
+    if (value.payments.length <= 1) return;
+    onChange({ ...value, payments: value.payments.filter((row) => row.id !== id) });
+  };
+
+  const fetchSuggestions = async (query: string) => {
+    const q = query.trim();
+    if (q.length < 1) {
+      setProductSuggestions([]);
+      return;
+    }
+    try {
+      const res = await fetch(`/api/product-history?q=${encodeURIComponent(q)}`, {
+        credentials: "same-origin",
+      });
+      const j = (await res.json()) as { ok?: boolean; data?: string[] };
+      setProductSuggestions(j.ok ? j.data ?? [] : []);
+    } catch {
+      setProductSuggestions([]);
+    }
+  };
+
+  const fetchCustomerSuggestions = async (query: string) => {
+    const q = query.trim();
+    if (q.length < 1) {
+      setCustomerSuggestions([]);
+      return;
+    }
+    try {
+      const res = await fetch(`/api/customers?q=${encodeURIComponent(q)}`, {
+        credentials: "same-origin",
+      });
+      const j = (await res.json()) as { ok?: boolean; data?: { name: string }[] };
+      setCustomerSuggestions(j.ok ? (j.data ?? []).map((row) => row.name) : []);
+    } catch {
+      setCustomerSuggestions([]);
+    }
+  };
+
+  useEffect(() => {
+    if (value.payments.length > 0) return;
+    onChange({
+      ...value,
+      payments: [
+        {
+          id: newPaymentId(),
+          instrument: PAYMENT_INSTRUMENT_OPTIONS[0],
+          amount: "",
+          notes: "",
+        },
+      ],
+    });
+  }, [onChange, value]);
+
+  const paidInput = paymentLinesTotal(value);
+  const paidOverTotal = value.kind === "income" && paidInput > grandTotal + 1e-9 && grandTotal >= 0;
+  const paidEffective = Math.min(Math.max(0, paidInput), grandTotal);
+  const remainingShow = Math.max(0, grandTotal - paidEffective);
 
   return (
     <section className="app-panel p-6 md:p-8">
@@ -106,10 +210,19 @@ export function IncomeExpenseFields({ heading, headingClass = "text-slate-950", 
           <input
             type="text"
             value={value.counterpartyName}
-            onChange={(e) => setPatch({ counterpartyName: e.target.value })}
+            list="customer-suggestions"
+            onChange={(e) => {
+              setPatch({ counterpartyName: e.target.value });
+              void fetchCustomerSuggestions(e.target.value);
+            }}
             className={inputClass}
             placeholder="לדוגמה: קייטרינג גולן"
           />
+          <datalist id="customer-suggestions">
+            {customerSuggestions.map((name) => (
+              <option key={name} value={name} />
+            ))}
+          </datalist>
         </label>
         <label className={labelClass}>
           <span className="flex items-center gap-2">
@@ -134,16 +247,6 @@ export function IncomeExpenseFields({ heading, headingClass = "text-slate-950", 
               </option>
             ))}
           </select>
-        </label>
-        <label className={`md:col-span-2 ${labelClass}`}>
-          שיטת תקבול
-          <input
-            type="text"
-            value={value.paymentMethod}
-            onChange={(e) => setPatch({ paymentMethod: e.target.value })}
-            className={inputClass}
-            placeholder="לדוגמה: מזומן, אשראי, העברה בנקאית"
-          />
         </label>
       </div>
 
@@ -195,13 +298,21 @@ export function IncomeExpenseFields({ heading, headingClass = "text-slate-950", 
           </button>
         </div>
 
+        <datalist id="product-history-suggestions">
+          {productSuggestions.map((name) => (
+            <option key={name} value={name} />
+          ))}
+        </datalist>
+
         <div className="mt-4 overflow-x-auto rounded-2xl border border-slate-200">
-          <table className="min-w-[820px] w-full divide-y divide-slate-200 text-right text-sm">
+          <table className="min-w-[980px] w-full divide-y divide-slate-200 text-right text-sm">
             <thead className="bg-slate-50">
               <tr>
                 <th className="px-3 py-3 font-bold text-slate-600">שם פריט</th>
                 <th className="px-3 py-3 font-bold text-slate-600">כמות</th>
                 <th className="px-3 py-3 font-bold text-slate-600">מחיר יחידה</th>
+                <th className="px-3 py-3 font-bold text-slate-600">מע״מ</th>
+                <th className="px-3 py-3 font-bold text-slate-600">לפני מע״מ</th>
                 <th className="px-3 py-3 font-bold text-slate-600">מע״מ</th>
                 <th className="px-3 py-3 font-bold text-slate-600">סה״כ שורה</th>
                 <th className="w-14 px-3 py-3 font-bold text-slate-600" />
@@ -214,7 +325,11 @@ export function IncomeExpenseFields({ heading, headingClass = "text-slate-950", 
                     <input
                       type="text"
                       value={row.itemName}
-                      onChange={(e) => updateLine(row.id, { itemName: e.target.value })}
+                      list="product-history-suggestions"
+                      onChange={(e) => {
+                        updateLine(row.id, { itemName: e.target.value });
+                        void fetchSuggestions(e.target.value);
+                      }}
                       className="w-full rounded-lg border border-slate-200 px-2 py-2 text-right"
                       placeholder={`פריט ${index + 1}`}
                     />
@@ -252,6 +367,8 @@ export function IncomeExpenseFields({ heading, headingClass = "text-slate-950", 
                       ))}
                     </select>
                   </td>
+                  <td className="px-3 py-3 font-bold text-slate-700">{formatShekel(netLineTotals[index] ?? 0)}</td>
+                  <td className="px-3 py-3 font-bold text-slate-700">{formatShekel(vatLineTotals[index] ?? 0)}</td>
                   <td className="px-3 py-3 font-bold text-slate-900">{formatShekel(lineTotals[index] ?? 0)}</td>
                   <td className="px-3 py-2">
                     <button
@@ -272,10 +389,105 @@ export function IncomeExpenseFields({ heading, headingClass = "text-slate-950", 
         <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-cyan-200 bg-cyan-50/60 px-4 py-4">
           <span className="flex items-center gap-2 text-sm font-bold text-cyan-900">
             <Calculator className="h-5 w-5" aria-hidden />
-            סה״כ כולל שורות
+            סיכום מסמך
           </span>
-          <span className="text-2xl font-black text-slate-950">{formatShekel(grandTotal)}</span>
+          <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-sm font-bold text-slate-800">
+            <span>
+              לפני מע״מ: <span className="font-black text-slate-950">{formatShekel(netTotal)}</span>
+            </span>
+            <span>
+              מע״מ: <span className="font-black text-slate-950">{formatShekel(vatTotal)}</span>
+            </span>
+            <span>
+              סה״כ: <span className="text-2xl font-black text-slate-950">{formatShekel(grandTotal)}</span>
+            </span>
+          </div>
         </div>
+
+        {value.kind === "income" && (
+          <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50/90 px-4 py-4 md:px-5 md:py-5">
+            <div className="flex flex-wrap items-center gap-2 border-b border-slate-200/80 pb-3">
+              <CreditCard className="h-4 w-4 text-slate-600" aria-hidden />
+              <p className="text-sm font-black text-slate-900">פרטי תשלום</p>
+              <button
+                type="button"
+                onClick={addPayment}
+                className="me-auto rounded-lg bg-white px-3 py-1.5 text-xs font-bold text-slate-800 shadow-sm ring-1 ring-slate-200 hover:bg-slate-50"
+              >
+                הוסף אמצעי תשלום
+              </button>
+            </div>
+            <div className="mt-4 space-y-3">
+              {value.payments.map((payment) => (
+                <div
+                  key={payment.id}
+                  className="grid gap-3 rounded-xl border border-slate-200 bg-white p-3 sm:grid-cols-[1fr_1fr_1.5fr_auto]"
+                >
+                  <label className={labelClass}>
+                    אמצעי תשלום
+                    <select
+                      value={payment.instrument || PAYMENT_INSTRUMENT_OPTIONS[0]}
+                      onChange={(e) => updatePayment(payment.id, { instrument: e.target.value })}
+                      className={inputClass}
+                    >
+                      {PAYMENT_INSTRUMENT_OPTIONS.map((opt) => (
+                        <option key={opt} value={opt}>
+                          {PAYMENT_METHOD_LABELS[opt]}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className={labelClass}>
+                    סכום
+                    <input
+                      type="number"
+                      min={0}
+                      step="0.01"
+                      value={payment.amount}
+                      onChange={(e) => updatePayment(payment.id, { amount: e.target.value })}
+                      className={inputClass}
+                      placeholder="0"
+                    />
+                  </label>
+                  <label className={labelClass}>
+                    הערות
+                    <input
+                      type="text"
+                      value={payment.notes}
+                      onChange={(e) => updatePayment(payment.id, { notes: e.target.value })}
+                      className={inputClass}
+                      placeholder="הערות תשלום"
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => removePayment(payment.id)}
+                    className="self-end rounded-lg p-2 text-rose-600 hover:bg-rose-50"
+                    aria-label="מחיקת תשלום"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </div>
+              ))}
+            </div>
+            {paidOverTotal && (
+              <p className="mt-3 text-xs font-bold text-rose-700" role="alert">
+                סכום התשלום לא יכול לעלות על סה״כ המסמך.
+              </p>
+            )}
+            {!paidOverTotal && (
+              <div className="mt-4 flex flex-wrap items-center gap-x-6 gap-y-2 text-sm font-bold text-slate-800">
+                <span>
+                  שולם: <span className="font-black text-slate-950">{formatShekel(paidEffective)}</span>
+                </span>
+                <span className="text-slate-400">|</span>
+                <span>
+                  נותר: <span className="font-black text-slate-950">{formatShekel(remainingShow)}</span>
+                </span>
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </section>
   );

@@ -1,0 +1,289 @@
+generator client {
+  provider   = "prisma-client-js"
+  engineType = "binary"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model Customer {
+  id             String   @id @default(cuid())
+  name           String
+  phone          String?
+  customerType   String?
+  openingBalance Float    @default(0)
+  createdAt      DateTime @default(now())
+
+  documents FinancialDocument[]
+  payments  Payment[]
+}
+
+model Supplier {
+  id             String   @id @default(cuid())
+  name           String
+  phone          String?
+  openingBalance Float    @default(0)
+  createdAt      DateTime @default(now())
+
+  ledgerEntries LedgerEntry[]
+}
+
+model Employee {
+  id             String   @id @default(cuid())
+  name           String
+  phone          String?
+  openingBalance Float    @default(0)
+  /// תפקיד / תיאור לתצוגה (למשל: מטבח, אריזה)
+  role           String?
+  /// מחלקה לצבעי UI
+  department     String?
+  createdAt      DateTime @default(now())
+
+  tasks         EmployeeTask[]
+  linkedUsers   User[]
+  ledgerEntries LedgerEntry[]
+}
+
+/// Manual ledger lines for ספק / עובד (לא כרטסת לקוח — היא מחושבת ממסמכים ותשלומים)
+model LedgerEntry {
+  id          String   @id @default(cuid())
+  entryDate   DateTime @db.Date
+  docType     String
+  description String
+  debit       Float    @default(0)
+  credit      Float    @default(0)
+  createdAt   DateTime @default(now())
+
+  supplierId String?
+  supplier   Supplier? @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  employeeId String?
+  employee   Employee? @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@index([supplierId])
+  @@index([employeeId])
+}
+
+model FinancialDocument {
+  id              String   @id @default(cuid())
+  title           String
+  category        String
+  documentType    String
+  customerId      String?
+  customer        Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+
+  totalAmount     Float
+  paidAmount      Float    @default(0)
+  remainingAmount Float
+  /// PAID | PARTIAL | UNPAID
+  paymentStatus   String   @default("UNPAID")
+
+  notes    String?
+  metadata Json?
+
+  pdfStoragePath String?
+  sentToCpa      Boolean  @default(false)
+  docDate        DateTime? @db.Date
+  createdAt      DateTime @default(now())
+
+  items    FinancialDocumentItem[]
+  payments Payment[]
+  /// תנועות תזרים שמקושרות כדוח Z (אותו מסמך כ־FinancialDocument)
+  zReportCashFlowEntries CashFlowEntry[] @relation("CashFlowZReportFinancialDocument")
+
+  @@index([customerId])
+  @@index([createdAt])
+}
+
+model FinancialDocumentItem {
+  id         String @id @default(cuid())
+  documentId String
+  document   FinancialDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  productId   String?
+  product     Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
+  productName String?
+  itemName    String
+  quantity    Float
+  unitPrice   Float
+  vatType     String?
+  total       Float
+
+  @@index([documentId])
+  @@index([productId])
+}
+
+model Payment {
+  id            String   @id @default(cuid())
+  customerId    String
+  customer      Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  documentId String?
+  document   FinancialDocument? @relation(fields: [documentId], references: [id], onDelete: SetNull)
+
+  amount        Float
+  paymentMethod String?
+  notes         String?
+  createdAt     DateTime @default(now())
+
+  @@index([customerId])
+  @@index([documentId])
+}
+
+model CashFlowEntry {
+  id                String   @id @default(cuid())
+  entryType         String
+  amount            Float
+  description       String?
+  paymentMethod     String?
+  customerId        String?
+  customerName      String?
+  notes             String?
+  paymentId         String?
+  documentId        String?
+  relatedDocumentId String?
+  /// מקור התנועה: לדוגמה z_report
+  source            String?
+  /// מזהה דוח Z בפועל — שורת FinancialDocument עם documentType "דוח Z"
+  zReportId         String?
+  zReport           FinancialDocument? @relation("CashFlowZReportFinancialDocument", fields: [zReportId], references: [id], onDelete: Cascade)
+  entryDate         DateTime @db.Date
+  isDirect          Boolean  @default(false)
+  createdAt         DateTime @default(now())
+
+  @@index([entryDate])
+  @@index([customerId])
+  @@index([paymentId])
+  @@index([documentId])
+  @@index([relatedDocumentId])
+  @@index([zReportId])
+  @@index([source])
+}
+
+model GeneratedPdf {
+  id         String   @id @default(cuid())
+  customerId String?
+  documentId String?
+  pdfUrl     String
+  kind       String?
+  createdAt  DateTime @default(now())
+}
+
+model ProductHistory {
+  id        String   @id @default(cuid())
+  itemName  String   @unique
+  createdAt DateTime @default(now())
+}
+
+model Product {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  createdAt DateTime @default(now())
+
+  documentItems FinancialDocumentItem[]
+}
+
+model InventoryItem {
+  id           String   @id @default(cuid())
+  itemName     String
+  currentStock Float
+  createdAt    DateTime @default(now())
+
+  movements InventoryMovement[]
+}
+
+model InventoryMovement {
+  id              String   @id @default(cuid())
+  inventoryItemId String
+  item            InventoryItem @relation(fields: [inventoryItemId], references: [id], onDelete: Cascade)
+
+  movementType String
+  quantity     Float
+  note         String?
+  createdAt    DateTime @default(now())
+
+  @@index([inventoryItemId])
+}
+
+model EmployeeTask {
+  id          String   @id @default(cuid())
+  employeeId  String
+  employee    Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  title       String?
+  description String
+  /// normal | low | medium | high | urgent
+  priority    String   @default("normal")
+  /// pending | in_progress | completed (באיחור מחושב לפי dueAt)
+  status      String   @default("pending")
+  dueAt       DateTime
+  startedAt   DateTime?
+  completedAt DateTime?
+  /// משתמש שיצר את המשימה (מנהל)
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([employeeId])
+  @@index([dueAt])
+  @@index([status])
+  @@index([createdAt])
+  @@index([startedAt])
+}
+
+model FormFieldDef {
+  id        String   @id @default(cuid())
+  label     String
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+}
+
+model FinanceSettings {
+  id                 Int    @id @default(1)
+  cashOpeningBalance Float  @default(0)
+}
+
+enum UserRole {
+  SUPER_ADMIN
+  EMPLOYEE
+}
+
+model User {
+  id           String   @id @default(cuid())
+  fullName     String
+  email        String   @unique
+  passwordHash String
+  role         UserRole
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  /// לשיוך משתמש לעובד (לשונית "שלי" במשימות)
+  employeeId   String?
+  employee     Employee? @relation(fields: [employeeId], references: [id], onDelete: SetNull)
+
+  permissions UserPermission[]
+  activityLogs ActivityLog[]
+
+  @@index([employeeId])
+}
+
+model UserPermission {
+  id         String @id @default(cuid())
+  userId     String
+  user       User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  permission String
+
+  @@unique([userId, permission])
+  @@index([userId])
+}
+
+model ActivityLog {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  action    String
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([createdAt])
+}

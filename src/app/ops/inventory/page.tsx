@@ -1,37 +1,78 @@
 "use client";
 
 import { AlertTriangle, ClipboardCheck, Package } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { parseNum } from "@/lib/format-shekel";
 
-type ShelfItem = {
+type InvRow = {
   id: string;
   name: string;
   expected: number;
 };
 
-const SHELF_ITEMS: ShelfItem[] = [
-  { id: "flour", name: "קמח לבן שק 25 ק״ג — מדף א", expected: 42 },
-  { id: "sugar", name: "סוכר דמררה — מדף ב", expected: 28 },
-  { id: "cream", name: "שמנת מתוקה 38% — מקרר מדף ג", expected: 96 },
-  { id: "trays", name: "מגשים ריקים — מדף אריזות", expected: 320 },
-  { id: "boxes", name: "קופסאות קרטון למארזים — מדף ד", expected: 540 },
-  { id: "labels", name: "מדבקות לוגו — מדף אטום", expected: 12000 },
-];
-
 export default function InventoryPage() {
+  const [rows, setRows] = useState<InvRow[]>([]);
   const [actualById, setActualById] = useState<Record<string, string>>({});
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
 
-  const rows = useMemo(
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch("/api/inventory", { credentials: "same-origin" });
+      const j = (await res.json()) as {
+        data?: { id: string; itemName: string; currentStock: number }[];
+      };
+      const list = j.data ?? [];
+      setRows(list.map((r) => ({ id: r.id, name: r.itemName, expected: r.currentStock })));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const displayRows = useMemo(
     () =>
-      SHELF_ITEMS.map((item) => {
+      rows.map((item) => {
         const raw = actualById[item.id] ?? "";
         const actual = raw === "" ? null : parseNum(raw);
         const diff = actual === null ? null : actual - item.expected;
         return { ...item, raw, actual, diff };
       }),
-    [actualById],
+    [rows, actualById],
   );
+
+  const saveCount = async () => {
+    setSaving(true);
+    setNotice(null);
+    try {
+      for (const row of displayRows) {
+        if (row.actual === null) continue;
+        await fetch("/api/inventory/movements", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            inventoryItemId: row.id,
+            movementType: "count",
+            quantity: row.actual,
+            note: "ספירת משמרת",
+          }),
+          credentials: "same-origin",
+        });
+      }
+      setActualById({});
+      await load();
+      setNotice("ספירת משמרת נשמרה במסד הנתונים.");
+    } catch {
+      setNotice("שמירה נכשלה.");
+    } finally {
+      setSaving(false);
+    }
+  };
 
   return (
     <div className="mx-auto max-w-7xl app-panel p-8">
@@ -41,8 +82,16 @@ export default function InventoryPage() {
       </p>
       <h1 className="mt-3 text-3xl font-black text-slate-950">ספירת מלאי מדפים — משמרת בוקר</h1>
       <p className="mt-2 max-w-3xl text-sm text-slate-600">
-        השווי מערכת מוצג בעמודה &quot;צפי במערכת&quot;. הזינו ספירה בפועל — ההפרש מחושב מיד.
+        השווי מערכת מוצג בעמודה &quot;צפי במערכת&quot; (מלאי מחושב במסד). הזינו ספירה בפועל — ההפרש מחושב מיד.
       </p>
+
+      {notice && (
+        <p className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-bold text-emerald-900">
+          {notice}
+        </p>
+      )}
+
+      {loading && <p className="mt-6 text-sm font-semibold text-slate-500">טוען…</p>}
 
       <div className="mt-6 overflow-x-auto rounded-2xl border border-slate-200">
         <table className="min-w-[820px] w-full divide-y divide-slate-200 text-right text-sm">
@@ -55,7 +104,7 @@ export default function InventoryPage() {
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100 bg-white">
-            {rows.map((row) => (
+            {displayRows.map((row) => (
               <tr key={row.id}>
                 <td className="px-4 py-3 font-semibold text-slate-900">{row.name}</td>
                 <td className="px-4 py-3 font-bold text-slate-800">{row.expected.toLocaleString("he-IL")}</td>
@@ -100,12 +149,20 @@ export default function InventoryPage() {
         </table>
       </div>
 
+      {!loading && rows.length === 0 && (
+        <p className="mt-6 text-sm font-semibold text-slate-600">
+          אין פריטי מלאי — הוסיפו פריט דרך ה-API או מסך ניהול עתידי.
+        </p>
+      )}
+
       <button
         type="button"
-        className="mt-6 inline-flex items-center gap-2 rounded-xl bg-luxury-gold px-5 py-3 font-bold text-luxury-charcoal shadow-luxury-sm hover:bg-luxury-gold-hover"
+        disabled={saving || loading}
+        onClick={() => void saveCount()}
+        className="mt-6 inline-flex items-center gap-2 rounded-xl bg-luxury-gold px-5 py-3 font-bold text-luxury-charcoal shadow-luxury-sm hover:bg-luxury-gold-hover disabled:opacity-50"
       >
         <ClipboardCheck className="h-4 w-4" aria-hidden />
-        שמירת ספירת משמרת
+        {saving ? "שומר…" : "שמירת ספירת משמרת"}
       </button>
     </div>
   );

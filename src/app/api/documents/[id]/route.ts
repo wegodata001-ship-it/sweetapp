@@ -1,0 +1,257 @@
+import { NextRequest, NextResponse } from "next/server";
+import {
+  combineIncomeNotes,
+  incomeExpenseGrandTotal,
+  lineGrossTotal,
+  type FinanceDocumentPayload,
+  type IncomeExpensePayload,
+  type VatMode,
+  type ZReportPayload,
+} from "@/lib/finance/document-payload";
+import { prismaDocToFinanceRow } from "@/lib/finance/map-document";
+import { syncFinancialDocumentPaymentTotals } from "@/lib/finance/sync-document-amounts";
+import {
+  attachProductsToItems,
+  normalizedPaymentLines,
+  replaceCashFlowForDocument,
+  saveProductHistoryFromItems,
+} from "@/lib/finance/document-side-effects";
+import { prisma } from "@/lib/prisma";
+import { requireDb } from "@/lib/api-route";
+import { getSessionFromCookie } from "@/lib/auth/get-session";
+import { logActivity } from "@/lib/activity-log";
+import { parseNum } from "@/lib/format-shekel";
+import { getSupabaseServiceClient } from "@/lib/supabase/server";
+import type { Prisma } from "@prisma/client";
+
+function asJson(value: unknown): Prisma.InputJsonValue {
+  return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
+}
+
+const BUCKET = process.env.NEXT_PUBLIC_SUPABASE_STORAGE_BUCKET?.trim() || "pdf_photo";
+
+function zTotal(z: ZReportPayload): number {
+  return z.cashTaxable + z.cashExempt + z.creditTaxable + z.creditExempt + z.transfers;
+}
+
+async function ensureCustomerByName(name: string): Promise<string | null> {
+  const n = name.trim();
+  if (!n) return null;
+  const found = await prisma.customer.findFirst({ where: { name: n } });
+  if (found) return found.id;
+  const c = await prisma.customer.create({ data: { name: n } });
+  return c.id;
+}
+
+function buildItemsFromIncomeExpense(payload: IncomeExpensePayload) {
+  return payload.lines
+    .filter((l) => l.itemName.trim() || parseNum(l.price) > 0)
+    .map((l) => {
+      const qty = Math.max(0, parseNum(l.quantity));
+      const price = Math.max(0, parseNum(l.price));
+      const vat = l.vatMode as VatMode;
+      const lineTotal = lineGrossTotal(l.quantity, l.price, vat);
+      return {
+        itemName: l.itemName || "שורה",
+        quantity: qty || 1,
+        unitPrice: price,
+        vatType: l.vatMode,
+        total: lineTotal,
+      };
+    });
+}
+
+export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
+  const block = await requireDb();
+  if (block) return block;
+  const { id } = await ctx.params;
+  try {
+    const row = await prisma.financialDocument.findUnique({
+      where: { id },
+      include: { customer: { select: { name: true } } },
+    });
+    if (!row) return NextResponse.json({ ok: false, error: "לא נמצא" }, { status: 404 });
+    return NextResponse.json({ ok: true, data: prismaDocToFinanceRow(row) });
+  } catch (e) {
+    return NextResponse.json(
+      { ok: false, error: e instanceof Error ? e.message : "שגיאה" },
+      { status: 500 },
+    );
+  }
+}
+
+export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
+  const block = await requireDb();
+  if (block) return block;
+  const session = await getSessionFromCookie();
+  const { id } = await ctx.params;
+  try {
+    const body = (await req.json()) as {
+      title?: string;
+      category?: string;
+      doc_date?: string | null;
+      sent_to_cpa?: boolean;
+      payload?: FinanceDocumentPayload;
+    };
+
+    const existing = await prisma.financialDocument.findUnique({ where: { id } });
+    if (!existing) return NextResponse.json({ ok: false, error: "לא נמצא" }, { status: 404 });
+
+    if (body.payload) {
+      const meta = body.payload;
+      if (meta.kind === "zreport") {
+        const z = meta;
+        const total = zTotal(z);
+        await prisma.financialDocumentItem.deleteMany({ where: { documentId: id } });
+        await prisma.financialDocument.update({
+          where: { id },
+          data: {
+            title: body.title ?? existing.title,
+            category: body.category ?? existing.category,
+            documentType: "דוח Z",
+            totalAmount: total,
+            paidAmount: total,
+            remainingAmount: 0,
+            paymentStatus: total <= 0 ? "UNPAID" : "PAID",
+            metadata: asJson(meta),
+            docDate: z.zDate ? new Date(z.zDate) : undefined,
+            sentToCpa: body.sent_to_cpa ?? undefined,
+          },
+        });
+        await syncFinancialDocumentPaymentTotals(id);
+        await replaceCashFlowForDocument(id);
+      } else {
+        const ie = meta as IncomeExpensePayload;
+        const items = buildItemsFromIncomeExpense(ie);
+        const calculatedTotal =
+          items.reduce((s, r) => s + r.total, 0) || incomeExpenseGrandTotal(ie);
+        const customerId =
+          ie.kind === "income" ? await ensureCustomerByName(ie.counterpartyName) : null;
+
+        const category = body.category ?? existing.category;
+        const isIncomeRegister = ie.kind === "income" && category === "הכנסה";
+
+        if (isIncomeRegister) {
+          const paidRaw = normalizedPaymentLines(ie).reduce((sum, p) => sum + parseNum(p.amount), 0);
+          if (paidRaw > calculatedTotal + 1e-9) {
+            return NextResponse.json(
+              { ok: false, error: "סכום תשלום לא יכול לעלות על סה״כ המסמך" },
+              { status: 400 },
+            );
+          }
+        }
+
+        await prisma.payment.deleteMany({ where: { documentId: id } });
+
+        await prisma.financialDocumentItem.deleteMany({ where: { documentId: id } });
+        const itemsWithProducts = await attachProductsToItems(items);
+        await prisma.financialDocument.update({
+          where: { id },
+          data: {
+            title: body.title ?? existing.title,
+            category,
+            documentType: ie.documentType,
+            customerId,
+            totalAmount: calculatedTotal,
+            metadata: asJson(meta),
+            notes: combineIncomeNotes(ie),
+            docDate: ie.docDate ? new Date(ie.docDate) : body.doc_date ? new Date(body.doc_date) : undefined,
+            sentToCpa: body.sent_to_cpa ?? undefined,
+            items: {
+              create:
+                itemsWithProducts.length > 0
+                  ? itemsWithProducts
+                  : [
+                      {
+                        itemName: "סיכום",
+                        productName: "סיכום",
+                        quantity: 1,
+                        unitPrice: calculatedTotal,
+                        vatType: null,
+                        total: calculatedTotal,
+                      },
+                    ],
+            },
+          },
+        });
+        await saveProductHistoryFromItems(items);
+
+        if (isIncomeRegister) {
+          const payments = normalizedPaymentLines(ie);
+          if (payments.length > 0 && customerId) {
+            await prisma.payment.createMany({
+              data: payments.map((payment) => ({
+                customerId,
+                documentId: id,
+                amount: parseNum(payment.amount),
+                paymentMethod: payment.instrument.trim() || null,
+                notes: payment.notes.trim() || null,
+              })),
+            });
+          }
+        }
+
+        await syncFinancialDocumentPaymentTotals(id);
+        await replaceCashFlowForDocument(id);
+      }
+    } else {
+      await prisma.financialDocument.update({
+        where: { id },
+        data: {
+          title: body.title,
+          category: body.category,
+          docDate:
+            body.doc_date === undefined ? undefined : body.doc_date ? new Date(body.doc_date) : null,
+          sentToCpa: body.sent_to_cpa,
+        },
+      });
+      await replaceCashFlowForDocument(id);
+    }
+
+    const updated = await prisma.financialDocument.findUnique({ where: { id } });
+    if (session) await logActivity(session.sub, "document_edit");
+    return NextResponse.json({ ok: true, data: updated ? prismaDocToFinanceRow(updated) : null });
+  } catch (e) {
+    return NextResponse.json(
+      { ok: false, error: e instanceof Error ? e.message : "שגיאה" },
+      { status: 500 },
+    );
+  }
+}
+
+export async function DELETE(_req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
+  const block = await requireDb();
+  if (block) return block;
+  const session = await getSessionFromCookie();
+  const { id } = await ctx.params;
+  try {
+    const existing = await prisma.financialDocument.findUnique({
+      where: { id },
+      select: { pdfStoragePath: true },
+    });
+    if (!existing) return NextResponse.json({ ok: false, error: "לא נמצא" }, { status: 404 });
+
+    if (existing.pdfStoragePath) {
+      const supabase = getSupabaseServiceClient();
+      if (supabase) {
+        await supabase.storage.from(BUCKET).remove([existing.pdfStoragePath]);
+      }
+    }
+
+    await prisma.cashFlowEntry.deleteMany({
+      where: {
+        isDirect: false,
+        OR: [{ documentId: id }, { relatedDocumentId: id }, { zReportId: id }],
+      },
+    });
+
+    await prisma.financialDocument.delete({ where: { id } });
+    if (session) await logActivity(session.sub, "document_delete");
+    return NextResponse.json({ ok: true });
+  } catch (e) {
+    return NextResponse.json(
+      { ok: false, error: e instanceof Error ? e.message : "שגיאה" },
+      { status: 500 },
+    );
+  }
+}
