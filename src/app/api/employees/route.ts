@@ -1,10 +1,45 @@
 import { NextRequest, NextResponse } from "next/server";
+import { UserRole } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireDb } from "@/lib/api-route";
+import { getSessionFromCookie } from "@/lib/auth/get-session";
+import { canManageAllTasks } from "@/lib/tasks/task-access";
 
-export async function GET() {
+/**
+ * ברירת מחדל: רשומות Employee (כרטסות).
+ * ?forTasks=1 — משתמשי EMPLOYEE פעילים להקצאת משימות (טבלת User בלבד).
+ */
+export async function GET(req: NextRequest) {
   const block = await requireDb();
   if (block) return block;
+  const forTasks = req.nextUrl.searchParams.get("forTasks") === "1";
+  if (forTasks) {
+    const session = await getSessionFromCookie();
+    if (!session || !canManageAllTasks(session)) {
+      return NextResponse.json({ ok: false, error: "אין הרשאה" }, { status: 403 });
+    }
+    try {
+      const rows = await prisma.user.findMany({
+        where: {
+          role: UserRole.EMPLOYEE,
+          isActive: true,
+        },
+        orderBy: { fullName: "asc" },
+        select: {
+          id: true,
+          fullName: true,
+          email: true,
+          role: true,
+        },
+      });
+      return NextResponse.json({ ok: true, data: rows });
+    } catch (e) {
+      return NextResponse.json(
+        { ok: false, error: e instanceof Error ? e.message : "שגיאה" },
+        { status: 500 },
+      );
+    }
+  }
   try {
     const rows = await prisma.employee.findMany({ orderBy: { name: "asc" } });
     return NextResponse.json({ ok: true, data: rows });

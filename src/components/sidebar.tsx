@@ -1,5 +1,6 @@
 "use client";
 
+import { CheckSquare } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useAuth } from "@/components/auth-provider";
@@ -107,6 +108,7 @@ function NavLink({ item }: { item: NavItem }) {
 }
 
 export function Sidebar() {
+  const pathname = usePathname();
   const { user, loading } = useAuth();
   const permSet = user ? new Set(user.permissions) : new Set<string>();
   const role = user?.role ?? "EMPLOYEE";
@@ -117,8 +119,17 @@ export function Sidebar() {
 
   const showWorkerPortal = role === "SUPER_ADMIN" || permSet.has("employee_clock");
 
+  const showMyTasksNav =
+    role === "SUPER_ADMIN" ||
+    role === "EMPLOYEE" ||
+    permSet.has("employee_clock") ||
+    permSet.has("tasks");
+
   const anyNav =
-    financeVisible.length > 0 || managementVisible.length > 0 || adminVisible.length > 0;
+    financeVisible.length > 0 ||
+    managementVisible.length > 0 ||
+    adminVisible.length > 0 ||
+    showMyTasksNav;
 
   if (loading) {
     return (
@@ -205,6 +216,33 @@ export function Sidebar() {
                 </div>
               </div>
             ) : null}
+
+            {showMyTasksNav ? (
+              <div>
+                <div className="mb-3 px-2">
+                  <p className="text-xs font-bold tracking-[0.12em] text-slate-500">המשימות שלי</p>
+                </div>
+                <Link
+                  href="/employee/tasks"
+                  className={`group flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold transition ${
+                    pathname === "/employee/tasks" || pathname.startsWith("/employee/tasks/")
+                      ? "bg-luxury-gold text-luxury-charcoal shadow-luxury-sm"
+                      : "text-slate-300 hover:bg-white/10 hover:text-white"
+                  }`}
+                >
+                  <span
+                    className={`rounded-lg border p-1.5 ${
+                      pathname === "/employee/tasks" || pathname.startsWith("/employee/tasks/")
+                        ? "border-luxury-charcoal/25 bg-luxury-charcoal/10 text-luxury-charcoal"
+                        : "border-white/15 bg-white/5 text-slate-400 group-hover:text-slate-200"
+                    }`}
+                  >
+                    <CheckSquare className="h-4 w-4" aria-hidden />
+                  </span>
+                  המשימות שלי
+                </Link>
+              </div>
+            ) : null}
           </nav>
         )}
 
@@ -212,7 +250,7 @@ export function Sidebar() {
           <div className="mt-8 rounded-xl border border-white/10 bg-luxury-charcoal/50 p-4 shadow-luxury-sm">
             <p className="text-xs font-semibold text-slate-300">גישה נפרדת לעובדים</p>
             <Link
-              href="/worker/tasks"
+              href="/employee/tasks"
               className="mt-3 inline-block w-full rounded-xl bg-luxury-gold px-4 py-2.5 text-center text-sm font-bold text-luxury-charcoal shadow-luxury-sm transition hover:bg-luxury-gold-hover"
             >
               מעבר לפורטל עובד אישי

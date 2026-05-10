@@ -1,20 +1,72 @@
-/** סטטוס תצוגה — באיחור מחושב לפי dueAt כשלא הושלם */
-export type TaskEffectiveStatus = "pending" | "in_progress" | "completed" | "overdue";
+import { scheduledStartMs } from "@/lib/tasks/schedule";
 
-export function effectiveTaskStatus(row: { status: string; dueAt: Date }): TaskEffectiveStatus {
+/** סטטוס תצוגה — באיחור כשממתינה ושעת ההתחלה המתוזמנת כבר עברה */
+export type TaskEffectiveStatus =
+  | "pending"
+  | "in_progress"
+  | "completed"
+  | "overdue"
+  | "problem"
+  | "rejected";
+
+/** סטטוסים שהעובד יכול לעדכן ב־UI */
+export const EMPLOYEE_TASK_STATUS_KEYS = [
+  "pending",
+  "in_progress",
+  "completed",
+  "problem",
+  "rejected",
+] as const;
+export type EmployeeTaskStatusKey = (typeof EMPLOYEE_TASK_STATUS_KEYS)[number];
+
+export const WORKER_STATUS_LABELS: Record<EmployeeTaskStatusKey, string> = {
+  pending: "ממתינה",
+  in_progress: "בטיפול",
+  completed: "הושלמה",
+  problem: "בעיה",
+  rejected: "נדחתה",
+};
+
+export function taskDeadlinePassed(row: {
+  status: string;
+  taskDate: Date;
+  startTime: string;
+  dueDate?: Date | null;
+}): boolean {
+  if (row.status === "completed" || row.status === "rejected") return false;
+  if (row.dueDate) {
+    const end = new Date(row.dueDate);
+    end.setHours(23, 59, 59, 999);
+    if (Date.now() > end.getTime()) return true;
+  }
+  const sched = scheduledStartMs(row.taskDate, row.startTime);
+  return row.status === "pending" && Date.now() > sched;
+}
+
+export function effectiveTaskStatus(row: {
+  status: string;
+  taskDate: Date;
+  startTime: string;
+  dueDate?: Date | null;
+}): TaskEffectiveStatus {
   if (row.status === "completed") return "completed";
-  if (new Date(row.dueAt).getTime() < Date.now()) return "overdue";
+  if (row.status === "problem") return "problem";
+  if (row.status === "rejected") return "rejected";
   if (row.status === "in_progress") return "in_progress";
+  if (taskDeadlinePassed(row)) return "overdue";
   return "pending";
 }
 
-/** האם הסימון "הושלם בזמן" — יחסית ליעד */
+/** התחלה בזמן לעומת השעה המתוזמנת */
 export function completionQuality(
   completedAt: Date | null,
-  dueAt: Date,
+  startedAt: Date | null,
+  taskDate: Date,
+  startTime: string,
 ): "on_time" | "late" | null {
-  if (!completedAt) return null;
-  return completedAt.getTime() <= new Date(dueAt).getTime() ? "on_time" : "late";
+  if (!completedAt || !startedAt) return null;
+  const sched = scheduledStartMs(taskDate, startTime);
+  return startedAt.getTime() <= sched ? "on_time" : "late";
 }
 
 /** תומך גם בערכים ישנים מהמסד (medium, low) */
@@ -42,6 +94,8 @@ export const STATUS_LABELS: Record<TaskEffectiveStatus, string> = {
   in_progress: "בטיפול",
   completed: "הושלמה",
   overdue: "באיחור",
+  problem: "בעיה",
+  rejected: "נדחתה",
 };
 
 /** משך טיפול במילישניות */

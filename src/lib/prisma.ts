@@ -20,7 +20,7 @@ export type EmployeeTaskOrm = {
   update: (args: unknown) => Promise<unknown>;
   delete: (args: unknown) => Promise<unknown>;
   count: (args: unknown) => Promise<number>;
-  groupBy: (args: unknown) => Promise<{ employeeId: string; _count: { _all: number } }[]>;
+  groupBy: (args: unknown) => Promise<{ assigneeId: string; _count: { _all: number } }[]>;
 };
 
 /** delegate למודל EmployeeTask — קיים בלקוח אחרי `npx prisma generate` + `db push` */

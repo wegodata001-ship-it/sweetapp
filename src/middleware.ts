@@ -45,20 +45,47 @@ export async function middleware(request: NextRequest) {
   const role = session.role as UserRole;
   const permSet = new Set(session.permissions);
 
+  const canAccessMyTasksPage =
+    role === "SUPER_ADMIN" ||
+    role === "EMPLOYEE" ||
+    permSet.has("employee_clock") ||
+    permSet.has("tasks");
+
   if (pathname.startsWith("/api/")) {
     const apiUrl = request.nextUrl;
+    if (pathname === "/api/tasks/my" && request.method === "GET" && canAccessMyTasksPage) {
+      return NextResponse.next();
+    }
+    if (
+      /^\/api\/tasks\/[^/]+$/.test(pathname) &&
+      request.method === "PATCH" &&
+      canAccessMyTasksPage
+    ) {
+      return NextResponse.next();
+    }
     if (
       pathname === "/api/tasks" &&
       apiUrl.searchParams.get("scope") === "worker" &&
       request.method === "GET" &&
-      (role === "SUPER_ADMIN" || permSet.has("employee_clock"))
+      (role === "SUPER_ADMIN" || permSet.has("employee_clock") || role === "EMPLOYEE")
     ) {
       return NextResponse.next();
     }
     if (
       /^\/api\/tasks\/[^/]+\/(start|complete)$/.test(pathname) &&
       request.method === "POST" &&
-      (role === "SUPER_ADMIN" || permSet.has("employee_clock") || permSet.has("tasks"))
+      (role === "SUPER_ADMIN" ||
+        permSet.has("employee_clock") ||
+        permSet.has("tasks") ||
+        role === "EMPLOYEE")
+    ) {
+      return NextResponse.next();
+    }
+    if (
+      pathname === "/api/employees" &&
+      request.method === "GET" &&
+      apiUrl.searchParams.get("forTasks") === "1" &&
+      (role === "SUPER_ADMIN" || permSet.has("tasks"))
     ) {
       return NextResponse.next();
     }
@@ -79,6 +106,13 @@ export async function middleware(request: NextRequest) {
     }
     if (rule && rule !== "SUPER_ADMIN_ONLY" && role !== "SUPER_ADMIN" && !permSet.has(rule)) {
       return NextResponse.json({ ok: false, error: "אין הרשאה" }, { status: 403 });
+    }
+    return NextResponse.next();
+  }
+
+  if (pathname === "/employee/tasks" || pathname.startsWith("/employee/tasks/")) {
+    if (!canAccessMyTasksPage) {
+      return NextResponse.redirect(new URL("/", request.url));
     }
     return NextResponse.next();
   }

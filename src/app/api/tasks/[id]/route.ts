@@ -1,39 +1,99 @@
 import { NextRequest, NextResponse } from "next/server";
+import { UserRole } from "@prisma/client";
 import { prisma, getEmployeeTaskOrm } from "@/lib/prisma";
 import { requireDb } from "@/lib/api-route";
 import { getSessionFromCookie } from "@/lib/auth/get-session";
 import { canManageAllTasks } from "@/lib/tasks/task-access";
-import { PRIORITY_KEYS, type TaskPriorityKey } from "@/lib/tasks/helpers";
+import {
+  EMPLOYEE_TASK_STATUS_KEYS,
+  PRIORITY_KEYS,
+  type TaskPriorityKey,
+} from "@/lib/tasks/helpers";
+import { parseTaskDateInput } from "@/lib/tasks/schedule";
 import { serializeEmployeeTask } from "@/lib/tasks/serialize-task";
+
+const ASSIGNEE_SELECT = { id: true, fullName: true, email: true, role: true } as const;
+
+function normStart(t: string): string | null {
+  const s = t.trim();
+  const m = /^(\d{1,2}):(\d{2})$/.exec(s);
+  if (!m) return null;
+  const hh = Math.min(23, Math.max(0, parseInt(m[1], 10)));
+  const mm = Math.min(59, Math.max(0, parseInt(m[2], 10)));
+  return `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
+}
 
 export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const block = await requireDb();
   if (block) return block;
   const session = await getSessionFromCookie();
-  if (!session || !canManageAllTasks(session)) {
-    return NextResponse.json({ ok: false, error: "אין הרשאה" }, { status: 403 });
+  if (!session?.sub) {
+    return NextResponse.json({ ok: false, error: "נדרשת התחברות" }, { status: 401 });
   }
 
   const { id } = await ctx.params;
   try {
     const body = (await req.json()) as {
       title?: string | null;
-      description?: string;
+      description?: string | null;
       priority?: string;
       status?: string;
-      dueAt?: string | null;
+      taskDate?: string | null;
+      startTime?: string | null;
+      dueDate?: string | null;
+      assigneeId?: string;
       employeeId?: string;
       mark_complete?: boolean;
+      employeeNote?: string | null;
     };
 
     const et = getEmployeeTaskOrm();
     const existing = (await et.findUnique({
       where: { id },
-      include: { employee: { select: { id: true, name: true, role: true, department: true } } },
+      include: { assignee: { select: ASSIGNEE_SELECT } },
     })) as Parameters<typeof serializeEmployeeTask>[0] | null;
     if (!existing) return NextResponse.json({ ok: false, error: "לא נמצא" }, { status: 404 });
 
+    const isManager = canManageAllTasks(session);
+    const isAssignee = session.sub === existing.assigneeId;
+    if (!isManager && !isAssignee) {
+      return NextResponse.json({ ok: false, error: "אין הרשאה" }, { status: 403 });
+    }
+
     const data: Record<string, unknown> = {};
+
+    if (isAssignee && !isManager) {
+      if (body.employeeNote !== undefined) {
+        data.employeeNote = body.employeeNote?.trim() || null;
+      }
+      if (body.status !== undefined) {
+        const st = body.status as string;
+        if (!EMPLOYEE_TASK_STATUS_KEYS.includes(st as (typeof EMPLOYEE_TASK_STATUS_KEYS)[number])) {
+          return NextResponse.json({ ok: false, error: "סטטוס לא חוקי" }, { status: 400 });
+        }
+        data.status = st;
+        if (st === "completed") {
+          data.completedAt = new Date();
+          if (!existing.startedAt) data.startedAt = new Date();
+        } else {
+          data.completedAt = null;
+          if (st === "pending") {
+            data.startedAt = null;
+          } else if (st === "in_progress" && !existing.startedAt) {
+            data.startedAt = new Date();
+          }
+        }
+      }
+      if (Object.keys(data).length === 0) {
+        return NextResponse.json({ ok: false, error: "אין שדות לעדכון" }, { status: 400 });
+      }
+      const updated = (await et.update({
+        where: { id },
+        data,
+        include: { assignee: { select: ASSIGNEE_SELECT } },
+      })) as Parameters<typeof serializeEmployeeTask>[0];
+      return NextResponse.json({ ok: true, data: serializeEmployeeTask(updated) });
+    }
 
     if (body.title !== undefined) {
       const t = body.title?.trim() ?? "";
@@ -42,18 +102,45 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
       }
       data.title = t;
     }
-    if (body.description !== undefined) data.description = body.description.trim();
+    if (body.description !== undefined) data.description = body.description?.trim() || null;
+    if (body.employeeNote !== undefined) data.employeeNote = body.employeeNote?.trim() || null;
     if (body.priority !== undefined && PRIORITY_KEYS.includes(body.priority as TaskPriorityKey)) {
       data.priority = body.priority;
     }
-    if (body.dueAt !== undefined && body.dueAt !== null) {
-      const d = new Date(body.dueAt);
-      if (Number.isFinite(d.getTime())) data.dueAt = d;
+    if (body.taskDate !== undefined && body.taskDate !== null) {
+      const td = parseTaskDateInput(body.taskDate);
+      if (!Number.isFinite(td.getTime())) {
+        return NextResponse.json({ ok: false, error: "תאריך לא תקין" }, { status: 400 });
+      }
+      data.taskDate = td;
     }
-    if (body.employeeId !== undefined) {
-      const emp = await prisma.employee.findUnique({ where: { id: body.employeeId } });
-      if (!emp) return NextResponse.json({ ok: false, error: "עובד לא נמצא" }, { status: 400 });
-      data.employeeId = emp.id;
+    if (body.startTime !== undefined && body.startTime !== null) {
+      const st = normStart(body.startTime);
+      if (!st) return NextResponse.json({ ok: false, error: "שעת התחלה לא תקינה" }, { status: 400 });
+      data.startTime = st;
+    }
+    if (body.dueDate !== undefined) {
+      if (body.dueDate === null || body.dueDate === "") {
+        data.dueDate = null;
+      } else {
+        const d = new Date(body.dueDate.trim());
+        if (!Number.isFinite(d.getTime())) {
+          return NextResponse.json({ ok: false, error: "תאריך יעד לא תקין" }, { status: 400 });
+        }
+        data.dueDate = d;
+      }
+    }
+    const newAssignee = body.assigneeId ?? body.employeeId;
+    if (newAssignee !== undefined) {
+      const u = await prisma.user.findFirst({
+        where: {
+          id: newAssignee,
+          role: UserRole.EMPLOYEE,
+          isActive: true,
+        },
+      });
+      if (!u) return NextResponse.json({ ok: false, error: "משתמש לא נמצא או אינו עובד פעיל" }, { status: 400 });
+      data.assigneeId = u.id;
     }
 
     const wantComplete = body.mark_complete === true || body.status === "completed";
@@ -73,12 +160,18 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
       if (!existing.startedAt) {
         data.startedAt = new Date();
       }
+    } else if (
+      body.status === "problem" ||
+      body.status === "rejected"
+    ) {
+      data.status = body.status;
+      data.completedAt = null;
     }
 
     const updated = (await et.update({
       where: { id },
       data,
-      include: { employee: { select: { id: true, name: true, role: true, department: true } } },
+      include: { assignee: { select: ASSIGNEE_SELECT } },
     })) as Parameters<typeof serializeEmployeeTask>[0];
 
     return NextResponse.json({ ok: true, data: serializeEmployeeTask(updated) });

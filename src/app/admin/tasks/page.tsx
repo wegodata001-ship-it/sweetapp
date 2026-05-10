@@ -3,7 +3,6 @@
 import {
   AlertTriangle,
   Check,
-  ChevronDown,
   ClipboardList,
   Clock3,
   Filter,
@@ -16,23 +15,28 @@ import {
   Table,
   Trash2,
   UserRound,
+  Users,
 } from "lucide-react";
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  EMPLOYEE_TASK_STATUS_KEYS,
   MANAGER_TASK_PRIORITIES,
   PRIORITY_LABELS,
   STATUS_LABELS,
+  WORKER_STATUS_LABELS,
   priorityLabel,
   type TaskEffectiveStatus,
 } from "@/lib/tasks/helpers";
+import { formatDateInputLocal } from "@/lib/tasks/schedule";
 import type { SerializedEmployeeTask } from "@/lib/tasks/serialize-task";
 
-type Assignee = {
+/** משתמשי EMPLOYEE פעילים — מקור: User, לא Employee */
+type TaskAssigneeUser = {
   id: string;
-  name: string;
-  role: string | null;
-  department: string | null;
+  fullName: string;
+  email: string;
+  role: string;
 };
 
 type TaskStats = {
@@ -46,6 +50,8 @@ type TaskStats = {
     completed: number;
     overdue: number;
     urgent_open: number;
+    completed_today?: number;
+    top_busy?: { employee_id: string; name: string; open_count: number } | null;
   };
 };
 
@@ -80,19 +86,21 @@ function deptDotClass(dept: string | null) {
   return DEPT_DOT[dept];
 }
 
-function formatDue(iso: string) {
+function formatTaskDay(iso: string) {
   try {
-    const d = new Date(iso);
-    return d.toLocaleString("he-IL", {
+    return new Date(iso).toLocaleDateString("he-IL", {
+      weekday: "short",
       day: "2-digit",
       month: "2-digit",
       year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
     });
   } catch {
     return iso;
   }
+}
+
+function scheduledLabel(task: TaskRow) {
+  return `${formatTaskDay(task.task_date)} · ${task.start_time}`;
 }
 
 function formatClock(iso: string | null) {
@@ -123,25 +131,21 @@ function formatDuration(ms: number | null) {
   return `${m} דק׳`;
 }
 
-/** יחידת זמן שנותר או כמה זמן עבר מאז היעד */
-function formatRemainOrLate(dueIso: string, status: string) {
-  if (status === "completed") return { overdue: false as const, text: "—" };
-  const dueMs = new Date(dueIso).getTime();
-  const left = dueMs - Date.now();
-  if (left <= 0) {
+/** עד שעת ההתחלה המתוזמנת — או באיחור אם ממתינה וכבר עברה השעה */
+function formatRemainOrLateTask(task: TaskRow) {
+  if (task.status === "completed") return { overdue: false as const, text: "—" };
+  const schedMs = task.scheduled_start_ms;
+  const now = Date.now();
+  if (task.status === "pending" && now > schedMs) {
     return {
       overdue: true as const,
-      text: `⚠ עבר לפני ${formatRemain(Math.abs(left))}`,
+      text: `⚠ באיחור · עבר לפני ${formatRemain(now - schedMs)}`,
     };
   }
-  return { overdue: false as const, text: formatRemain(left) };
-}
-
-function combineDueAtIso(dateStr: string, timeStr: string): string | null {
-  if (!dateStr?.trim() || !timeStr?.trim()) return null;
-  const combined = `${dateStr.trim()}T${timeStr.trim()}`;
-  const d = new Date(combined);
-  return Number.isFinite(d.getTime()) ? d.toISOString() : null;
+  if (task.status === "pending") {
+    return { overdue: false as const, text: formatRemain(schedMs - now) };
+  }
+  return { overdue: false as const, text: "—" };
 }
 
 function employeeInitials(name: string) {
@@ -158,23 +162,25 @@ function cardShell(eff: TaskEffectiveStatus, urgentGlow: boolean) {
   }
   if (eff === "overdue") return `${base} border-rose-400 ring-2 ring-rose-300/50`;
   if (eff === "completed") return `${base} border-emerald-300 bg-emerald-50/25`;
+  if (eff === "problem") return `${base} border-rose-500 bg-rose-50/20`;
+  if (eff === "rejected") return `${base} border-slate-400 bg-slate-100/40`;
   if (eff === "in_progress") return `${base} border-blue-400 bg-blue-50/30`;
   return `${base} border-slate-200 bg-slate-50/40`;
 }
 
 export default function AdminTasksPage() {
-  const [assignees, setAssignees] = useState<Assignee[]>([]);
-  const [assigneesError, setAssigneesError] = useState<string | null>(null);
+  const [employees, setEmployees] = useState<TaskAssigneeUser[]>([]);
+  const [employeesError, setEmployeesError] = useState<string | null>(null);
   const [tasks, setTasks] = useState<TaskRow[]>([]);
   const [stats, setStats] = useState<TaskStats | null>(null);
-  const [metaEmployeeId, setMetaEmployeeId] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  const [employeeId, setEmployeeId] = useState("");
+  const [selectedAssigneeIds, setSelectedAssigneeIds] = useState<string[]>([]);
   const [taskTitle, setTaskTitle] = useState("");
   const [taskDescription, setTaskDescription] = useState("");
-  const [dueDate, setDueDate] = useState("");
-  const [dueTime, setDueTime] = useState("12:00");
+  const [taskDateField, setTaskDateField] = useState("");
+  const [scheduledStartTime, setScheduledStartTime] = useState("08:00");
+  const [taskDueDate, setTaskDueDate] = useState("");
   const [priority, setPriority] = useState<(typeof MANAGER_TASK_PRIORITIES)[number]>("normal");
   const [createSuccess, setCreateSuccess] = useState(false);
   const [timeTick, setTimeTick] = useState(0);
@@ -182,44 +188,54 @@ export default function AdminTasksPage() {
   const [tab, setTab] = useState<(typeof TAB_OPTIONS)[number]["id"]>("all");
   const [filterQ, setFilterQ] = useState("");
   const [debouncedQ, setDebouncedQ] = useState("");
-  const [filterEmployee, setFilterEmployee] = useState("");
+  const [filterAssignee, setFilterAssignee] = useState("");
   const [filterPriority, setFilterPriority] = useState("");
-  const [filterDepartment, setFilterDepartment] = useState("");
   const [filterDateFrom, setFilterDateFrom] = useState("");
   const [filterDateTo, setFilterDateTo] = useState("");
+  const [filterStatus, setFilterStatus] = useState("");
+  const [onlyOverdue, setOnlyOverdue] = useState(false);
+  const [onlyOpen, setOnlyOpen] = useState(false);
   const [viewMode, setViewMode] = useState<"cards" | "table">("cards");
 
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [groupModalId, setGroupModalId] = useState<string | null>(null);
+
+  const { groupEntries, soloTasks } = useMemo(() => {
+    const g = new Map<string, TaskRow[]>();
+    const solo: TaskRow[] = [];
+    for (const t of tasks) {
+      if (t.group_id) {
+        if (!g.has(t.group_id)) g.set(t.group_id, []);
+        g.get(t.group_id)!.push(t);
+      } else solo.push(t);
+    }
+    for (const arr of g.values()) {
+      arr.sort((a, b) => a.assignee.fullName.localeCompare(b.assignee.fullName, "he"));
+    }
+    return { groupEntries: [...g.entries()], soloTasks: solo };
+  }, [tasks]);
 
   useEffect(() => {
     const t = window.setTimeout(() => setDebouncedQ(filterQ), 380);
     return () => window.clearTimeout(t);
   }, [filterQ]);
 
-  const departmentOptions = useMemo(() => {
-    const s = new Set<string>();
-    for (const a of assignees) {
-      if (a.department?.trim()) s.add(a.department.trim());
-    }
-    return [...s].sort((a, b) => a.localeCompare(b, "he"));
-  }, [assignees]);
-
-  const loadAssignees = useCallback(async () => {
-    setAssigneesError(null);
+  const loadEmployees = useCallback(async () => {
+    setEmployeesError(null);
     try {
-      const res = await fetch("/api/tasks/assignees", { credentials: "same-origin" });
+      const res = await fetch("/api/employees?forTasks=1", { credentials: "same-origin" });
       if (!res.ok) {
-        setAssignees([]);
-        setAssigneesError(
+        setEmployees([]);
+        setEmployeesError(
           res.status === 403 ? "אין הרשאה לטעון עובדים (נדרשת הרשאת משימות)." : "טעינת עובדים נכשלה.",
         );
         return;
       }
-      const j = (await res.json()) as { data?: Assignee[] };
-      setAssignees(j.data ?? []);
+      const j = (await res.json()) as { data?: TaskAssigneeUser[] };
+      setEmployees(j.data ?? []);
     } catch {
-      setAssignees([]);
-      setAssigneesError("טעינת עובדים נכשלה.");
+      setEmployees([]);
+      setEmployeesError("טעינת עובדים נכשלה.");
     }
   }, []);
 
@@ -227,13 +243,16 @@ export default function AdminTasksPage() {
     setLoadError(null);
     try {
       const params = new URLSearchParams();
-      params.set("tab", tab);
+      const useAdvFilters = Boolean(filterStatus) || onlyOverdue || onlyOpen;
+      params.set("tab", useAdvFilters ? "all" : tab);
       if (debouncedQ.trim()) params.set("q", debouncedQ.trim());
-      if (filterEmployee) params.set("employeeId", filterEmployee);
+      if (filterAssignee) params.set("assigneeId", filterAssignee);
       if (filterPriority) params.set("priority", filterPriority);
-      if (filterDepartment) params.set("department", filterDepartment);
       if (filterDateFrom) params.set("dateFrom", filterDateFrom);
       if (filterDateTo) params.set("dateTo", filterDateTo);
+      if (filterStatus) params.set("filterStatus", filterStatus);
+      if (onlyOverdue) params.set("onlyOverdue", "1");
+      if (onlyOpen) params.set("onlyOpen", "1");
 
       const res = await fetch(`/api/tasks?${params.toString()}`, { credentials: "same-origin" });
       if (res.status === 503) {
@@ -243,22 +262,28 @@ export default function AdminTasksPage() {
       const j = (await res.json()) as {
         data?: TaskRow[];
         stats?: TaskStats;
-        meta?: { user_employee_id?: string | null };
         ok?: boolean;
       };
       if (j.data) setTasks(j.data);
       if (j.stats) setStats(j.stats);
-      if (j.meta?.user_employee_id !== undefined) {
-        setMetaEmployeeId(j.meta.user_employee_id ?? null);
-      }
     } catch {
       setLoadError("טעינה נכשלה");
     }
-  }, [tab, debouncedQ, filterEmployee, filterPriority, filterDepartment, filterDateFrom, filterDateTo]);
+  }, [
+    tab,
+    debouncedQ,
+    filterAssignee,
+    filterPriority,
+    filterDateFrom,
+    filterDateTo,
+    filterStatus,
+    onlyOverdue,
+    onlyOpen,
+  ]);
 
   useEffect(() => {
-    void loadAssignees();
-  }, [loadAssignees]);
+    void loadEmployees();
+  }, [loadEmployees]);
 
   useEffect(() => {
     void loadTasks();
@@ -283,16 +308,24 @@ export default function AdminTasksPage() {
   const dash = stats?.dashboard;
 
   const submitTask = async () => {
-    const dueIso = combineDueAtIso(dueDate, dueTime);
-    if (!employeeId || !taskTitle.trim() || !taskDescription.trim() || !dueIso) return;
+    if (
+      selectedAssigneeIds.length === 0 ||
+      !taskTitle.trim() ||
+      !taskDateField.trim() ||
+      !scheduledStartTime.trim()
+    ) {
+      return;
+    }
     const res = await fetch("/api/tasks", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        employeeId,
+        assigneeIds: selectedAssigneeIds,
         title: taskTitle.trim(),
-        description: taskDescription.trim(),
-        dueAt: dueIso,
+        description: taskDescription.trim() || null,
+        taskDate: taskDateField.trim(),
+        startTime: scheduledStartTime.trim(),
+        dueDate: taskDueDate.trim() || null,
         priority,
       }),
       credentials: "same-origin",
@@ -300,12 +333,19 @@ export default function AdminTasksPage() {
     if (!res.ok) return;
     setTaskTitle("");
     setTaskDescription("");
-    setDueDate("");
-    setDueTime("12:00");
+    setTaskDateField("");
+    setScheduledStartTime("08:00");
+    setTaskDueDate("");
     setPriority("normal");
-    setEmployeeId("");
+    setSelectedAssigneeIds([]);
     setCreateSuccess(true);
     await loadTasks();
+  };
+
+  const toggleAssignee = (id: string) => {
+    setSelectedAssigneeIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
+    );
   };
 
   const patchTask = async (id: string, patch: Record<string, unknown>) => {
@@ -355,11 +395,6 @@ export default function AdminTasksPage() {
             {loadError}
           </p>
         )}
-        {tab === "mine" && !metaEmployeeId && (
-          <p className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-            לא שויך עובד לחשבון המשתמש — שאלו מנהל לשייך Worker במסך משתמשים. עד אז הטאב «שלי» ריק.
-          </p>
-        )}
       </section>
 
       <section className="app-panel p-5 md:p-6">
@@ -381,9 +416,9 @@ export default function AdminTasksPage() {
           </div>
         ) : null}
 
-        {assigneesError ? (
+        {employeesError ? (
           <p className="mt-4 text-sm font-bold text-rose-700" role="alert">
-            {assigneesError}
+            {employeesError}
           </p>
         ) : null}
 
@@ -392,28 +427,47 @@ export default function AdminTasksPage() {
             <span className={labelClass}>
               <span className="flex items-center gap-2">
                 <UserRound className="h-4 w-4 text-slate-500" aria-hidden />
-                עובד
+                עובדים (ניתן לבחור כמה)
               </span>
             </span>
-            {assignees.length === 0 && !assigneesError ? (
+            {employees.length === 0 && !employeesError ? (
               <div className="mt-2 rounded-2xl border border-dashed border-slate-300 bg-slate-50/80 p-6 text-center shadow-inner">
-                <p className="text-sm font-black text-slate-800">אין עובדים במערכת</p>
-                <p className="mt-1 text-xs text-slate-600">הוסיפו עובד בכרטסות כדי להקצות משימות.</p>
+                <p className="text-sm font-black text-slate-800">אין עובדים פעילים במערכת</p>
+                <p className="mt-1 text-xs text-slate-600">
+                  ניהול עובדים (משתמשים בתפקיד EMPLOYEE) מתבצע במסך ניהול משתמשים.
+                </p>
                 <Link
-                  href="/finance/ledgers"
-                  className="mt-4 inline-flex items-center justify-center gap-2 rounded-xl bg-luxury-navy-rich px-4 py-2.5 text-sm font-black text-white shadow-sm hover:bg-luxury-charcoal"
+                  href="/admin/users"
+                  className="mt-4 inline-flex items-center justify-center gap-2 rounded-xl border border-luxury-navy-rich/25 bg-white px-4 py-2.5 text-sm font-black text-luxury-navy-rich shadow-sm hover:bg-slate-50"
                 >
-                  <Plus className="h-4 w-4" aria-hidden />
-                  צור עובד חדש
+                  מעבר לניהול משתמשים
                 </Link>
               </div>
             ) : (
-              <div className="mt-2">
-                <EmployeeAssigneePicker
-                  assignees={assignees}
-                  value={employeeId}
-                  onChange={setEmployeeId}
-                />
+              <div className="mt-2 grid max-h-56 gap-2 overflow-y-auto rounded-2xl border border-slate-200 bg-slate-50/50 p-3">
+                {employees.map((a) => (
+                  <label
+                    key={a.id}
+                    className="flex cursor-pointer items-center gap-3 rounded-xl border border-transparent bg-white px-3 py-2.5 shadow-sm transition hover:border-luxury-gold/40"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selectedAssigneeIds.includes(a.id)}
+                      onChange={() => toggleAssignee(a.id)}
+                      className="h-4 w-4 shrink-0 rounded border-slate-300 text-luxury-navy-rich focus:ring-luxury-gold"
+                    />
+                    <span className="flex h-9 w-9 shrink-0 items-center justify-center text-lg" aria-hidden>
+                      👤
+                    </span>
+                    <span className="min-w-0 flex-1 text-right">
+                      <span className="block truncate font-black text-slate-950">{a.fullName}</span>
+                      <span className="block truncate text-xs font-semibold text-slate-500">{a.email}</span>
+                    </span>
+                    <span className="shrink-0 rounded-full bg-luxury-gold/20 px-2 py-0.5 text-[10px] font-black text-luxury-navy-rich">
+                      {a.role}
+                    </span>
+                  </label>
+                ))}
               </div>
             )}
           </div>
@@ -421,12 +475,12 @@ export default function AdminTasksPage() {
           <label className={labelClass}>
             <span className="flex items-center gap-2">
               <span aria-hidden>📅</span>
-              תאריך יעד
+              תאריך משימה
             </span>
             <input
               type="date"
-              value={dueDate}
-              onChange={(e) => setDueDate(e.target.value)}
+              value={taskDateField}
+              onChange={(e) => setTaskDateField(e.target.value)}
               className={inputClass}
             />
           </label>
@@ -434,12 +488,25 @@ export default function AdminTasksPage() {
           <label className={labelClass}>
             <span className="flex items-center gap-2">
               <Clock3 className="h-4 w-4 text-slate-500" aria-hidden />
-              שעת יעד
+              שעת התחלה (מתוזמנת)
             </span>
             <input
               type="time"
-              value={dueTime}
-              onChange={(e) => setDueTime(e.target.value)}
+              value={scheduledStartTime}
+              onChange={(e) => setScheduledStartTime(e.target.value)}
+              className={inputClass}
+            />
+          </label>
+
+          <label className={labelClass}>
+            <span className="flex items-center gap-2">
+              <span aria-hidden>🎯</span>
+              יעד (אופציונלי)
+            </span>
+            <input
+              type="date"
+              value={taskDueDate}
+              onChange={(e) => setTaskDueDate(e.target.value)}
               className={inputClass}
             />
           </label>
@@ -472,7 +539,7 @@ export default function AdminTasksPage() {
           </label>
 
           <label className="md:col-span-2">
-            <span className={labelClass}>תיאור משימה *</span>
+            <span className={labelClass}>תיאור משימה</span>
             <textarea
               value={taskDescription}
               onChange={(e) => setTaskDescription(e.target.value)}
@@ -487,7 +554,7 @@ export default function AdminTasksPage() {
           <button
             type="button"
             onClick={() => void submitTask()}
-            disabled={assignees.length === 0}
+            disabled={employees.length === 0 || selectedAssigneeIds.length === 0}
             className="inline-flex items-center justify-center gap-2 rounded-xl bg-luxury-gold px-5 py-3 text-sm font-black text-luxury-charcoal shadow-luxury-sm hover:bg-luxury-gold-hover disabled:pointer-events-none disabled:opacity-50"
           >
             <SendMini />
@@ -497,20 +564,35 @@ export default function AdminTasksPage() {
       </section>
 
       {dash ? (
-        <section className="grid grid-cols-2 gap-3 md:grid-cols-5">
+        <section className="grid grid-cols-2 gap-3 md:grid-cols-4 lg:grid-cols-7">
           {[
             { k: "total", label: "סה״כ משימות", value: dash.total, tone: "bg-slate-100 text-slate-900 border-slate-200" },
             { k: "in_progress", label: "בטיפול", value: dash.in_progress, tone: "bg-blue-50 text-blue-950 border-blue-200" },
             { k: "completed", label: "הושלמו", value: dash.completed, tone: "bg-emerald-50 text-emerald-950 border-emerald-200" },
             { k: "overdue", label: "באיחור", value: dash.overdue, tone: "bg-rose-50 text-rose-950 border-rose-200" },
             { k: "urgent_open", label: "דחופות פתוחות", value: dash.urgent_open, tone: "bg-orange-50 text-orange-950 border-orange-300" },
+            {
+              k: "completed_today",
+              label: "הושלמו היום",
+              value: dash.completed_today ?? 0,
+              tone: "bg-teal-50 text-teal-950 border-teal-200",
+            },
+            {
+              k: "top_busy",
+              label: "עמוס ביותר",
+              value: dash.top_busy?.name
+                ? `${dash.top_busy.name} (${dash.top_busy.open_count})`
+                : "—",
+              tone: "bg-violet-50 text-violet-950 border-violet-200",
+              wide: true,
+            },
           ].map((c) => (
             <div
               key={c.k}
-              className={`rounded-2xl border px-4 py-3 shadow-sm ${c.tone}`}
+              className={`rounded-2xl border px-4 py-3 shadow-sm ${c.tone} ${"wide" in c && c.wide ? "col-span-2 lg:col-span-1" : ""}`}
             >
               <p className="text-[11px] font-bold opacity-80">{c.label}</p>
-              <p className="mt-1 text-2xl font-black tabular-nums">{c.value}</p>
+              <p className="mt-1 text-xl font-black tabular-nums md:text-2xl">{c.value}</p>
             </div>
           ))}
         </section>
@@ -590,7 +672,7 @@ export default function AdminTasksPage() {
           ))}
         </div>
 
-        <div className="mt-4 grid gap-3 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+        <div className="mt-4 grid gap-3 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
           <label className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 xl:col-span-2">
             <Search className="h-4 w-4 shrink-0 text-slate-400" aria-hidden />
             <input
@@ -601,26 +683,14 @@ export default function AdminTasksPage() {
             />
           </label>
           <select
-            value={filterEmployee}
-            onChange={(e) => setFilterEmployee(e.target.value)}
+            value={filterAssignee}
+            onChange={(e) => setFilterAssignee(e.target.value)}
             className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-slate-900"
           >
             <option value="">כל העובדים</option>
-            {assignees.map((a) => (
+            {employees.map((a) => (
               <option key={a.id} value={a.id}>
-                {a.name}
-              </option>
-            ))}
-          </select>
-          <select
-            value={filterDepartment}
-            onChange={(e) => setFilterDepartment(e.target.value)}
-            className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-slate-900"
-          >
-            <option value="">כל המחלקות</option>
-            {departmentOptions.map((d) => (
-              <option key={d} value={d}>
-                {d}
+                {a.fullName}
               </option>
             ))}
           </select>
@@ -651,6 +721,38 @@ export default function AdminTasksPage() {
             />
           </div>
         </div>
+        <div className="mt-3 flex flex-wrap items-center gap-3 rounded-xl border border-slate-100 bg-slate-50/80 px-3 py-3">
+          <select
+            value={filterStatus}
+            onChange={(e) => setFilterStatus(e.target.value)}
+            className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-slate-900"
+          >
+            <option value="">כל הסטטוסים</option>
+            {EMPLOYEE_TASK_STATUS_KEYS.map((k) => (
+              <option key={k} value={k}>
+                {WORKER_STATUS_LABELS[k]}
+              </option>
+            ))}
+          </select>
+          <label className="flex cursor-pointer items-center gap-2 text-sm font-bold text-slate-800">
+            <input
+              type="checkbox"
+              checked={onlyOpen}
+              onChange={(e) => setOnlyOpen(e.target.checked)}
+              className="h-4 w-4 rounded border-slate-300"
+            />
+            רק פתוחות
+          </label>
+          <label className="flex cursor-pointer items-center gap-2 text-sm font-bold text-slate-800">
+            <input
+              type="checkbox"
+              checked={onlyOverdue}
+              onChange={(e) => setOnlyOverdue(e.target.checked)}
+              className="h-4 w-4 rounded border-slate-300"
+            />
+            רק באיחור
+          </label>
+        </div>
         <div className="mt-2 flex justify-end">
           <button
             type="button"
@@ -675,13 +777,85 @@ export default function AdminTasksPage() {
             </div>
           ) : viewMode === "cards" ? (
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-              {tasks.map((task) => {
+              {groupEntries.map(([gid, members]) => {
+                const head = members[0]!;
+                void timeTick;
+                const eff = head.effective_status as TaskEffectiveStatus;
+                const urgentOpen = head.priority === "urgent" && members.some((m) => m.status !== "completed");
+                const overdueUi = members.some((m) => m.deadline_passed);
+                const pr = PRIORITY_STYLES[head.priority] ?? PRIORITY_STYLES.normal;
+                return (
+                  <article key={gid} className={`${cardShell(eff, urgentOpen)} min-h-[320px]`}>
+                    {urgentOpen ? (
+                      <div className="absolute end-3 top-3 flex items-center gap-1 rounded-full bg-red-600 px-2 py-0.5 text-[10px] font-black uppercase text-white shadow-md shadow-red-500/30">
+                        <Flame className="h-3 w-3" aria-hidden />
+                        דחופה
+                      </div>
+                    ) : null}
+                    {overdueUi ? (
+                      <div
+                        className={`absolute flex items-center gap-1 rounded-full bg-rose-600 px-2 py-0.5 text-[10px] font-black uppercase text-white shadow-md ${
+                          urgentOpen ? "end-3 top-12" : "end-3 top-3"
+                        }`}
+                      >
+                        <AlertTriangle className="h-3 w-3" aria-hidden />
+                        באיחור
+                      </div>
+                    ) : null}
+                    <div className="flex items-start gap-3">
+                      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-luxury-navy-rich/10 text-luxury-navy-rich">
+                        <Users className="h-5 w-5" aria-hidden />
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-xs font-black uppercase tracking-wide text-slate-500">משימה קבוצתית</p>
+                        <p className="mt-0.5 text-base font-black leading-snug text-luxury-navy-rich">{head.title}</p>
+                        <p className="mt-1 inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-black text-slate-800">
+                          👥 {members.length} עובדים
+                        </p>
+                      </div>
+                    </div>
+                    <p className="mt-3 line-clamp-3 text-sm leading-snug text-slate-600">{head.description}</p>
+                    <p className="mt-2 text-xs font-semibold text-slate-600">
+                      <Clock3 className="me-1 inline h-3.5 w-3.5 text-luxury-navy-rich" aria-hidden />
+                      שעת התחלה מתוזמנת:{" "}
+                      <span className="font-black text-slate-900">{scheduledLabel(head)}</span>
+                    </p>
+                    <div className="mt-3 flex flex-wrap gap-1.5">
+                      {members.map((m) => (
+                        <span
+                          key={m.id}
+                          className="inline-flex max-w-full items-center gap-1 truncate rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-bold text-slate-800"
+                          title={`${m.employee.name} — ${STATUS_LABELS[m.effective_status as TaskEffectiveStatus]}`}
+                        >
+                          {m.employee.name} — {STATUS_LABELS[m.effective_status as TaskEffectiveStatus]}
+                        </span>
+                      ))}
+                    </div>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <span className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-black ${pr}`}>
+                        <Sparkles className="h-3 w-3" aria-hidden />
+                        {priorityLabel(head.priority)}
+                      </span>
+                    </div>
+                    <div className="mt-auto flex flex-wrap gap-2 border-t border-slate-100 pt-3">
+                      <button
+                        type="button"
+                        onClick={() => setGroupModalId(gid)}
+                        className="inline-flex flex-1 items-center justify-center gap-2 rounded-lg bg-luxury-navy-rich px-3 py-2 text-xs font-black text-white hover:bg-luxury-charcoal"
+                      >
+                        פרטי עובדים
+                      </button>
+                    </div>
+                  </article>
+                );
+              })}
+              {soloTasks.map((task) => {
                 void timeTick;
                 const eff = task.effective_status as TaskEffectiveStatus;
-                const overdueUi = eff === "overdue";
+                const overdueUi = task.deadline_passed || eff === "overdue";
                 const urgentOpen = task.priority === "urgent" && task.status !== "completed";
                 const pr = PRIORITY_STYLES[task.priority] ?? PRIORITY_STYLES.normal;
-                const remainLine = formatRemainOrLate(task.due_at, task.status);
+                const remainLine = formatRemainOrLateTask(task);
 
                 return (
                   <article key={task.id} className={cardShell(eff, urgentOpen)}>
@@ -718,9 +892,7 @@ export default function AdminTasksPage() {
                           {task.employee.department ? (
                             <p className="truncate text-xs font-bold text-slate-500">{task.employee.department}</p>
                           ) : null}
-                          <p className="mt-1 text-base font-black leading-snug text-luxury-navy-rich">
-                            {task.title ?? "—"}
-                          </p>
+                          <p className="mt-1 text-base font-black leading-snug text-luxury-navy-rich">{task.title}</p>
                         </div>
                       </div>
                     </div>
@@ -729,15 +901,16 @@ export default function AdminTasksPage() {
                     <div className="mt-3 space-y-2 text-xs font-semibold text-slate-600">
                       <p className="flex items-center gap-1.5">
                         <Clock3 className="h-3.5 w-3.5 shrink-0 text-luxury-navy-rich" aria-hidden />
-                        זמן יעד: <span className="font-black text-slate-900">{formatDue(task.due_at)}</span>
+                        שעת התחלה מתוזמנת:{" "}
+                        <span className="font-black text-slate-900">{scheduledLabel(task)}</span>
                       </p>
                       {task.status !== "completed" ? (
                         <p className={remainLine.overdue ? "font-black text-rose-700" : "text-slate-600"}>
-                          זמן שנותר: <span className="tabular-nums">{remainLine.text}</span>
+                          מצב זמן: <span className="tabular-nums">{remainLine.text}</span>
                         </p>
                       ) : (
                         <p className="text-emerald-800">
-                          זמן טיפול:{" "}
+                          זמן עבודה בפועל:{" "}
                           <span className="font-black">{formatDuration(task.handling_duration_ms)}</span>
                         </p>
                       )}
@@ -770,7 +943,7 @@ export default function AdminTasksPage() {
                           }`}
                         >
                           <Check className="h-3 w-3" aria-hidden />
-                          {task.completion_quality === "on_time" ? "הושלם בזמן" : "הושלם באיחור"}
+                          {task.completion_quality === "on_time" ? "התחלה בזמן" : "התחלה באיחור"}
                         </span>
                       ) : null}
                     </div>
@@ -813,15 +986,15 @@ export default function AdminTasksPage() {
                     <th className="px-3 py-3">כותרת</th>
                     <th className="px-3 py-3">עדיפות</th>
                     <th className="px-3 py-3">סטטוס</th>
-                    <th className="px-3 py-3">זמן יעד</th>
-                    <th className="px-3 py-3">זמן שנותר</th>
+                    <th className="px-3 py-3">תאריך ושעת התחלה</th>
+                    <th className="px-3 py-3">מצב זמן</th>
                   </tr>
                 </thead>
                 <tbody>
                   {tasks.map((task) => {
                     void timeTick;
                     const eff = task.effective_status as TaskEffectiveStatus;
-                    const remainLine = formatRemainOrLate(task.due_at, task.status);
+                    const remainLine = formatRemainOrLateTask(task);
                     return (
                       <tr key={task.id} className="border-b border-slate-100 hover:bg-slate-50/80">
                         <td className="px-3 py-2.5 font-bold text-slate-900">
@@ -851,7 +1024,7 @@ export default function AdminTasksPage() {
                             {STATUS_LABELS[eff]}
                           </span>
                         </td>
-                        <td className="px-3 py-2.5 tabular-nums text-slate-700">{formatDue(task.due_at)}</td>
+                        <td className="px-3 py-2.5 text-slate-700">{scheduledLabel(task)}</td>
                         <td
                           className={`px-3 py-2.5 text-xs font-bold tabular-nums ${
                             remainLine.overdue ? "text-rose-700" : "text-slate-700"
@@ -868,131 +1041,85 @@ export default function AdminTasksPage() {
           )}
         </div>
       </section>
-    </div>
-  );
-}
 
-function splitLocalDateTime(iso: string) {
-  const d = new Date(iso);
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return {
-    date: `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`,
-    time: `${pad(d.getHours())}:${pad(d.getMinutes())}`,
-  };
-}
-
-function EmployeeAssigneePicker({
-  assignees,
-  value,
-  onChange,
-}: {
-  assignees: Assignee[];
-  value: string;
-  onChange: (id: string) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const [search, setSearch] = useState("");
-  const rootRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    function handleDoc(e: MouseEvent) {
-      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
-    }
-    document.addEventListener("mousedown", handleDoc);
-    return () => document.removeEventListener("mousedown", handleDoc);
-  }, []);
-
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) return assignees;
-    return assignees.filter(
-      (a) =>
-        a.name.toLowerCase().includes(q) ||
-        (a.role ?? "").toLowerCase().includes(q) ||
-        (a.department ?? "").toLowerCase().includes(q),
-    );
-  }, [assignees, search]);
-
-  const selected = assignees.find((a) => a.id === value);
-
-  return (
-    <div className="relative" ref={rootRef}>
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        className="flex w-full items-center justify-between gap-3 rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-right shadow-sm outline-none transition hover:border-luxury-gold focus:border-luxury-gold focus:ring-2 focus:ring-luxury-gold/25"
-      >
-        {selected ? (
-          <span className="flex min-w-0 flex-1 items-center gap-3">
-            <span
-              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-gradient-to-br from-luxury-navy-rich/12 to-slate-50 text-xs font-black text-luxury-navy-rich"
-              aria-hidden
-            >
-              {employeeInitials(selected.name)}
-            </span>
-            <span className="min-w-0 flex-1 text-right">
-              <span className="block truncate font-black text-slate-950">👤 {selected.name}</span>
-              <span className="mt-0.5 block truncate text-xs font-semibold text-slate-500">
-                {selected.department ?? "ללא מחלקה"}
-              </span>
-            </span>
-            {selected.role ? (
-              <span className="shrink-0 rounded-full border border-luxury-gold/40 bg-luxury-gold/15 px-2 py-0.5 text-[10px] font-black text-luxury-navy-rich">
-                {selected.role}
-              </span>
-            ) : null}
-          </span>
-        ) : (
-          <span className="text-sm font-semibold text-slate-400">בחרו עובד מהרשימה</span>
-        )}
-        <ChevronDown className={`h-4 w-4 shrink-0 text-slate-500 transition ${open ? "rotate-180" : ""}`} aria-hidden />
-      </button>
-
-      {open ? (
-        <div className="absolute start-0 top-[calc(100%+6px)] z-50 w-full overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl ring-1 ring-black/5">
-          <div className="border-b border-slate-100 p-2">
-            <input
-              type="search"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-900 outline-none focus:border-luxury-gold"
-              placeholder="חיפוש עובד…"
-              autoFocus
-            />
+      {groupModalId ? (
+        <div
+          className="fixed inset-0 z-[130] flex items-center justify-center bg-black/50 p-4"
+          onClick={() => setGroupModalId(null)}
+          role="presentation"
+        >
+          <div
+            className="max-h-[88vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl ring-1 ring-black/10"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between gap-3 border-b border-slate-100 pb-3">
+              <h3 className="text-lg font-black text-slate-950">פרטי משימה קבוצתית</h3>
+              <button
+                type="button"
+                className="rounded-lg px-3 py-1.5 text-xs font-bold text-slate-600 hover:bg-slate-100"
+                onClick={() => setGroupModalId(null)}
+              >
+                סגירה
+              </button>
+            </div>
+            <ul className="mt-4 space-y-4">
+              {tasks
+                .filter((t) => t.group_id === groupModalId)
+                .map((task) => {
+                  const eff = task.effective_status as TaskEffectiveStatus;
+                  return (
+                    <li key={task.id} className="rounded-xl border border-slate-200 bg-slate-50/60 p-4">
+                      <div className="flex flex-wrap items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="font-black text-slate-950">{task.employee.name}</p>
+                          <p className="text-xs text-slate-600">{scheduledLabel(task)}</p>
+                          <span
+                            className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[11px] font-black ${
+                              eff === "completed"
+                                ? "bg-emerald-100 text-emerald-900"
+                                : eff === "in_progress"
+                                  ? "bg-blue-100 text-blue-900"
+                                  : eff === "overdue"
+                                    ? "bg-rose-100 text-rose-900"
+                                    : "bg-slate-100 text-slate-800"
+                            }`}
+                          >
+                            {STATUS_LABELS[eff]}
+                          </span>
+                        </div>
+                        <div className="flex shrink-0 gap-2">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setEditingId((id) => (id === task.id ? null : task.id))
+                            }
+                            className="rounded-lg border border-slate-200 px-2 py-1 text-[11px] font-bold text-slate-700 hover:bg-white"
+                          >
+                            עריכה
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void deleteTask(task.id)}
+                            className="rounded-lg border border-rose-200 px-2 py-1 text-[11px] font-bold text-rose-700 hover:bg-rose-50"
+                          >
+                            מחיקה
+                          </button>
+                        </div>
+                      </div>
+                      {editingId === task.id ? (
+                        <div className="mt-3 rounded-lg border border-luxury-gold/30 bg-white p-3">
+                          <QuickEdit
+                            task={task}
+                            onSave={(p) => void patchTask(task.id, p)}
+                            onClose={() => setEditingId(null)}
+                          />
+                        </div>
+                      ) : null}
+                    </li>
+                  );
+                })}
+            </ul>
           </div>
-          <ul className="max-h-56 overflow-y-auto py-1">
-            {filtered.map((a) => (
-              <li key={a.id}>
-                <button
-                  type="button"
-                  onClick={() => {
-                    onChange(a.id);
-                    setOpen(false);
-                    setSearch("");
-                  }}
-                  className={`flex w-full items-center gap-3 px-3 py-2.5 text-right transition hover:bg-luxury-navy-rich/5 ${
-                    value === a.id ? "bg-luxury-gold/15" : ""
-                  }`}
-                >
-                  <span
-                    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-slate-50 text-[11px] font-black text-luxury-navy-rich"
-                    aria-hidden
-                  >
-                    {employeeInitials(a.name)}
-                  </span>
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm font-black text-slate-950">{a.name}</span>
-                    <span className="block truncate text-xs font-semibold text-slate-500">{a.department ?? "—"}</span>
-                  </span>
-                  {a.role ? (
-                    <span className="shrink-0 rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold text-slate-700">
-                      {a.role}
-                    </span>
-                  ) : null}
-                </button>
-              </li>
-            ))}
-          </ul>
         </div>
       ) : null}
     </div>
@@ -1031,8 +1158,10 @@ function QuickEdit({
 }) {
   const [title, setTitle] = useState(task.title ?? "");
   const [desc, setDesc] = useState(task.description);
-  const [dueDate, setDueDate] = useState(() => splitLocalDateTime(task.due_at).date);
-  const [dueTime, setDueTime] = useState(() => splitLocalDateTime(task.due_at).time);
+  const [taskDateEdit, setTaskDateEdit] = useState(() => formatDateInputLocal(task.task_date));
+  const [startTimeEdit, setStartTimeEdit] = useState(task.start_time);
+  const [dueEdit, setDueEdit] = useState(task.due_date ?? "");
+  const [empNote, setEmpNote] = useState(task.employee_note ?? "");
   const [pri, setPri] = useState(task.priority);
   const [stat, setStat] = useState(task.status);
 
@@ -1053,17 +1182,31 @@ function QuickEdit({
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
         <input
           type="date"
-          value={dueDate}
-          onChange={(e) => setDueDate(e.target.value)}
+          value={taskDateEdit}
+          onChange={(e) => setTaskDateEdit(e.target.value)}
           className="rounded-lg border border-slate-200 px-2 py-2 text-sm"
         />
         <input
           type="time"
-          value={dueTime}
-          onChange={(e) => setDueTime(e.target.value)}
+          value={startTimeEdit}
+          onChange={(e) => setStartTimeEdit(e.target.value)}
           className="rounded-lg border border-slate-200 px-2 py-2 text-sm"
         />
       </div>
+      <label className="block text-[11px] font-bold text-slate-600">יעד (אופציונלי)</label>
+      <input
+        type="date"
+        value={dueEdit}
+        onChange={(e) => setDueEdit(e.target.value)}
+        className="w-full rounded-lg border border-slate-200 px-2 py-2 text-sm"
+      />
+      <label className="block text-[11px] font-bold text-slate-600">הערת עובד</label>
+      <textarea
+        value={empNote}
+        onChange={(e) => setEmpNote(e.target.value)}
+        rows={2}
+        className="w-full rounded-lg border border-slate-200 bg-white p-2 text-sm font-semibold"
+      />
       <div className="flex flex-wrap gap-2">
         <select value={pri} onChange={(e) => setPri(e.target.value)} className="rounded-lg border px-2 py-1 text-xs font-bold">
           {MANAGER_TASK_PRIORITIES.map((k) => (
@@ -1079,6 +1222,8 @@ function QuickEdit({
           <option value="pending">ממתינה</option>
           <option value="in_progress">בטיפול</option>
           <option value="completed">הושלמה</option>
+          <option value="problem">בעיה</option>
+          <option value="rejected">נדחתה</option>
         </select>
       </div>
       <div className="flex gap-2">
@@ -1086,12 +1231,14 @@ function QuickEdit({
           type="button"
           className="rounded-lg bg-luxury-navy-rich px-3 py-1.5 text-xs font-black text-white"
           onClick={() => {
-            const dueIso = combineDueAtIso(dueDate, dueTime);
-            if (!title.trim() || !dueIso) return;
+            if (!title.trim() || !taskDateEdit.trim() || !startTimeEdit.trim()) return;
             onSave({
               title: title.trim(),
               description: desc,
-              dueAt: dueIso,
+              taskDate: taskDateEdit.trim(),
+              startTime: startTimeEdit.trim(),
+              dueDate: dueEdit.trim() || null,
+              employeeNote: empNote.trim() || null,
               priority: pri,
               status: stat,
               mark_complete: stat === "completed",

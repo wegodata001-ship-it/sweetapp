@@ -1,20 +1,24 @@
 import { NextResponse } from "next/server";
+import { UserRole } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireDb } from "@/lib/api-route";
 
-/** רשימת עובדים להקצאת משימות (מסך משימות — הרשאת tasks) */
+/** עובדי משימות = משתמשים EMPLOYEE פעילים (לא טבלת Employee) */
 export async function GET() {
   const block = await requireDb();
   if (block) return block;
   try {
-    const rows = await prisma.employee.findMany({
-      orderBy: { name: "asc" },
+    const rows = await prisma.user.findMany({
+      where: {
+        role: UserRole.EMPLOYEE,
+        isActive: true,
+      },
+      orderBy: { fullName: "asc" },
       select: {
         id: true,
-        name: true,
+        fullName: true,
+        email: true,
         role: true,
-        department: true,
-        phone: true,
       },
     });
     return NextResponse.json({ ok: true, data: rows });
