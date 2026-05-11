@@ -97,6 +97,11 @@ export async function middleware(request: NextRequest) {
     ) {
       return NextResponse.next();
     }
+    if (pathname.startsWith("/api/reports")) {
+      if (role === "SUPER_ADMIN") return NextResponse.next();
+      if (permSet.has("financial_registration") || permSet.has("cash_flow")) return NextResponse.next();
+      return NextResponse.json({ ok: false, error: "אין הרשאה" }, { status: 403 });
+    }
     const rule = matchRule(pathname, API_ACCESS_RULES);
     if (rule === null && role !== "SUPER_ADMIN") {
       return NextResponse.json({ ok: false, error: "אין הרשאה" }, { status: 403 });

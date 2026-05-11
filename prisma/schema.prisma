@@ -77,8 +77,14 @@ model FinancialDocument {
   totalAmount     Float
   paidAmount      Float    @default(0)
   remainingAmount Float
-  /// PAID | PARTIAL | UNPAID
-  paymentStatus   String   @default("UNPAID")
+  /// paid | partial | unpaid
+  paymentStatus   String   @default("unpaid")
+  /// פיקדון לקוחות אירועים — נשמר בנפרד מהמוצרים/מכירות
+  depositAmount   Float    @default(0)
+  depositType     String?
+  depositNote     String?
+  /// open | returned | refunded
+  depositStatus   String   @default("open")
 
   notes    String?
   metadata Json?
@@ -171,6 +177,26 @@ model GeneratedPdf {
   createdAt  DateTime @default(now())
 }
 
+/// דוחות PDF שנשמרו ב־Storage — מקור האמת לארכיון (עצמאי ממחיקת מסמך מקור)
+model GeneratedReport {
+  id          String   @id @default(cuid())
+  /// INCOME | EXPENSE | Z_REPORT | CASHFLOW | PAYMENT
+  type        String
+  title       String
+  relatedId   String?
+  fileName    String
+  filePath    String
+  publicUrl   String
+  createdById String?
+  createdBy   User?    @relation("GeneratedReportCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt   DateTime @default(now())
+
+  @@index([type])
+  @@index([relatedId])
+  @@index([createdAt])
+  @@index([createdById])
+}
+
 model ProductHistory {
   id        String   @id @default(cuid())
   itemName  String   @unique
@@ -188,8 +214,6 @@ model Warehouse {
   id        String   @id @default(cuid())
   name      String
   createdAt DateTime @default(now())
-
-  inventoryCounts InventoryCount[]
 }
 
 model Product {
@@ -209,33 +233,46 @@ model Product {
   lastStockBy   User?     @relation("ProductLastStockBy", fields: [lastStockById], references: [id], onDelete: SetNull)
 
   documentItems      FinancialDocumentItem[]
-  inventoryCounts    InventoryCount[]
   inventoryMovements InventoryMovement[]
 
   @@index([categoryId])
   @@index([supplierId])
 }
 
-/// צילום ספירה חודשית — לא מעדכן מלאי בפועל (רק snapshot)
-model InventoryCount {
-  id          String   @id @default(cuid())
-  sessionId   String
-  countDate   DateTime @db.Date
-  warehouseId String?
-  warehouse   Warehouse? @relation(fields: [warehouseId], references: [id], onDelete: SetNull)
-  productId   String
-  product     Product    @relation(fields: [productId], references: [id], onDelete: Cascade)
-  systemQty   Int
-  actualQty   Int
-  difference  Int
-  notes       String?
-  createdAt   DateTime   @default(now())
-  createdById String?
-  createdBy   User?      @relation(fields: [createdById], references: [id], onDelete: SetNull)
+/// חומרי גלם ומלאי פנימי לספירה — לא מוצרי מכירה
+model InventoryProduct {
+  id               String   @id @default(cuid())
+  name             String
+  location         String
+  /// חומרי גלם | אריזות | קירור | מדבקות | כללי
+  category         String   @default("כללי")
+  minimumQuantity  Float    @default(0)
+  unit             String?
+  createdAt        DateTime @default(now())
 
-  @@index([sessionId])
+  counts InventoryCount[]
+
+  @@unique([name])
+}
+
+/// כל ספירה נשמרת; משווה לספירה הקודמת של אותו פריט
+model InventoryCount {
+  id                 String           @id @default(cuid())
+  inventoryProductId String
+  inventoryProduct   InventoryProduct @relation(fields: [inventoryProductId], references: [id], onDelete: Cascade)
+  countDate          DateTime
+  previousQuantity   Float
+  currentQuantity    Float
+  difference         Float
+  note               String?
+  createdAt          DateTime         @default(now())
+  countedByUserId    String?
+  countedBy          User?            @relation("InventoryCountCountedBy", fields: [countedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([inventoryProductId])
   @@index([countDate])
-  @@index([productId])
+  @@index([difference])
+  @@index([countedByUserId])
 }
 
 /// תנועות מלאי יומיות — מעדכנות currentStock במוצר
@@ -273,6 +310,8 @@ model EmployeeTask {
   taskDate    DateTime
   /// שעת התחלה מתוזמנת לעובד (פורמט HH:mm)
   startTime   String
+  /// שעת סיום מתוזמנת לעובד (פורמט HH:mm) — לא זמן עבודה בפועל
+  endTime     String?
   startedAt   DateTime?
   completedAt DateTime?
   /// יעד (יום) — לא חובה; איחור מחושב גם מ־taskDate+startTime אם לא הוגדר
@@ -292,11 +331,20 @@ model EmployeeTask {
   @@index([startedAt])
 }
 
-model FormFieldDef {
-  id        String   @id @default(cuid())
-  label     String
-  sortOrder Int      @default(0)
-  createdAt DateTime @default(now())
+/// שדות לטפסים דינמיים — לא רק תווית
+model DynamicFormField {
+  id           String   @id @default(cuid())
+  label        String
+  /// STRING | NUMBER | EMAIL | PHONE | DATE | TIME | TEXTAREA | SELECT | BOOLEAN
+  fieldType    String   @default("STRING")
+  placeholder  String?
+  required     Boolean  @default(false)
+  /// ל‑SELECT: מערך מחרוזות אפשרויות
+  optionsJson  Json?
+  sortOrder    Int      @default(0)
+  createdAt    DateTime @default(now())
+
+  @@map("FormFieldDef")
 }
 
 model FinanceSettings {
@@ -326,8 +374,9 @@ model User {
   assignedTasks EmployeeTask[]
 
   productLastStockUpdates Product[]           @relation("ProductLastStockBy")
-  inventoryCounts         InventoryCount[]
   inventoryMovements      InventoryMovement[]
+  inventoryCountsRecorded InventoryCount[]    @relation("InventoryCountCountedBy")
+  generatedReports        GeneratedReport[]   @relation("GeneratedReportCreatedBy")
 
   @@index([employeeId])
 }

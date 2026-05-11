@@ -14,21 +14,37 @@ function endOfToday(): Date {
   return d;
 }
 
+function classify(current: number | null, min: number): "shortage" | "low" | "ok" {
+  const q = current ?? 0;
+  if (min > 0 && q < min) return "shortage";
+  if (min > 0 && q === min) return "low";
+  return "ok";
+}
+
 export async function GET() {
   const block = await requireDb();
   if (block) return block;
   try {
-    const products = await prisma.product.findMany({
-      select: { currentStock: true, minStock: true },
+    const products = await prisma.inventoryProduct.findMany({
+      include: {
+        counts: {
+          orderBy: { countDate: "desc" },
+          take: 1,
+          select: { currentQuantity: true },
+        },
+      },
     });
+
     const totalProducts = products.length;
     let shortageCount = 0;
     let lowStockCount = 0;
     for (const p of products) {
-      if (p.currentStock <= 0) shortageCount++;
-      else if (p.minStock > 0 && p.currentStock <= p.minStock) lowStockCount++;
+      const q = p.counts[0]?.currentQuantity ?? null;
+      const tier = classify(q, p.minimumQuantity);
+      if (tier === "shortage") shortageCount++;
+      else if (tier === "low") lowStockCount++;
     }
-    const pieOk = totalProducts - shortageCount - lowStockCount;
+    const pieOk = Math.max(0, totalProducts - shortageCount - lowStockCount);
 
     const todayMovements = await prisma.inventoryMovement.count({
       where: {
@@ -45,7 +61,7 @@ export async function GET() {
         totalProducts,
         shortageCount,
         lowStockCount,
-        pieOk: Math.max(0, pieOk),
+        pieOk,
         todayMovements,
       },
     });

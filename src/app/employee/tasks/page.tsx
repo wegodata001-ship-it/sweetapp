@@ -37,13 +37,8 @@ function formatDay(iso: string) {
   }
 }
 
-function formatClock(iso: string | null) {
-  if (!iso) return "—";
-  try {
-    return new Date(iso).toLocaleTimeString("he-IL", { hour: "2-digit", minute: "2-digit" });
-  } catch {
-    return "—";
-  }
+function plannedTimeRange(task: SerializedEmployeeTask) {
+  return `${task.start_time} - ${task.end_time || "..."}`;
 }
 
 const PRI_BADGE: Record<string, string> = {
@@ -96,7 +91,9 @@ export default function EmployeeTasksPage() {
   }, []);
 
   useEffect(() => {
-    void load();
+    queueMicrotask(() => {
+      void load();
+    });
   }, [load]);
 
   const patch = async (id: string, body: Record<string, unknown>) => {
@@ -208,7 +205,7 @@ export default function EmployeeTasksPage() {
                     <th className="px-4 py-3.5 font-bold text-slate-700">סטטוס</th>
                     <th className="px-4 py-3.5 font-bold text-slate-700">תאריך</th>
                     <th className="px-4 py-3.5 font-bold text-slate-700">התחלה</th>
-                    <th className="px-4 py-3.5 font-bold text-slate-700">יעד</th>
+                    <th className="px-4 py-3.5 font-bold text-slate-700">סיום</th>
                     <th className="px-4 py-3.5 font-bold text-slate-700">פעולות</th>
                   </tr>
                 </thead>
@@ -269,11 +266,10 @@ export default function EmployeeTasksPage() {
                           {formatDay(task.task_date)}
                         </td>
                         <td className="px-4 py-3 align-top text-xs text-slate-600">
-                          <div>{task.start_time}</div>
-                          <div className="text-slate-400">{formatClock(task.started_at)}</div>
+                          <span className="font-black text-slate-900">{task.start_time}</span>
                         </td>
                         <td className="px-4 py-3 align-top text-xs text-slate-600">
-                          {task.due_date ? formatDay(task.due_date) : "—"}
+                          <span className="font-black text-slate-900">{task.end_time || "..."}</span>
                         </td>
                         <td className="px-4 py-3 align-top">
                           <div className="flex flex-col gap-2">
@@ -336,10 +332,8 @@ export default function EmployeeTasksPage() {
                       <p className="font-semibold text-slate-900">{formatDay(task.task_date)}</p>
                     </div>
                     <div>
-                      <span className="font-bold text-slate-500">יעד</span>
-                      <p className="font-semibold text-slate-900">
-                        {task.due_date ? formatDay(task.due_date) : "—"}
-                      </p>
+                      <span className="font-bold text-slate-500">שעות מתוכננות</span>
+                      <p className="font-semibold text-slate-900">{plannedTimeRange(task)}</p>
                     </div>
                   </div>
                   <label className="block text-xs font-bold text-slate-600">סטטוס</label>

@@ -157,20 +157,20 @@ export default function AdminUsersPage() {
   }
 
   return (
-    <div className="mx-auto max-w-5xl space-y-6">
-      <section className="app-panel p-6 sm:p-8">
-        <div className="flex flex-wrap items-start justify-between gap-4">
+    <div className="mx-auto max-w-5xl space-y-[14px]">
+      <section className="app-panel mb-[14px] p-4 md:p-[18px]">
+        <div className="flex flex-wrap items-start justify-between gap-2.5">
           <div>
-            <p className="text-sm font-bold tracking-[0.14em] text-luxury-gold">ניהול הרשאות</p>
-            <h1 className="mt-2 text-2xl font-black text-slate-950">משתמשים ועובדים</h1>
-            <p className="mt-2 max-w-xl text-sm text-slate-600">
+            <p className="text-[12px] font-bold tracking-[0.14em] text-luxury-gold opacity-90">ניהול הרשאות</p>
+            <h1 className="erp-page-title mt-1 text-slate-950">משתמשים ועובדים</h1>
+            <p className="mt-1 max-w-xl text-[14px] leading-snug text-slate-600 opacity-80">
               יצירה ועריכה של משתמשים, והגדרת הרשאות לפי מסכים. עובד רואה רק מה שמסומן.
             </p>
           </div>
           <button
             type="button"
             onClick={() => openCreate()}
-            className="rounded-full bg-luxury-gold px-5 py-2.5 text-sm font-bold text-luxury-charcoal shadow-luxury-sm transition hover:bg-luxury-gold-hover"
+            className="erp-btn bg-luxury-gold text-luxury-charcoal shadow-sm hover:bg-luxury-gold-hover"
           >
             + משתמש חדש
           </button>
@@ -182,19 +182,23 @@ export default function AdminUsersPage() {
           </p>
         ) : null}
 
-        <div className="mt-8 grid gap-4">
+        <div className="mt-4 grid gap-2.5">
           {users.map((u) => (
             <div
               key={u.id}
-              className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-slate-200 bg-white px-4 py-4 shadow-sm"
+              className="flex min-h-[72px] flex-wrap items-center justify-between gap-3 rounded-[18px] border border-slate-200 bg-white px-3 py-2 shadow-sm"
             >
-              <div>
-                <p className="font-bold text-slate-950">{u.fullName}</p>
-                <p className="text-sm text-slate-600">{u.email}</p>
-                <p className="mt-1 text-xs font-semibold text-slate-500">
-                  {u.role === "SUPER_ADMIN" ? "SUPER ADMIN" : "EMPLOYEE"}
-                  {u.isActive ? "" : " · לא פעיל"}
-                </p>
+              <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-0.5 md:gap-x-5">
+                <p className="truncate font-bold text-slate-950">{u.fullName}</p>
+                <p className="truncate text-[14px] text-slate-600">{u.email}</p>
+                <span className="inline-flex shrink-0 items-center gap-2 text-[12px] font-semibold text-slate-600">
+                  <span
+                    className={`h-2 w-2 shrink-0 rounded-full ${u.isActive ? "bg-emerald-500" : "bg-slate-300"}`}
+                    title={u.isActive ? "פעיל" : "לא פעיל"}
+                    aria-hidden
+                  />
+                  {u.role === "SUPER_ADMIN" ? "ADMIN" : "EMPLOYEE"}
+                </span>
               </div>
               <div className="flex flex-wrap gap-2">
                 <button

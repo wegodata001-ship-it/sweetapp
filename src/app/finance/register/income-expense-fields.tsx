@@ -1,11 +1,14 @@
 "use client";
 
-import { Calculator, Calendar, CreditCard, FileText, Plus, Receipt, Trash2, User } from "lucide-react";
+import { Calculator, Calendar, CreditCard, FileText, Package, Plus, Receipt, Trash2, User } from "lucide-react";
 import { useEffect, useState } from "react";
 import {
   DOCUMENT_TYPE_OPTIONS,
+  DEPOSIT_TYPE_LABELS,
+  DEPOSIT_TYPE_OPTIONS,
+  incomeExpenseDepositAmount,
   incomeExpenseGrandTotal,
-  incomeExpenseNetTotal,
+  incomeExpenseTotalToPay,
   incomeExpenseVatTotal,
   lineGrossTotal,
   lineNetTotal,
@@ -22,9 +25,22 @@ import {
 import { formatShekel } from "@/lib/format-shekel";
 
 const inputClass =
-  "mt-1 block w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-right text-slate-900 shadow-sm outline-none transition focus:border-luxury-gold focus:ring-2 focus:ring-luxury-gold/25";
+  "mt-1 block h-11 min-h-[44px] w-full rounded-[16px] border border-slate-300 bg-white px-3 text-right text-sm text-slate-900 shadow-sm outline-none transition focus:border-luxury-gold focus:ring-2 focus:ring-luxury-gold/25";
 
-const labelClass = "block text-sm font-bold text-slate-700";
+const labelClass = "block text-[13px] font-bold text-slate-700";
+
+/** שם פריט בטבלה — מעט נמוך יותר מברירת המחדל */
+const lineItemNameClass =
+  "h-11 min-h-[44px] w-full rounded-[16px] border border-slate-200 px-2 text-right text-sm outline-none focus:border-luxury-gold focus:ring-1 focus:ring-luxury-gold/25";
+
+const lineQtyClass =
+  "h-11 min-h-[44px] w-[90px] rounded-[16px] border border-slate-200 px-2 text-right text-sm outline-none focus:border-luxury-gold focus:ring-1 focus:ring-luxury-gold/25";
+
+const lineMoneyClass =
+  "h-11 min-h-[44px] w-full min-w-[5rem] rounded-[16px] border border-slate-200 px-2 text-right text-sm outline-none focus:border-luxury-gold focus:ring-1 focus:ring-luxury-gold/25";
+
+const lineSelectClass =
+  "h-11 min-h-[44px] w-full rounded-[16px] border border-slate-200 px-1 text-right text-[13px] font-semibold outline-none focus:border-luxury-gold";
 
 type Props = {
   heading: string;
@@ -33,6 +49,8 @@ type Props = {
   intro: string;
   value: IncomeExpensePayload;
   onChange: (next: IncomeExpensePayload) => void;
+  disabled?: boolean;
+  counterpartyInputId?: string;
 };
 
 export function IncomeExpenseFields({
@@ -42,17 +60,22 @@ export function IncomeExpenseFields({
   intro,
   value,
   onChange,
+  disabled = false,
+  counterpartyInputId,
 }: Props) {
   const showEventFields = value.clientMode === "event";
   const [productSuggestions, setProductSuggestions] = useState<string[]>([]);
   const [customerSuggestions, setCustomerSuggestions] = useState<string[]>([]);
+  const isExpense = value.kind === "expense";
 
   const lineTotals = value.lines.map((row) => lineGrossTotal(row.quantity, row.price, row.vatMode));
   const netLineTotals = value.lines.map((row) => lineNetTotal(row.quantity, row.price, row.vatMode));
   const vatLineTotals = value.lines.map((row) => lineVatTotal(row.quantity, row.price, row.vatMode));
-  const netTotal = incomeExpenseNetTotal(value);
   const vatTotal = incomeExpenseVatTotal(value);
   const grandTotal = incomeExpenseGrandTotal(value);
+  const depositAmount = incomeExpenseDepositAmount(value);
+  const totalToPay = incomeExpenseTotalToPay(value);
+  const showDepositBox = !isExpense && (value.clientMode === "event" || value.includeDeposit);
 
   const setPatch = (patch: Partial<IncomeExpensePayload>) => onChange({ ...value, ...patch });
 
@@ -160,28 +183,43 @@ export function IncomeExpenseFields({
     });
   }, [onChange, value]);
 
+  const paymentTone = isExpense
+    ? {
+        border: "border-rose-200",
+        bg: "bg-rose-50/75",
+        icon: "text-rose-700",
+        title: "text-rose-950",
+        chip: "bg-rose-100 text-rose-900",
+      }
+    : {
+        border: "border-emerald-200",
+        bg: "bg-emerald-50/75",
+        icon: "text-emerald-700",
+        title: "text-emerald-950",
+        chip: "bg-emerald-100 text-emerald-900",
+      };
   const paidInput = paymentLinesTotal(value);
-  const paidOverTotal = value.kind === "income" && paidInput > grandTotal + 1e-9 && grandTotal >= 0;
-  const paidEffective = Math.min(Math.max(0, paidInput), grandTotal);
-  const remainingShow = Math.max(0, grandTotal - paidEffective);
+  const paymentOverpaid = paidInput > totalToPay + 1e-6 && totalToPay >= 0;
+  const remainingShow = Math.max(0, totalToPay - paidInput);
 
   return (
-    <section className="app-panel p-6 md:p-8">
+    <section className="app-panel mb-[14px] p-[18px]">
+      <fieldset disabled={disabled} className={disabled ? "pointer-events-none opacity-60" : ""}>
       <div className="flex flex-wrap items-center gap-2">
-        <Receipt className={`h-5 w-5 ${iconClass}`} aria-hidden />
-        <h2 className={`text-xl font-black ${headingClass}`}>{heading}</h2>
+        <Receipt className={`h-4 w-4 ${iconClass}`} aria-hidden />
+        <h2 className={`text-[22px] font-extrabold ${headingClass}`}>{heading}</h2>
       </div>
-      <p className="mt-2 text-sm text-slate-600">{intro}</p>
+      <p className="mt-1 text-[13px] leading-snug text-slate-600 opacity-70">{intro}</p>
 
-      <div className="mt-6">
-        <p className="text-sm font-black text-slate-800">סוג לקוח</p>
-        <div className="mt-2 grid gap-2 sm:grid-cols-2">
+      <div className="mt-3">
+        <p className="text-[13px] font-black text-slate-800">סוג לקוח</p>
+        <div className="mt-2 grid gap-3 sm:grid-cols-2">
           <button
             type="button"
             onClick={() => setPatch({ clientMode: "general" })}
-            className={`rounded-xl border px-4 py-3 text-sm font-bold transition ${
+            className={`h-11 rounded-[16px] border px-[18px] text-[15px] font-bold transition ${
               value.clientMode === "general"
-                ? "border-luxury-gold bg-luxury-gold text-luxury-charcoal shadow-md"
+                ? "border-luxury-gold bg-luxury-gold text-luxury-charcoal shadow-sm"
                 : "border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100"
             }`}
           >
@@ -190,9 +228,9 @@ export function IncomeExpenseFields({
           <button
             type="button"
             onClick={() => setPatch({ clientMode: "event" })}
-            className={`rounded-xl border px-4 py-3 text-sm font-bold transition ${
+            className={`h-11 rounded-[16px] border px-[18px] text-[15px] font-bold transition ${
               value.clientMode === "event"
-                ? "border-amber-700 bg-amber-700 text-white shadow-md"
+                ? "border-amber-700 bg-amber-700 text-white shadow-sm"
                 : "border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100"
             }`}
           >
@@ -201,13 +239,14 @@ export function IncomeExpenseFields({
         </div>
       </div>
 
-      <div className="mt-6 grid gap-4 md:grid-cols-2">
+      <div className="mt-3 grid gap-3 md:grid-cols-2">
         <label className={labelClass}>
           <span className="flex items-center gap-2">
             <User className="h-4 w-4 text-slate-500" aria-hidden />
-            שם לקוח
+            {isExpense ? "ספק / גורם" : "שם לקוח"}
           </span>
           <input
+            id={counterpartyInputId}
             type="text"
             value={value.counterpartyName}
             list="customer-suggestions"
@@ -216,7 +255,7 @@ export function IncomeExpenseFields({
               void fetchCustomerSuggestions(e.target.value);
             }}
             className={inputClass}
-            placeholder="לדוגמה: קייטרינג גולן"
+            placeholder={isExpense ? "לדוגמה: ספק חומרי גלם" : "לדוגמה: קייטרינג גולן"}
           />
           <datalist id="customer-suggestions">
             {customerSuggestions.map((name) => (
@@ -251,21 +290,9 @@ export function IncomeExpenseFields({
       </div>
 
       {showEventFields && (
-        <div className="mt-6 rounded-2xl border border-amber-200 bg-amber-50/80 p-4 md:p-5">
-          <p className="text-sm font-black text-amber-900">פרטי אירוע</p>
-          <div className="mt-4 grid gap-4 md:grid-cols-3">
-            <label className={labelClass}>
-              סכום פיקדון
-              <input
-                type="number"
-                min={0}
-                step="0.01"
-                value={value.depositAmount}
-                onChange={(e) => setPatch({ depositAmount: e.target.value })}
-                className={inputClass}
-                placeholder="0"
-              />
-            </label>
+        <div className="mt-3 rounded-[18px] border border-amber-200 bg-amber-50/80 p-[18px]">
+          <p className="text-[13px] font-black text-amber-900">פרטי אירוע</p>
+          <div className="mt-3 grid gap-3 md:grid-cols-2">
             <label className={labelClass}>
               כמות מגשים / כלים
               <input
@@ -285,15 +312,15 @@ export function IncomeExpenseFields({
         </div>
       )}
 
-      <div className="mt-8">
+      <div className="mt-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <p className="text-base font-black text-slate-900">שורות פריטים</p>
+          <p className="text-[15px] font-black text-slate-900">שורות פריטים</p>
           <button
             type="button"
             onClick={addLine}
-            className="inline-flex items-center gap-2 rounded-xl bg-luxury-gold px-4 py-2 text-sm font-bold text-luxury-charcoal shadow-luxury-sm hover:bg-luxury-gold-hover"
+            className="inline-flex h-9 items-center gap-1.5 rounded-[16px] bg-luxury-gold px-3 py-1.5 text-[13px] font-bold text-luxury-charcoal shadow-sm hover:bg-luxury-gold-hover"
           >
-            <Plus className="h-4 w-4" aria-hidden />
+            <Plus className="h-3.5 w-3.5" aria-hidden />
             הוספת שורה
           </button>
         </div>
@@ -304,24 +331,24 @@ export function IncomeExpenseFields({
           ))}
         </datalist>
 
-        <div className="mt-4 overflow-x-auto rounded-2xl border border-slate-200">
-          <table className="min-w-[980px] w-full divide-y divide-slate-200 text-right text-sm">
+        <div className="mt-3 overflow-x-auto rounded-[18px] border border-slate-200">
+          <table className="min-w-[980px] w-full divide-y divide-slate-200 text-right text-[13px]">
             <thead className="bg-slate-50">
               <tr>
-                <th className="px-3 py-3 font-bold text-slate-600">שם פריט</th>
-                <th className="px-3 py-3 font-bold text-slate-600">כמות</th>
-                <th className="px-3 py-3 font-bold text-slate-600">מחיר יחידה</th>
-                <th className="px-3 py-3 font-bold text-slate-600">מע״מ</th>
-                <th className="px-3 py-3 font-bold text-slate-600">לפני מע״מ</th>
-                <th className="px-3 py-3 font-bold text-slate-600">מע״מ</th>
-                <th className="px-3 py-3 font-bold text-slate-600">סה״כ שורה</th>
-                <th className="w-14 px-3 py-3 font-bold text-slate-600" />
+                <th className="px-2 py-[10px] font-bold text-slate-600">שם פריט</th>
+                <th className="px-2 py-[10px] font-bold text-slate-600">כמות</th>
+                <th className="px-2 py-[10px] font-bold text-slate-600">מחיר יחידה</th>
+                <th className="px-2 py-[10px] font-bold text-slate-600">מע״מ</th>
+                <th className="px-2 py-[10px] font-bold text-slate-600">לפני מע״מ</th>
+                <th className="px-2 py-[10px] font-bold text-slate-600">מע״מ</th>
+                <th className="px-2 py-[10px] font-bold text-slate-600">סה״כ שורה</th>
+                <th className="w-12 px-2 py-[10px] font-bold text-slate-600" />
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 bg-white">
               {value.lines.map((row, index) => (
-                <tr key={row.id}>
-                  <td className="px-3 py-2">
+                <tr key={row.id} className="h-[68px]">
+                  <td className="px-2 py-[10px] align-middle">
                     <input
                       type="text"
                       value={row.itemName}
@@ -330,35 +357,35 @@ export function IncomeExpenseFields({
                         updateLine(row.id, { itemName: e.target.value });
                         void fetchSuggestions(e.target.value);
                       }}
-                      className="w-full rounded-lg border border-slate-200 px-2 py-2 text-right"
+                      className={lineItemNameClass}
                       placeholder={`פריט ${index + 1}`}
                     />
                   </td>
-                  <td className="px-3 py-2">
+                  <td className="px-2 py-[10px] align-middle">
                     <input
                       type="number"
                       min={0}
                       step="0.001"
                       value={row.quantity}
                       onChange={(e) => updateLine(row.id, { quantity: e.target.value })}
-                      className="w-full rounded-lg border border-slate-200 px-2 py-2 text-right"
+                      className={lineQtyClass}
                     />
                   </td>
-                  <td className="px-3 py-2">
+                  <td className="px-2 py-[10px] align-middle">
                     <input
                       type="number"
                       min={0}
                       step="0.01"
                       value={row.price}
                       onChange={(e) => updateLine(row.id, { price: e.target.value })}
-                      className="w-full rounded-lg border border-slate-200 px-2 py-2 text-right"
+                      className={lineMoneyClass}
                     />
                   </td>
-                  <td className="px-3 py-2">
+                  <td className="px-2 py-[10px] align-middle">
                     <select
                       value={row.vatMode}
                       onChange={(e) => updateLine(row.id, { vatMode: e.target.value as VatMode })}
-                      className="w-full rounded-lg border border-slate-200 px-1 py-2 text-right text-xs font-semibold"
+                      className={lineSelectClass}
                     >
                       {(Object.keys(VAT_MODE_LABELS) as VatMode[]).map((k) => (
                         <option key={k} value={k}>
@@ -367,17 +394,23 @@ export function IncomeExpenseFields({
                       ))}
                     </select>
                   </td>
-                  <td className="px-3 py-3 font-bold text-slate-700">{formatShekel(netLineTotals[index] ?? 0)}</td>
-                  <td className="px-3 py-3 font-bold text-slate-700">{formatShekel(vatLineTotals[index] ?? 0)}</td>
-                  <td className="px-3 py-3 font-bold text-slate-900">{formatShekel(lineTotals[index] ?? 0)}</td>
-                  <td className="px-3 py-2">
+                  <td className="px-2 py-[10px] align-middle text-[15px] font-bold text-slate-700 tabular-nums">
+                    {formatShekel(netLineTotals[index] ?? 0)}
+                  </td>
+                  <td className="px-2 py-[10px] align-middle text-[15px] font-bold text-slate-700 tabular-nums">
+                    {formatShekel(vatLineTotals[index] ?? 0)}
+                  </td>
+                  <td className="px-2 py-[10px] align-middle text-[15px] font-bold text-slate-900 tabular-nums">
+                    {formatShekel(lineTotals[index] ?? 0)}
+                  </td>
+                  <td className="px-2 py-[10px] align-middle">
                     <button
                       type="button"
                       onClick={() => removeLine(row.id)}
-                      className="rounded-lg p-2 text-rose-600 hover:bg-rose-50"
+                      className="rounded-lg p-1.5 text-rose-600 hover:bg-rose-50"
                       aria-label="מחיקת שורה"
                     >
-                      <Trash2 className="h-4 w-4" />
+                      <Trash2 className="h-3.5 w-3.5" />
                     </button>
                   </td>
                 </tr>
@@ -386,44 +419,124 @@ export function IncomeExpenseFields({
           </table>
         </div>
 
-        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-cyan-200 bg-cyan-50/60 px-4 py-4">
-          <span className="flex items-center gap-2 text-sm font-bold text-cyan-900">
-            <Calculator className="h-5 w-5" aria-hidden />
-            סיכום מסמך
+        <div className="mt-3 flex min-h-[70px] flex-wrap items-center justify-between gap-4 rounded-[18px] border border-cyan-200 bg-cyan-50/70 px-[18px] py-3">
+          <span className="flex items-center gap-2 text-[13px] font-bold text-cyan-900">
+            <Calculator className="h-4 w-4 shrink-0" aria-hidden />
+            סיכום
           </span>
-          <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-sm font-bold text-slate-800">
-            <span>
-              לפני מע״מ: <span className="font-black text-slate-950">{formatShekel(netTotal)}</span>
-            </span>
-            <span>
-              מע״מ: <span className="font-black text-slate-950">{formatShekel(vatTotal)}</span>
-            </span>
-            <span>
-              סה״כ: <span className="text-2xl font-black text-slate-950">{formatShekel(grandTotal)}</span>
-            </span>
+          <div className="flex flex-1 flex-wrap items-end justify-end gap-6 sm:gap-10">
+            <div className="text-center sm:text-right">
+              <p className="text-[13px] font-bold text-slate-600 opacity-70">סה״כ</p>
+              <p className="text-[28px] font-black tabular-nums leading-none text-slate-950">{formatShekel(grandTotal)}</p>
+            </div>
+            <div className="text-center sm:text-right">
+              <p className="text-[13px] font-bold text-slate-600 opacity-70">מע״מ</p>
+              <p className="text-[28px] font-black tabular-nums leading-none text-slate-950">{formatShekel(vatTotal)}</p>
+            </div>
+            <div className="text-center sm:text-right">
+              <p className="text-[13px] font-bold text-slate-600 opacity-70">לתשלום</p>
+              <p className="text-[28px] font-black tabular-nums leading-none text-cyan-900">{formatShekel(totalToPay)}</p>
+            </div>
           </div>
         </div>
 
-        {value.kind === "income" && (
-          <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50/90 px-4 py-4 md:px-5 md:py-5">
-            <div className="flex flex-wrap items-center gap-2 border-b border-slate-200/80 pb-3">
-              <CreditCard className="h-4 w-4 text-slate-600" aria-hidden />
-              <p className="text-sm font-black text-slate-900">פרטי תשלום</p>
+        {showDepositBox && (
+          <details className="mt-3 rounded-[18px] border border-amber-200 bg-amber-50/75 p-[18px] shadow-sm">
+            <summary className="flex cursor-pointer list-none flex-wrap items-center gap-2 text-[13px] font-black text-amber-950">
+              <Package className="h-4 w-4 text-amber-700" aria-hidden />
+              פיקדון
+              {value.includeDeposit && depositAmount > 0 ? (
+                <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-black text-amber-950">
+                  {formatShekel(depositAmount)}
+                </span>
+              ) : null}
+            </summary>
+            <div className="mt-3 grid gap-3 md:grid-cols-[auto_1fr_1fr]">
+              <label className="flex h-11 min-h-[44px] items-center gap-2 rounded-[16px] border border-amber-200 bg-white px-3 text-[13px] font-bold text-slate-800">
+                <input
+                  type="checkbox"
+                  checked={value.includeDeposit}
+                  onChange={(e) =>
+                    setPatch({
+                      includeDeposit: e.target.checked,
+                      depositAmount: e.target.checked ? value.depositAmount : "",
+                      depositNote: e.target.checked ? value.depositNote : "",
+                    })
+                  }
+                  className="h-4 w-4 accent-amber-700"
+                />
+                כולל פיקדון
+              </label>
+              <label className={labelClass}>
+                סוג פיקדון
+                <select
+                  value={value.depositType || DEPOSIT_TYPE_OPTIONS[0]}
+                  onChange={(e) => setPatch({ depositType: e.target.value })}
+                  disabled={!value.includeDeposit}
+                  className={inputClass}
+                >
+                  {DEPOSIT_TYPE_OPTIONS.map((opt) => (
+                    <option key={opt} value={opt}>
+                      {DEPOSIT_TYPE_LABELS[opt]}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className={labelClass}>
+                סכום פיקדון
+                <input
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  value={value.depositAmount}
+                  onChange={(e) => setPatch({ depositAmount: e.target.value })}
+                  disabled={!value.includeDeposit}
+                  className={inputClass}
+                  placeholder="0"
+                />
+              </label>
+              <label className={`md:col-span-3 ${labelClass}`}>
+                הערת פיקדון
+                <textarea
+                  value={value.depositNote}
+                  onChange={(e) => setPatch({ depositNote: e.target.value })}
+                  disabled={!value.includeDeposit}
+                  className="mt-1 block min-h-[52px] w-full resize-y rounded-[16px] border border-slate-300 bg-white px-3 py-2 text-right text-[15px] text-slate-900 shadow-sm outline-none transition focus:border-luxury-gold focus:ring-2 focus:ring-luxury-gold/25 disabled:opacity-60"
+                  placeholder="פיקדון עבור מגשי אירועים"
+                />
+              </label>
+            </div>
+          </details>
+        )}
+
+        {depositAmount > 0 ? (
+          <p className="mt-3 rounded-[16px] border border-amber-100 bg-amber-50/90 px-3 py-2 text-[13px] font-semibold text-amber-950">
+            פיקדון: <span className="font-black tabular-nums">{formatShekel(depositAmount)}</span>
+          </p>
+        ) : null}
+
+        <div className={`mt-3 rounded-[18px] border ${paymentTone.border} ${paymentTone.bg} p-[18px]`}>
+            <div className="flex h-[58px] flex-wrap items-center gap-2 border-b border-slate-200/80">
+              <CreditCard className={`h-3.5 w-3.5 ${paymentTone.icon}`} aria-hidden />
+              <p className={`text-[15px] font-black ${paymentTone.title}`}>פרטי תשלום</p>
+              <span className={`rounded-full px-2 py-0.5 text-[10px] font-black ${paymentTone.chip}`}>
+                {isExpense ? "יציאה / חובה" : "כניסה / זכות"}
+              </span>
               <button
                 type="button"
                 onClick={addPayment}
-                className="me-auto rounded-lg bg-white px-3 py-1.5 text-xs font-bold text-slate-800 shadow-sm ring-1 ring-slate-200 hover:bg-slate-50"
+                className="me-auto inline-flex h-8 items-center rounded-[16px] bg-white px-2.5 py-1 text-[12px] font-bold text-slate-800 shadow-sm ring-1 ring-slate-200 hover:bg-slate-50"
               >
-                הוסף אמצעי תשלום
+                + אמצעי תשלום
               </button>
             </div>
-            <div className="mt-4 space-y-3">
+            <div className="mt-3 grid gap-3 lg:grid-cols-2">
               {value.payments.map((payment) => (
                 <div
                   key={payment.id}
-                  className="grid gap-3 rounded-xl border border-slate-200 bg-white p-3 sm:grid-cols-[1fr_1fr_1.5fr_auto]"
+                  className="grid min-h-[58px] items-center gap-x-2 gap-y-2 rounded-[16px] border border-slate-200 bg-white px-3 py-2 shadow-sm sm:grid-cols-[1fr_0.85fr_1.15fr_auto]"
                 >
-                  <label className={labelClass}>
+                  <label className={`${labelClass} mb-0`}>
                     אמצעי תשלום
                     <select
                       value={payment.instrument || PAYMENT_INSTRUMENT_OPTIONS[0]}
@@ -462,33 +575,42 @@ export function IncomeExpenseFields({
                   <button
                     type="button"
                     onClick={() => removePayment(payment.id)}
-                    className="self-end rounded-lg p-2 text-rose-600 hover:bg-rose-50"
+                    className="self-center rounded-lg p-1.5 text-rose-600 hover:bg-rose-50 sm:self-end"
                     aria-label="מחיקת תשלום"
                   >
-                    <Trash2 className="h-4 w-4" />
+                    <Trash2 className="h-3.5 w-3.5" />
                   </button>
                 </div>
               ))}
             </div>
-            {paidOverTotal && (
-              <p className="mt-3 text-xs font-bold text-rose-700" role="alert">
-                סכום התשלום לא יכול לעלות על סה״כ המסמך.
+            {paymentOverpaid && (
+              <p className="mt-2 text-[13px] font-bold text-rose-700" role="alert">
+                סכום אמצעי התשלום לא יכול לעלות על סה״כ המסמך.
               </p>
             )}
-            {!paidOverTotal && (
-              <div className="mt-4 flex flex-wrap items-center gap-x-6 gap-y-2 text-sm font-bold text-slate-800">
-                <span>
-                  שולם: <span className="font-black text-slate-950">{formatShekel(paidEffective)}</span>
-                </span>
-                <span className="text-slate-400">|</span>
-                <span>
-                  נותר: <span className="font-black text-slate-950">{formatShekel(remainingShow)}</span>
-                </span>
+            <div className="mt-4 grid gap-2 rounded-[14px] border border-slate-200 bg-white/90 px-3 py-2.5 text-[13px] font-bold sm:grid-cols-3">
+              <div>
+                <p className="text-[11px] font-semibold text-slate-500">סה״כ מסמך</p>
+                <p className="text-[18px] font-black tabular-nums text-slate-950">{formatShekel(totalToPay)}</p>
               </div>
-            )}
-          </div>
-        )}
+              <div>
+                <p className="text-[11px] font-semibold text-emerald-700">שולם</p>
+                <p className="text-[18px] font-black tabular-nums text-emerald-800">{formatShekel(paidInput)}</p>
+              </div>
+              <div>
+                <p className="text-[11px] font-semibold text-amber-800">יתרה פתוחה</p>
+                <p
+                  className={`text-[18px] font-black tabular-nums ${
+                    remainingShow > 1e-6 ? "text-amber-900" : "text-slate-400"
+                  }`}
+                >
+                  {formatShekel(remainingShow)}
+                </p>
+              </div>
+            </div>
+        </div>
       </div>
+      </fieldset>
     </section>
   );
 }

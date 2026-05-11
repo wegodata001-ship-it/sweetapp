@@ -19,6 +19,7 @@ export function serializeEmployeeTask(row: {
   status: string;
   taskDate: Date;
   startTime: string;
+  endTime?: string | null;
   startedAt: Date | null;
   completedAt: Date | null;
   dueDate?: Date | null;
@@ -55,6 +56,7 @@ export function serializeEmployeeTask(row: {
     effective_status: effective,
     task_date: row.taskDate.toISOString(),
     start_time: row.startTime,
+    end_time: row.endTime ?? null,
     scheduled_start_ms: schedMs,
     started_at: row.startedAt?.toISOString() ?? null,
     completed_at: row.completedAt?.toISOString() ?? null,

@@ -52,7 +52,7 @@ function LedgersPageInner() {
   const [applied, setApplied] = useState<Filters>(() => emptyFilters());
 
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
+  const [pageSize, setPageSize] = useState(12);
 
   const [overview, setOverview] = useState<LedgerOverviewResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -217,27 +217,42 @@ function LedgersPageInner() {
   };
 
   const totalPages = overview ? Math.max(1, Math.ceil(overview.total / overview.pageSize)) : 1;
+  const pageSummary = useMemo(() => {
+    const rows = overview?.rows ?? [];
+    return rows.reduce(
+      (acc, row) => ({
+        debit: acc.debit + row.total_debit,
+        credit: acc.credit + row.total_credit,
+        open: acc.open + Math.max(0, row.open_balance),
+      }),
+      { debit: 0, credit: 0, open: 0 },
+    );
+  }, [overview]);
 
   const inputClass =
-    "mt-1 block w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-right font-semibold text-slate-900 shadow-sm outline-none focus:border-luxury-gold focus:ring-2 focus:ring-luxury-gold/25";
+    "mt-1 block h-[42px] w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-right text-[13px] font-semibold text-slate-900 shadow-sm outline-none focus:border-luxury-gold focus:ring-2 focus:ring-luxury-gold/25";
+  const thClass = "px-3 py-2 text-[14px] font-bold";
+  const tdClass = "h-[52px] px-3 py-2 align-middle text-[13px]";
+  const iconButtonClass =
+    "inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-700 shadow-sm transition hover:bg-slate-50 hover:text-luxury-navy-rich";
 
   const renderEntityBadge = (t: EntityType) => {
     if (t === "customer") {
       return (
-        <span className="inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-black text-emerald-800">
+        <span className="inline-flex h-7 items-center rounded-full border border-emerald-200 bg-emerald-50 px-2 text-[11px] font-black text-emerald-800">
           לקוח
         </span>
       );
     }
     if (t === "supplier") {
       return (
-        <span className="inline-flex rounded-full border border-rose-200 bg-rose-50 px-2.5 py-1 text-xs font-black text-rose-800">
+        <span className="inline-flex h-7 items-center rounded-full border border-rose-200 bg-rose-50 px-2 text-[11px] font-black text-rose-800">
           ספק
         </span>
       );
     }
     return (
-      <span className="inline-flex rounded-full border border-cyan-200 bg-cyan-50 px-2.5 py-1 text-xs font-black text-cyan-900">
+      <span className="inline-flex h-7 items-center rounded-full border border-cyan-200 bg-cyan-50 px-2 text-[11px] font-black text-cyan-900">
         עובד
       </span>
     );
@@ -248,42 +263,46 @@ function LedgersPageInner() {
     if (v <= 0) {
       return <span className="font-black text-emerald-700">{formatShekel(0)}</span>;
     }
-    return <span className="font-black text-rose-600">{formatShekel(v)}</span>;
+    return <span className="font-black text-amber-800">{formatShekel(v)}</span>;
   };
 
   return (
-    <div className="mx-auto max-w-7xl app-panel p-8">
-      <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+    <div className="mx-auto max-w-7xl app-panel p-4 md:p-5">
+      <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
         <div>
-          <p className="flex items-center gap-2 text-sm font-bold tracking-[0.12em] text-cyan-700">
+          <p className="flex items-center gap-2 text-xs font-bold tracking-[0.12em] text-cyan-700">
             <BookMarked className="h-4 w-4" aria-hidden />
             כרטסות
           </p>
-          <h1 className="mt-2 text-3xl font-black text-slate-950">כרטסת מאוחדת</h1>
-          <p className="mt-2 max-w-2xl text-sm text-slate-600">
+          <h1 className="mt-1 text-[32px] font-black leading-tight text-slate-950">כרטסת מאוחדת</h1>
+          <p className="mt-1 max-w-2xl text-xs text-slate-600">
             כברירת מחדל מוצגים כל הלקוחות, הספקים והעובדים יחד. השתמשו בכפתור &quot;סינון&quot; להפעלת פילטרים.
           </p>
         </div>
       </div>
 
       {overview && (
-        <div className="mt-4 rounded-xl border border-slate-100 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-700 shadow-sm">
+        <div className="mt-3 flex h-auto min-h-11 flex-wrap items-center gap-2 rounded-xl border border-slate-100 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-700 shadow-sm md:h-11">
           <span className="font-bold text-slate-500">ישויות במערכת:</span>{" "}
           <span className="text-emerald-800">לקוחות {overview.counts.customers}</span>
-          <span className="mx-2 text-slate-400">|</span>
+          <span className="text-slate-400">|</span>
           <span className="text-rose-800">ספקים {overview.counts.suppliers}</span>
-          <span className="mx-2 text-slate-400">|</span>
+          <span className="text-slate-400">|</span>
           <span className="text-cyan-900">עובדים {overview.counts.employees}</span>
+          <span className="ms-auto hidden text-slate-400 md:inline">|</span>
+          <span className="text-rose-700">חובה {formatShekel(pageSummary.debit)}</span>
+          <span className="text-emerald-700">זכות {formatShekel(pageSummary.credit)}</span>
+          <span className="text-slate-950">יתרה פתוחה {formatShekel(pageSummary.open)}</span>
         </div>
       )}
 
-      <div className="mt-6 rounded-2xl border border-slate-100 bg-slate-50/80 p-4 shadow-sm">
-        <p className="mb-3 flex items-center gap-2 text-sm font-bold text-slate-800">
+      <div className="mt-3 rounded-xl border border-slate-100 bg-slate-50/80 p-3 shadow-sm">
+        <p className="mb-2 flex items-center gap-2 text-xs font-bold text-slate-800">
           <Filter className="h-4 w-4 text-slate-500" aria-hidden />
           סינון (מוחל בלחיצה על &quot;סינון&quot;)
         </p>
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-          <label className="text-sm font-bold text-slate-800">
+        <div className="grid gap-2 md:grid-cols-3 lg:grid-cols-6">
+          <label className="text-xs font-bold text-slate-800">
             חיפוש חופשי (שם)
             <input
               type="text"
@@ -294,7 +313,7 @@ function LedgersPageInner() {
             />
           </label>
 
-          <label className="text-sm font-bold text-slate-800">
+          <label className="text-xs font-bold text-slate-800">
             סוג ישות
             <select
               value={draft.entityType}
@@ -311,7 +330,7 @@ function LedgersPageInner() {
             </select>
           </label>
 
-          <label className="text-sm font-bold text-slate-800">
+          <label className="text-xs font-bold text-slate-800">
             שם / גורם
             <select
               value={draft.entityId}
@@ -328,7 +347,7 @@ function LedgersPageInner() {
             </select>
           </label>
 
-          <label className="text-sm font-bold text-slate-800">
+          <label className="text-xs font-bold text-slate-800">
             מתאריך
             <input
               type="date"
@@ -338,7 +357,7 @@ function LedgersPageInner() {
             />
           </label>
 
-          <label className="text-sm font-bold text-slate-800">
+          <label className="text-xs font-bold text-slate-800">
             עד תאריך
             <input
               type="date"
@@ -348,18 +367,18 @@ function LedgersPageInner() {
             />
           </label>
 
-          <div className="flex flex-wrap items-end gap-2 pb-1">
+          <div className="flex flex-wrap items-end gap-2">
             <button
               type="button"
               onClick={applyFilters}
-              className="rounded-xl bg-luxury-gold px-5 py-3 text-sm font-black text-luxury-charcoal shadow-luxury-sm hover:bg-luxury-gold-hover"
+              className="h-[42px] rounded-lg bg-luxury-gold px-4 text-xs font-black text-luxury-charcoal shadow-luxury-sm hover:bg-luxury-gold-hover"
             >
               סינון
             </button>
             <button
               type="button"
               onClick={clearFilters}
-              className="rounded-xl border border-slate-300 bg-white px-5 py-3 text-sm font-bold text-slate-800 hover:bg-slate-50"
+              className="h-[42px] rounded-lg border border-slate-300 bg-white px-4 text-xs font-bold text-slate-800 hover:bg-slate-50"
             >
               נקה פילטרים
             </button>
@@ -373,43 +392,52 @@ function LedgersPageInner() {
         </p>
       )}
 
-      <div className="mt-6 overflow-x-auto rounded-2xl border border-slate-200 shadow-sm">
-        <table className="min-w-[1100px] w-full divide-y divide-slate-200 text-right text-sm">
-          <thead className="bg-slate-50">
+      <div className="mt-3 hidden overflow-x-auto rounded-xl border border-slate-200 shadow-sm [scrollbar-width:thin] hover:[scrollbar-color:#cbd5e1_transparent] md:block [&::-webkit-scrollbar]:h-2 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-300 [&::-webkit-scrollbar-track]:bg-transparent">
+        <table className="w-full min-w-[880px] table-fixed divide-y divide-slate-200 text-right text-[13px]">
+          <colgroup>
+            <col className="w-[160px]" />
+            <col className="w-[90px]" />
+            <col className="w-[120px]" />
+            <col className="w-[120px]" />
+            <col className="w-[120px]" />
+            <col className="w-[100px]" />
+            <col className="w-[80px]" />
+          </colgroup>
+          <thead className="sticky top-0 z-10 bg-slate-50 shadow-sm">
             <tr>
-              <th className="px-4 py-3 font-bold text-slate-600">שם / גורם</th>
-              <th className="px-4 py-3 font-bold text-slate-600">סוג ישות</th>
-              <th className="px-4 py-3 font-bold text-slate-600">יתרה פתוחה</th>
-              <th className="px-4 py-3 font-bold text-rose-700">חובה</th>
-              <th className="px-4 py-3 font-bold text-emerald-700">זכות</th>
-              <th className="px-4 py-3 font-bold text-slate-600">סה״כ תנועות</th>
-              <th className="px-4 py-3 font-bold text-slate-600">פעולות</th>
+              <th className={`${thClass} text-slate-600`}>שם / גורם</th>
+              <th className={`${thClass} text-slate-600`}>סוג ישות</th>
+              <th className={`${thClass} text-slate-600`}>יתרה פתוחה</th>
+              <th className={`${thClass} text-rose-700`}>חובה</th>
+              <th className={`${thClass} text-emerald-700`}>זכות</th>
+              <th className={`${thClass} text-slate-600`}>תנועות</th>
+              <th className={`${thClass} text-slate-600`}>פעולות</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100 bg-white">
             {loading && (
               <tr>
-                <td colSpan={7} className="px-4 py-8 text-center font-semibold text-slate-500">
+                <td colSpan={7} className="h-[52px] px-3 py-2 text-center text-[13px] font-semibold text-slate-500">
                   טוען…
                 </td>
               </tr>
             )}
             {!loading &&
               overview?.rows.map((row) => (
-                <tr key={`${row.entity_type}-${row.id}`}>
-                  <td className="px-4 py-3 font-bold text-slate-950">{row.name}</td>
-                  <td className="px-4 py-3">{renderEntityBadge(row.entity_type)}</td>
-                  <td className="px-4 py-3">{renderOpenBalanceCell(row)}</td>
-                  <td className="px-4 py-3 font-semibold text-slate-900">{formatShekel(row.total_debit)}</td>
-                  <td className="px-4 py-3 font-semibold text-slate-900">{formatShekel(row.total_credit)}</td>
-                  <td className="px-4 py-3 font-semibold text-slate-700">{row.movement_count}</td>
-                  <td className="px-4 py-3">
-                    <div className="flex flex-wrap items-center justify-end gap-2">
+                <tr key={`${row.entity_type}-${row.id}`} className="h-[52px] transition hover:bg-slate-50/80">
+                  <td className={`${tdClass} truncate font-bold text-slate-950`} title={row.name}>{row.name}</td>
+                  <td className={tdClass}>{renderEntityBadge(row.entity_type)}</td>
+                  <td className={tdClass}>{renderOpenBalanceCell(row)}</td>
+                  <td className={`${tdClass} font-semibold text-slate-900`}>{formatShekel(row.total_debit)}</td>
+                  <td className={`${tdClass} font-semibold text-slate-900`}>{formatShekel(row.total_credit)}</td>
+                  <td className={`${tdClass} font-semibold text-slate-700`}>{row.movement_count}</td>
+                  <td className={tdClass}>
+                    <div className="flex items-center justify-end gap-1">
                       <button
                         type="button"
                         title="צפייה בכרטסת"
                         onClick={() => setDetailUrl({ type: row.entity_type, id: row.id })}
-                        className="rounded-lg border border-slate-200 bg-white p-2 text-slate-700 shadow-sm hover:bg-slate-50"
+                        className={iconButtonClass}
                       >
                         <Eye className="h-4 w-4" aria-hidden />
                       </button>
@@ -417,7 +445,7 @@ function LedgersPageInner() {
                         type="button"
                         title="עריכת יתרת פתיחה"
                         onClick={() => openEdit(row)}
-                        className="rounded-lg border border-slate-200 bg-white p-2 text-slate-700 shadow-sm hover:bg-slate-50"
+                        className={iconButtonClass}
                       >
                         <Pencil className="h-4 w-4" aria-hidden />
                       </button>
@@ -425,12 +453,12 @@ function LedgersPageInner() {
                         <Link
                           title="קליטת תשלום"
                           href={`/finance/register?paymentCustomerId=${encodeURIComponent(row.id)}`}
-                          className="rounded-lg border border-cyan-200 bg-cyan-50 p-2 text-cyan-900 shadow-sm hover:bg-cyan-100"
+                          className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-cyan-200 bg-cyan-50 text-cyan-900 shadow-sm transition hover:bg-cyan-100"
                         >
                           <Wallet className="h-4 w-4" aria-hidden />
                         </Link>
                       ) : (
-                        <span className="rounded-lg border border-slate-100 bg-slate-50 p-2 text-slate-300" title="קליטת תשלום ללקוח בלבד">
+                        <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-100 bg-slate-50 text-slate-300" title="קליטת תשלום ללקוח בלבד">
                           <Wallet className="h-4 w-4" aria-hidden />
                         </span>
                       )}
@@ -442,11 +470,77 @@ function LedgersPageInner() {
         </table>
       </div>
 
+      <div className="mt-3 grid gap-2 md:hidden">
+        {loading && (
+          <div className="rounded-xl border border-slate-100 bg-white p-3 text-center text-[13px] font-semibold text-slate-500 shadow-sm">
+            טוען…
+          </div>
+        )}
+        {!loading &&
+          overview?.rows.map((row) => (
+            <article key={`${row.entity_type}-${row.id}-mobile`} className="rounded-xl border border-slate-100 bg-white p-3 text-[13px] shadow-sm">
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <h2 className="truncate text-sm font-black text-slate-950">{row.name}</h2>
+                  <div className="mt-1">{renderEntityBadge(row.entity_type)}</div>
+                </div>
+                <details className="relative">
+                  <summary className="flex h-8 cursor-pointer list-none items-center rounded-lg border border-slate-200 bg-slate-50 px-3 text-xs font-black text-slate-700">
+                    פעולות
+                  </summary>
+                  <div className="absolute left-0 z-20 mt-1 w-40 rounded-xl border border-slate-200 bg-white p-1 shadow-lg">
+                    <button
+                      type="button"
+                      onClick={() => setDetailUrl({ type: row.entity_type, id: row.id })}
+                      className="block w-full rounded-lg px-3 py-2 text-right text-xs font-bold text-slate-700 hover:bg-slate-50"
+                    >
+                      צפייה בכרטסת
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => openEdit(row)}
+                      className="block w-full rounded-lg px-3 py-2 text-right text-xs font-bold text-slate-700 hover:bg-slate-50"
+                    >
+                      עריכת יתרת פתיחה
+                    </button>
+                    {row.entity_type === "customer" && (
+                      <Link
+                        href={`/finance/register?paymentCustomerId=${encodeURIComponent(row.id)}`}
+                        className="block rounded-lg px-3 py-2 text-right text-xs font-bold text-cyan-900 hover:bg-cyan-50"
+                      >
+                        קליטת תשלום
+                      </Link>
+                    )}
+                  </div>
+                </details>
+              </div>
+              <div className="mt-3 grid grid-cols-2 gap-2">
+                <div className="rounded-lg bg-slate-50 px-2 py-1.5">
+                  <p className="text-[11px] font-bold text-slate-500">יתרה פתוחה</p>
+                  <p className="font-black">{renderOpenBalanceCell(row)}</p>
+                </div>
+                <div className="rounded-lg bg-slate-50 px-2 py-1.5">
+                  <p className="text-[11px] font-bold text-slate-500">תנועות</p>
+                  <p className="font-black text-slate-900">{row.movement_count}</p>
+                </div>
+                <div className="rounded-lg bg-rose-50 px-2 py-1.5">
+                  <p className="text-[11px] font-bold text-rose-700">חובה</p>
+                  <p className="font-black text-slate-900">{formatShekel(row.total_debit)}</p>
+                </div>
+                <div className="rounded-lg bg-emerald-50 px-2 py-1.5">
+                  <p className="text-[11px] font-bold text-emerald-700">זכות</p>
+                  <p className="font-black text-slate-900">{formatShekel(row.total_credit)}</p>
+                </div>
+              </div>
+            </article>
+          ))}
+      </div>
+
       {!loading && overview && overview.rows.length === 0 && (
         <p className="mt-6 text-center text-sm font-semibold text-slate-500">אין תוצאות להצגה.</p>
       )}
 
-      <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-100 bg-white px-4 py-3 text-sm font-semibold text-slate-700 shadow-sm">
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-100 bg-white px-3 py-2 text-xs font-semibold text-slate-700 shadow-sm">
         <div className="flex flex-wrap items-center gap-2">
           <span>שורות בעמוד</span>
           <select
@@ -455,9 +549,9 @@ function LedgersPageInner() {
               setPageSize(Number(e.target.value));
               setPage(1);
             }}
-            className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-right font-bold"
+            className="h-8 rounded-lg border border-slate-300 bg-white px-2 text-right text-xs font-bold"
           >
-            {[10, 25, 50].map((n) => (
+            {[12, 25, 50].map((n) => (
               <option key={n} value={n}>
                 {n}
               </option>
@@ -469,7 +563,7 @@ function LedgersPageInner() {
             type="button"
             disabled={page <= 1 || loading}
             onClick={() => setPage((p) => Math.max(1, p - 1))}
-            className="inline-flex items-center gap-1 rounded-lg border border-slate-300 px-3 py-2 font-bold hover:bg-slate-50 disabled:opacity-40"
+            className="inline-flex h-8 items-center gap-1 rounded-lg border border-slate-300 px-2 font-bold hover:bg-slate-50 disabled:opacity-40"
           >
             <ChevronRight className="h-4 w-4" aria-hidden />
             הקודם
@@ -481,7 +575,7 @@ function LedgersPageInner() {
             type="button"
             disabled={page >= totalPages || loading}
             onClick={() => setPage((p) => p + 1)}
-            className="inline-flex items-center gap-1 rounded-lg border border-slate-300 px-3 py-2 font-bold hover:bg-slate-50 disabled:opacity-40"
+            className="inline-flex h-8 items-center gap-1 rounded-lg border border-slate-300 px-2 font-bold hover:bg-slate-50 disabled:opacity-40"
           >
             הבא
             <ChevronLeft className="h-4 w-4" aria-hidden />
@@ -490,53 +584,67 @@ function LedgersPageInner() {
       </div>
 
       {detail && (
-        <div id="ledger-detail" className="mt-10 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+        <div id="ledger-detail" className="mt-5 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <p className="text-xs font-black uppercase tracking-wide text-cyan-700">צפייה בכרטסת</p>
-              <h2 className="text-xl font-black text-slate-950">{detailName || "…"}</h2>
-              <p className="text-sm text-slate-600">
+              <h2 className="text-lg font-black text-slate-950">{detailName || "…"}</h2>
+              <p className="text-xs text-slate-600">
                 סוג: {entityLabels[detail.type]} · טווח תאריכים לפי הפילטרים הפעילים
               </p>
             </div>
             <button
               type="button"
               onClick={() => setDetailUrl(null)}
-              className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-bold text-slate-800 hover:bg-slate-50"
+              className="h-8 rounded-lg border border-slate-300 px-3 text-xs font-bold text-slate-800 hover:bg-slate-50"
             >
               סגירה
             </button>
           </div>
 
-          <div className="mt-4 overflow-x-auto rounded-xl border border-slate-100">
-            <table className="min-w-[920px] w-full divide-y divide-slate-200 text-right text-sm">
-              <thead className="bg-slate-50">
+          <div className="mt-3 overflow-x-auto rounded-xl border border-slate-100 [scrollbar-width:thin] hover:[scrollbar-color:#cbd5e1_transparent] [&::-webkit-scrollbar]:h-2 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-300 [&::-webkit-scrollbar-track]:bg-transparent">
+            <table className="w-full min-w-[820px] table-fixed divide-y divide-slate-200 text-right text-[13px]">
+              <colgroup>
+                <col className="w-[110px]" />
+                <col className="w-[120px]" />
+                <col />
+                <col className="w-[120px]" />
+                <col className="w-[120px]" />
+                <col className="w-[120px]" />
+              </colgroup>
+              <thead className="sticky top-0 z-10 bg-slate-50 shadow-sm">
                 <tr>
-                  <th className="px-4 py-3 font-bold text-slate-600">תאריך</th>
-                  <th className="px-4 py-3 font-bold text-slate-600">סוג מסמך</th>
-                  <th className="px-4 py-3 font-bold text-slate-600">תיאור</th>
-                  <th className="px-4 py-3 font-bold text-rose-700">חובה</th>
-                  <th className="px-4 py-3 font-bold text-emerald-700">זכות</th>
-                  <th className="px-4 py-3 font-bold text-slate-900">יתרה</th>
+                  <th className={`${thClass} text-slate-600`}>תאריך</th>
+                  <th className={`${thClass} text-slate-600`}>סוג מסמך</th>
+                  <th className={`${thClass} text-slate-600`}>תיאור</th>
+                  <th className={`${thClass} text-rose-700`}>חובה</th>
+                  <th className={`${thClass} text-emerald-700`}>זכות</th>
+                  <th className={`${thClass} text-slate-900`}>יתרה</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 bg-white">
                 {detailLoading && (
                   <tr>
-                    <td colSpan={6} className="px-4 py-8 text-center font-semibold text-slate-500">
+                    <td colSpan={6} className="h-[52px] px-3 py-2 text-center text-[13px] font-semibold text-slate-500">
                       טוען תנועות…
                     </td>
                   </tr>
                 )}
                 {!detailLoading &&
                   rowsWithBalance.map((row, idx) => (
-                    <tr key={`${row.id}-${idx}`}>
-                      <td className="whitespace-nowrap px-4 py-3 text-slate-700">{row.entry_date}</td>
-                      <td className="px-4 py-3 font-semibold text-slate-900">{row.doc_type}</td>
-                      <td className="px-4 py-3 text-slate-600">{row.description}</td>
-                      <td className="px-4 py-3 font-bold text-slate-900">{row.debit ? formatShekel(row.debit) : "—"}</td>
-                      <td className="px-4 py-3 font-bold text-slate-900">{row.credit ? formatShekel(row.credit) : "—"}</td>
-                      <td className="px-4 py-3 font-black text-slate-950">{formatShekel(row.balance)}</td>
+                    <tr key={`${row.id}-${idx}`} className="h-[52px] transition hover:bg-slate-50/80">
+                      <td className={`${tdClass} whitespace-nowrap text-slate-700`}>{row.entry_date}</td>
+                      <td className={`${tdClass} font-semibold text-slate-900`}>{row.doc_type}</td>
+                      <td className={`${tdClass} truncate text-slate-600`} title={row.description}>{row.description}</td>
+                      <td className={`${tdClass} font-bold text-slate-900`}>{row.debit ? formatShekel(row.debit) : "—"}</td>
+                      <td className={`${tdClass} font-bold text-slate-900`}>{row.credit ? formatShekel(row.credit) : "—"}</td>
+                      <td
+                        className={`${tdClass} font-black ${
+                          row.balance > 1e-6 ? "text-amber-900" : "text-slate-950"
+                        }`}
+                      >
+                        {formatShekel(row.balance)}
+                      </td>
                     </tr>
                   ))}
               </tbody>

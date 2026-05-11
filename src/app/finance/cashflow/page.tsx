@@ -4,6 +4,8 @@ import {
   Check,
   CirclePlus,
   Eye,
+  FileText,
+  Loader2,
   Minus,
   Pencil,
   Plus,
@@ -13,6 +15,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { PdfPreviewModal } from "@/components/pdf-preview-modal";
 import {
   deleteCashFlowEntry,
   fetchCashFlowEntries,
@@ -23,8 +26,8 @@ import { paymentMethodPill, sanitizeCashFlowDescription } from "@/lib/finance/ca
 import type { CashFlowRow } from "@/lib/finance/types";
 import { formatShekel, parseNum } from "@/lib/format-shekel";
 
-const cellPad = "px-3.5 py-2.5";
-const rowH = "h-14";
+const cellPad = "px-3 py-[10px]";
+const rowH = "min-h-[64px]";
 
 function isZReportCashFlow(row: CashFlowRow): boolean {
   return row.source === "z_report" || Boolean(row.z_report_id);
@@ -54,6 +57,8 @@ export default function CashflowPage() {
 
   const [openTypeMenuId, setOpenTypeMenuId] = useState<string | null>(null);
   const typeMenuRef = useRef<HTMLDivElement>(null);
+
+  const [pdfPreview, setPdfPreview] = useState<{ url: string; title: string } | null>(null);
 
   const [directOpen, setDirectOpen] = useState(false);
   const [directDate, setDirectDate] = useState("");
@@ -208,7 +213,7 @@ export default function CashflowPage() {
   };
 
   const filterInputClass =
-    "w-full min-w-0 rounded-xl border border-slate-200 bg-white px-3 py-2 text-right text-sm font-semibold text-slate-900 outline-none focus:border-luxury-gold focus:ring-1 focus:ring-luxury-gold/25";
+    "h-14 min-h-[56px] w-full min-w-0 rounded-xl border border-slate-200 bg-white px-3 py-0 text-right text-sm font-semibold text-slate-900 outline-none focus:border-luxury-gold focus:ring-1 focus:ring-luxury-gold/25";
 
   const compactInput =
     "w-full min-w-0 rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-right text-sm font-medium text-slate-900 outline-none focus:border-luxury-gold focus:ring-1 focus:ring-luxury-gold/25";
@@ -427,6 +432,13 @@ export default function CashflowPage() {
           )}
         </td>
         <td className={`${cellPad} align-middle`}>
+          {editing ? (
+            <span className="text-slate-300">—</span>
+          ) : (
+            <CashflowPdfButton rowId={row.id} onOpen={(url, title) => setPdfPreview({ url, title })} />
+          )}
+        </td>
+        <td className={`${cellPad} align-middle`}>
           <div className="flex items-center justify-end gap-1">
             {editing ? (
               <>
@@ -614,6 +626,7 @@ export default function CashflowPage() {
             </>
           ) : (
             <>
+              <CashflowPdfButton rowId={row.id} onOpen={(url, title) => setPdfPreview({ url, title })} />
               <button type="button" className="rounded-lg border border-slate-200 p-2 text-slate-700" onClick={() => startEdit(row)}>
                 <Pencil className="h-4 w-4" aria-hidden />
               </button>
@@ -633,15 +646,15 @@ export default function CashflowPage() {
   };
 
   return (
-    <div className="mx-auto max-w-7xl app-panel p-6 md:p-8">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+    <div className="mx-auto max-w-7xl app-panel mb-[14px] p-4 md:p-[18px]">
+      <div className="flex flex-col gap-2.5 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <p className="flex items-center gap-2 text-sm font-bold tracking-[0.12em] text-cyan-700">
+          <p className="flex items-center gap-2 text-[12px] font-bold tracking-[0.12em] text-cyan-700 opacity-80">
             <Wallet className="h-4 w-4" aria-hidden />
             תזרים מזומנים
           </p>
-          <h1 className="mt-2 text-2xl font-black text-slate-950 md:text-3xl">יומן תנועות מזומן</h1>
-          <p className="mt-2 max-w-3xl text-sm text-slate-600">
+          <h1 className="erp-page-title mt-1.5 text-slate-950">יומן תנועות מזומן</h1>
+          <p className="mt-1 max-w-3xl text-[14px] leading-snug text-slate-600 opacity-80">
             רישום תנועות בלבד מטבלת התזרים; ללא יתרות לקוח או חוב פתוח — אלו מוצגים במסכי כרטסות וגבייה.
           </p>
         </div>
@@ -653,9 +666,9 @@ export default function CashflowPage() {
             setDirectDate(`${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`);
             setDirectOpen(true);
           }}
-          className="inline-flex items-center justify-center gap-2 self-start rounded-xl bg-luxury-gold px-4 py-2.5 text-sm font-black text-luxury-charcoal shadow-luxury-sm hover:bg-luxury-gold-hover"
+          className="erp-btn gap-2 self-start bg-luxury-gold text-luxury-charcoal shadow-sm hover:bg-luxury-gold-hover"
         >
-          <CirclePlus className="h-5 w-5" aria-hidden />
+          <CirclePlus className="h-4 w-4" aria-hidden />
           רישום ישירות
         </button>
       </div>
@@ -666,8 +679,8 @@ export default function CashflowPage() {
         </p>
       )}
 
-      <div className="mt-5 grid gap-3 sm:grid-cols-3">
-        <div className="rounded-2xl border border-emerald-200 bg-emerald-50/70 p-4 shadow-sm">
+      <div className="mt-[14px] grid gap-2.5 sm:grid-cols-3">
+        <div className="flex h-[120px] flex-col justify-between rounded-[18px] border border-emerald-200 bg-emerald-50/70 p-[14px] shadow-sm">
           <p className="flex items-center gap-2 text-xs font-bold text-emerald-800">
             <Plus className="h-4 w-4 shrink-0 stroke-[2.5]" aria-hidden />
             סה״כ כניסות
@@ -675,7 +688,7 @@ export default function CashflowPage() {
           <p className="mt-1 text-xs font-medium text-emerald-700/90">לפי הסינון בתצוגה</p>
           <p className="mt-1 text-xl font-black text-emerald-900">{formatShekel(totalIn)}</p>
         </div>
-        <div className="rounded-2xl border border-rose-200 bg-rose-50/70 p-4 shadow-sm">
+        <div className="flex h-[120px] flex-col justify-between rounded-[18px] border border-rose-200 bg-rose-50/70 p-[14px] shadow-sm">
           <p className="flex items-center gap-2 text-xs font-bold text-rose-800">
             <Minus className="h-4 w-4 shrink-0 stroke-[2.5]" aria-hidden />
             סה״כ יציאות
@@ -683,7 +696,7 @@ export default function CashflowPage() {
           <p className="mt-1 text-xs font-medium text-rose-700/90">לפי הסינון בתצוגה</p>
           <p className="mt-1 text-xl font-black text-rose-900">{formatShekel(totalOut)}</p>
         </div>
-        <div className="rounded-2xl border border-cyan-200 bg-cyan-50/80 p-4 shadow-sm">
+        <div className="flex h-[120px] flex-col justify-between rounded-[18px] border border-cyan-200 bg-cyan-50/80 p-[14px] shadow-sm">
           <p className="flex items-center gap-2 text-xs font-bold text-cyan-900">
             <Wallet className="h-4 w-4 shrink-0" aria-hidden />
             יתרה כללית
@@ -693,7 +706,7 @@ export default function CashflowPage() {
         </div>
       </div>
 
-      <div className="mt-5 grid gap-3 rounded-2xl border border-slate-100 bg-slate-50/80 p-4 shadow-sm md:grid-cols-2 lg:grid-cols-5">
+      <div className="mt-[14px] grid min-h-[56px] items-center gap-2.5 rounded-[18px] border border-slate-100 bg-slate-50/80 p-3 shadow-sm md:grid-cols-2 lg:grid-cols-5">
         <input
           type="text"
           value={filterCustomer}
@@ -747,13 +760,14 @@ export default function CashflowPage() {
               <th className={`${cellPad} w-[22%] font-bold text-slate-600`}>לקוח / אמצעי</th>
               <th className={`${cellPad} w-[10%] font-bold text-emerald-700`}>כניסה</th>
               <th className={`${cellPad} w-[10%] font-bold text-rose-700`}>יציאה</th>
+              <th className={`${cellPad} w-[7%] font-bold text-slate-600`}>PDF</th>
               <th className={`${cellPad} w-[7%] font-bold text-slate-600`}>פעולות</th>
             </tr>
           </thead>
           <tbody className="bg-white">
             {loading && (
               <tr>
-                <td colSpan={7} className="px-4 py-10 text-center font-semibold text-slate-500">
+                <td colSpan={8} className="px-4 py-10 text-center font-semibold text-slate-500">
                   טוען…
                 </td>
               </tr>
@@ -841,6 +855,60 @@ export default function CashflowPage() {
           </div>
         </div>
       )}
+
+      <PdfPreviewModal
+        open={Boolean(pdfPreview?.url)}
+        url={pdfPreview?.url ?? ""}
+        title={pdfPreview?.title ?? ""}
+        onClose={() => setPdfPreview(null)}
+      />
     </div>
+  );
+}
+
+function CashflowPdfButton({
+  rowId,
+  onOpen,
+}: {
+  rowId: string;
+  onOpen: (url: string, title: string) => void;
+}) {
+  const [busy, setBusy] = useState(false);
+
+  const handle = async () => {
+    setBusy(true);
+    try {
+      const latest = await fetch(`/api/reports/latest?relatedId=${encodeURIComponent(rowId)}`, {
+        credentials: "same-origin",
+      });
+      const lj = (await latest.json()) as { data?: { publicUrl: string; fileName: string } | null };
+      if (lj.data?.publicUrl) {
+        onOpen(lj.data.publicUrl, lj.data.fileName);
+        return;
+      }
+      const gen = await fetch("/api/reports/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({ entity: "cashflow", relatedId: rowId }),
+      });
+      const gj = (await gen.json()) as { publicUrl?: string; pdfUrl?: string };
+      const url = gj.publicUrl ?? gj.pdfUrl;
+      if (url) onOpen(url, `cashflow-${rowId.slice(0, 8)}.pdf`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <button
+      type="button"
+      title="PDF"
+      disabled={busy}
+      onClick={() => void handle()}
+      className="rounded-lg border border-indigo-200 bg-indigo-50 p-1.5 text-indigo-900 hover:bg-indigo-100 disabled:opacity-50"
+    >
+      {busy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <FileText className="h-4 w-4" aria-hidden />}
+    </button>
   );
 }

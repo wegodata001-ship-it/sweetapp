@@ -6,18 +6,26 @@ export async function GET() {
   const block = await requireDb();
   if (block) return block;
   try {
-    const [incomeAgg, expenseAgg, cashRows, openInvoices] = await Promise.all([
-      prisma.financialDocument.aggregate({
+    const [incomeDocs, expenseDocs, cashRows, openInvoices, openDepositDocs, openBalancesSum] = await Promise.all([
+      prisma.financialDocument.findMany({
         where: { category: "הכנסה" },
-        _sum: { totalAmount: true },
+        select: { totalAmount: true, depositAmount: true },
       }),
-      prisma.financialDocument.aggregate({
+      prisma.financialDocument.findMany({
         where: { category: "הוצאה" },
-        _sum: { totalAmount: true },
+        select: { totalAmount: true, depositAmount: true },
       }),
       prisma.cashFlowEntry.findMany(),
       prisma.financialDocument.count({
         where: { category: "הכנסה", remainingAmount: { gt: 0 } },
+      }),
+      prisma.financialDocument.findMany({
+        where: { depositStatus: "open" },
+        select: { depositAmount: true },
+      }),
+      prisma.financialDocument.aggregate({
+        where: { category: "הכנסה", remainingAmount: { gt: 0 } },
+        _sum: { remainingAmount: true },
       }),
     ]);
 
@@ -26,15 +34,27 @@ export async function GET() {
       const t = row.entryType.toLowerCase();
       const raw = Number(row.amount);
       if (!Number.isFinite(raw)) continue;
-      if (t === "income" || t === "invoice") {
+      if (t === "income" || t === "invoice" || t === "deposit") {
         cashNet += raw >= 0 ? raw : 0;
-      } else if (["expense", "refund", "supplier_payment", "salary"].includes(t)) {
+      } else if (["expense", "refund", "supplier_payment", "salary", "deposit_refund"].includes(t)) {
         cashNet -= raw >= 0 ? raw : -raw;
       }
     }
 
-    const income = incomeAgg._sum.totalAmount ?? 0;
-    const expenses = expenseAgg._sum.totalAmount ?? 0;
+    const docNet = (row: { totalAmount: number; depositAmount?: number | null }) =>
+      Math.max(0, row.totalAmount - (row.depositAmount ?? 0));
+    const income = (incomeDocs as { totalAmount: number; depositAmount?: number | null }[]).reduce(
+      (sum, row) => sum + docNet(row),
+      0,
+    );
+    const expenses = (expenseDocs as { totalAmount: number; depositAmount?: number | null }[]).reduce(
+      (sum, row) => sum + docNet(row),
+      0,
+    );
+    const openDeposits = (openDepositDocs as { depositAmount?: number | null }[]).reduce(
+      (sum, row) => sum + Math.max(0, row.depositAmount ?? 0),
+      0,
+    );
 
     return NextResponse.json({
       ok: true,
@@ -43,7 +63,9 @@ export async function GET() {
         expenses,
         cashflow: cashNet,
         openInvoices,
+        openDeposits,
         overdueInvoices: 0,
+        openBalancesTotal: Math.max(0, openBalancesSum._sum.remainingAmount ?? 0),
       },
     });
   } catch (e) {

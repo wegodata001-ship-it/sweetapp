@@ -15,7 +15,9 @@ type Stats = {
   expenses: number;
   cashflow: number;
   openInvoices: number;
+  openDeposits: number;
   overdueInvoices: number;
+  openBalancesTotal: number;
 };
 
 export default function FinancePortalPage() {
@@ -53,6 +55,8 @@ export default function FinancePortalPage() {
   const income = stats?.income ?? 0;
   const expenses = stats?.expenses ?? 0;
   const cashflow = stats?.cashflow ?? 0;
+  const openDeposits = stats?.openDeposits ?? 0;
+  const openBalancesTotal = stats?.openBalancesTotal ?? 0;
 
   return (
     <div className="mx-auto max-w-7xl space-y-8">
@@ -80,7 +84,7 @@ export default function FinancePortalPage() {
         </div>
       </section>
 
-      <section className="grid gap-4 md:grid-cols-3">
+      <section className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
         <div className="app-panel p-6">
           <p className="text-sm font-semibold text-slate-500">Total income</p>
           <p className="mt-3 text-3xl font-black">
@@ -97,6 +101,18 @@ export default function FinancePortalPage() {
           <p className="text-sm font-semibold text-slate-500">Cashflow</p>
           <p className="mt-3 text-3xl font-black">
             {loading ? "…" : currencyFormatter.format(cashflow)}
+          </p>
+        </div>
+        <div className="app-panel border-orange-200 bg-orange-50/60 p-6">
+          <p className="text-sm font-semibold text-orange-950">יתרות פתוחות (חוב לגבייה)</p>
+          <p className="mt-3 text-3xl font-black text-orange-950">
+            {loading ? "…" : currencyFormatter.format(openBalancesTotal)}
+          </p>
+        </div>
+        <div className="app-panel border-amber-200 bg-amber-50/50 p-6">
+          <p className="text-sm font-semibold text-amber-900">סה״כ פיקדונות פתוחים</p>
+          <p className="mt-3 text-3xl font-black text-amber-950">
+            {loading ? "…" : currencyFormatter.format(openDeposits)}
           </p>
         </div>
       </section>

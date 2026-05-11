@@ -17,7 +17,7 @@ import { taskDeadlinePassed } from "@/lib/tasks/helpers";
 
 const ASSIGNEE_SELECT = { id: true, fullName: true, email: true, role: true } as const;
 
-function normalizeStartTime(t: string): string | null {
+function normalizeTime(t: string): string | null {
   const s = t.trim();
   const m = /^(\d{1,2}):(\d{2})$/.exec(s);
   if (!m) return null;
@@ -253,6 +253,7 @@ export async function POST(req: NextRequest) {
       priority?: string;
       taskDate?: string;
       startTime?: string;
+      endTime?: string | null;
       dueDate?: string | null;
     };
 
@@ -265,13 +266,20 @@ export async function POST(req: NextRequest) {
           : [];
     const assigneeIds = [...new Set(rawIds.map((id) => id?.trim()).filter(Boolean))] as string[];
 
-    const startNorm = body.startTime ? normalizeStartTime(body.startTime) : null;
+    const startNorm = body.startTime ? normalizeTime(body.startTime) : null;
+    const endNorm = body.endTime?.trim() ? normalizeTime(body.endTime) : null;
 
     if (!body.title?.trim() || !body.taskDate?.trim() || !startNorm || assigneeIds.length === 0) {
       return NextResponse.json(
         { ok: false, error: "חובה: לפחות עובד אחד, כותרת, תאריך ושעת התחלה" },
         { status: 400 },
       );
+    }
+    if (body.endTime?.trim() && !endNorm) {
+      return NextResponse.json({ ok: false, error: "שעת סיום לא תקינה" }, { status: 400 });
+    }
+    if (endNorm && endNorm < startNorm) {
+      return NextResponse.json({ ok: false, error: "שעת סיום חייבת להיות אחרי שעת ההתחלה" }, { status: 400 });
     }
 
     const taskDate = parseTaskDateInput(body.taskDate.trim());
@@ -323,6 +331,7 @@ export async function POST(req: NextRequest) {
           startedAt: null,
           taskDate,
           startTime: startNorm,
+          endTime: endNorm,
           dueDate: dueDateVal,
           createdById,
         },

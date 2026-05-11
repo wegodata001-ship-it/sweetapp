@@ -14,7 +14,7 @@ import { serializeEmployeeTask } from "@/lib/tasks/serialize-task";
 
 const ASSIGNEE_SELECT = { id: true, fullName: true, email: true, role: true } as const;
 
-function normStart(t: string): string | null {
+function normTime(t: string): string | null {
   const s = t.trim();
   const m = /^(\d{1,2}):(\d{2})$/.exec(s);
   if (!m) return null;
@@ -40,6 +40,7 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
       status?: string;
       taskDate?: string | null;
       startTime?: string | null;
+      endTime?: string | null;
       dueDate?: string | null;
       assigneeId?: string;
       employeeId?: string;
@@ -115,9 +116,28 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
       data.taskDate = td;
     }
     if (body.startTime !== undefined && body.startTime !== null) {
-      const st = normStart(body.startTime);
+      const st = normTime(body.startTime);
       if (!st) return NextResponse.json({ ok: false, error: "שעת התחלה לא תקינה" }, { status: 400 });
       data.startTime = st;
+    }
+    if (body.endTime !== undefined) {
+      if (body.endTime === null || body.endTime === "") {
+        data.endTime = null;
+      } else {
+        const et = normTime(body.endTime);
+        if (!et) return NextResponse.json({ ok: false, error: "שעת סיום לא תקינה" }, { status: 400 });
+        data.endTime = et;
+      }
+    }
+    const nextStart = typeof data.startTime === "string" ? data.startTime : existing.startTime;
+    const nextEnd =
+      typeof data.endTime === "string"
+        ? data.endTime
+        : data.endTime === null
+          ? null
+          : existing.endTime ?? null;
+    if (nextEnd && nextEnd < nextStart) {
+      return NextResponse.json({ ok: false, error: "שעת סיום חייבת להיות אחרי שעת ההתחלה" }, { status: 400 });
     }
     if (body.dueDate !== undefined) {
       if (body.dueDate === null || body.dueDate === "") {

@@ -9,6 +9,10 @@ type AppShellProps = {
   children: ReactNode;
 };
 
+/** ריפוד תוכן ERP קומפקטי — 18px דסקטופ, 10px מובייל */
+const MAIN_PAD =
+  "flex-1 bg-white px-[18px] py-[18px] max-md:px-2.5 max-md:py-2.5";
+
 export function AppShell({ children }: AppShellProps) {
   const pathname = usePathname();
   const workerPortal = pathname === "/worker" || pathname.startsWith("/worker/");
@@ -22,7 +26,7 @@ export function AppShell({ children }: AppShellProps) {
     return (
       <div className="min-h-screen bg-white">
         <SessionBar />
-        <main className="px-4 py-6 sm:px-8">{children}</main>
+        <main className="px-[18px] py-[18px] max-md:px-2.5 max-md:py-2.5">{children}</main>
       </div>
     );
   }
@@ -50,9 +54,7 @@ export function AppShell({ children }: AppShellProps) {
             </span>
           </div>
         </header>
-        <main className="flex-1 bg-white px-5 py-6 sm:px-8 lg:px-10 lg:py-10">
-          {children}
-        </main>
+        <main className={MAIN_PAD}>{children}</main>
       </div>
     </div>
   );

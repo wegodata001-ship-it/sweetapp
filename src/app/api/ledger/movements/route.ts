@@ -38,11 +38,11 @@ export async function GET(req: NextRequest) {
       const movements: LedgerMovementView[] = [];
 
       for (const d of docs) {
+        if (d.category !== "הכנסה") continue;
         const entryDate = (d.docDate ?? d.createdAt).toISOString().slice(0, 10);
         if (dateFrom && entryDate < dateFrom) continue;
         if (dateTo && entryDate > dateTo) continue;
         const remainingAmount = Math.max(0, d.remainingAmount);
-        const openBalance = Math.max(0, d.totalAmount - d.paidAmount);
 
         movements.push({
           id: `doc-${d.id}`,
@@ -51,15 +51,14 @@ export async function GET(req: NextRequest) {
           entity_name: customer.name,
           entity_type: "customer",
           entry_date: entryDate,
-          doc_type: remainingAmount > 0 ? d.documentType : `${d.documentType} · שולם במלואו`,
+          doc_type: d.documentType,
           description:
-            remainingAmount > 0
-              ? `${d.title} — חוב פתוח ${remainingAmount.toFixed(2)}`
+            remainingAmount > 1e-6
+              ? `${d.title} — חובה פתוחה ${remainingAmount.toFixed(2)} ₪`
               : `${d.title} — שולם במלואו`,
-          debit: openBalance,
+          debit: d.totalAmount,
           credit: 0,
-          open_balance: openBalance,
-          balance_delta: openBalance,
+          open_balance: remainingAmount,
         });
       }
 
@@ -81,7 +80,6 @@ export async function GET(req: NextRequest) {
           debit: 0,
           credit: p.amount,
           open_balance: openBalance,
-          balance_delta: 0,
         });
       }
 

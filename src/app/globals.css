@@ -10,6 +10,14 @@
   --nav-surface-elevated: #243044;
   --nav-border: rgba(255, 255, 255, 0.09);
   --content-surface: #ffffff;
+  /* Compact ERP density */
+  --erp-radius: 18px;
+  --erp-gap: 10px;
+  --erp-section-mb: 14px;
+  --erp-container-pad: 18px;
+  --erp-input-h: 44px;
+  --erp-btn-h: 42px;
+  --erp-table-row: 64px;
 }
 
 @theme inline {
@@ -22,9 +30,9 @@
   --font-mono: var(--font-geist-mono), ui-monospace, monospace;
 }
 
-/* ~17px root for clearer RTL Hebrew / Arabic reading */
+/* Base ~15px for Hebrew clarity; compact vs previous 106.25% */
 html {
-  font-size: 106.25%;
+  font-size: 100%;
 }
 
 body {
@@ -32,6 +40,8 @@ body {
   color: var(--foreground);
   font-family: var(--font-geist-sans), var(--font-noto-arabic), system-ui,
     sans-serif;
+  font-size: 0.875rem;
+  line-height: 1.45;
 }
 
 .font-arabic-brand {
@@ -46,25 +56,69 @@ textarea {
   font: inherit;
 }
 
-/* Premium surfaces: rounded-xl + soft elevation */
+/* Premium surfaces — ERP compact radius */
 @layer components {
   .app-panel {
-    @apply rounded-xl border border-slate-200/90 bg-white shadow-luxury;
+    @apply rounded-[18px] border border-slate-200/90 bg-white shadow-luxury;
   }
 
   .app-panel-muted {
-    @apply rounded-xl border border-slate-200/80 bg-slate-50/90 shadow-luxury-sm;
+    @apply rounded-[18px] border border-slate-200/80 bg-slate-50/90 shadow-luxury-sm;
+  }
+
+  /** Section titles across the app */
+  .erp-page-title {
+    @apply text-[clamp(2rem,2.6vw,2.625rem)] font-black leading-[1.1] tracking-tight text-slate-950;
+  }
+
+  .erp-section-title {
+    @apply text-[22px] font-extrabold text-slate-950;
+  }
+
+  /** Icon / compact action buttons in tables */
+  .erp-icon-btn {
+    @apply inline-flex h-[38px] min-h-[38px] min-w-[38px] items-center justify-center rounded-xl border border-slate-200 bg-white p-0 text-slate-700 shadow-sm transition hover:bg-slate-50;
+  }
+
+  /** Primary compact button */
+  .erp-btn {
+    @apply inline-flex h-[42px] items-center justify-center rounded-[16px] px-[18px] text-sm font-bold transition disabled:opacity-50;
+  }
+
+  /** Tables: default data tables under main (exclude .erp-table-loose, .inventory-count-table) */
+  main table:not(.erp-table-loose):not(.inventory-count-table) tbody tr {
+    min-height: 64px;
+  }
+
+  main table:not(.erp-table-loose):not(.inventory-count-table) :is(thead th, tbody td) {
+    padding-block: 10px;
+    padding-inline: 12px;
+    font-size: 14px;
+    line-height: 1.35;
+  }
+
+  main table.inventory-count-table tbody tr {
+    min-height: 58px;
+  }
+
+  main table.inventory-count-table :is(thead th, tbody td) {
+    padding-block: 8px;
+    padding-inline: 10px;
+    font-size: 14px;
   }
 }
 
-/* Form controls — rounded-xl, soft shadow; focus uses luxury gold */
+/* Form controls — compact ERP */
 @layer base {
   input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not(
       [type="file"]
     ):not([type="hidden"]),
-  select,
+  select {
+    @apply h-11 min-h-[44px] rounded-xl border border-slate-200/90 bg-white px-3 py-0 text-sm shadow-luxury-sm outline-none transition;
+  }
+
   textarea {
-    @apply rounded-xl border border-slate-200/90 bg-white px-3 py-2.5 text-base shadow-luxury-sm outline-none transition;
+    @apply min-h-[110px] rounded-xl border border-slate-200/90 bg-white px-3 py-2 text-sm shadow-luxury-sm outline-none transition;
   }
 
   input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not(

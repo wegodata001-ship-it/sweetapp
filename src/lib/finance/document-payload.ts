@@ -2,7 +2,7 @@
 export const VAT_RATE = 0.18;
 
 /** Exact document type labels for commercial documents (Hebrew). */
-/** אמצעי תשלום בכרטיס "פרטי תשלום" (מסמכי הכנסה) */
+/** אמצעי תשלום בכרטיס "פרטי תשלום" — לכל מסמך כספי */
 export const PAYMENT_INSTRUMENT_OPTIONS = [
   "CASH",
   "CREDIT",
@@ -17,6 +17,28 @@ export const PAYMENT_METHOD_LABELS: Record<(typeof PAYMENT_INSTRUMENT_OPTIONS)[n
   BANK: "העברה",
   BIT: "ביט",
   CHECK: "צ׳ק",
+};
+
+export const DEPOSIT_TYPE_OPTIONS = [
+  "TRAYS",
+  "SERVING_TOOLS",
+  "EVENT_EQUIPMENT",
+  "CRATES",
+  "OTHER",
+] as const;
+
+export const DEPOSIT_TYPE_LABELS: Record<(typeof DEPOSIT_TYPE_OPTIONS)[number], string> = {
+  TRAYS: "מגשים",
+  SERVING_TOOLS: "כלי הגשה",
+  EVENT_EQUIPMENT: "ציוד אירועים",
+  CRATES: "ארגזים",
+  OTHER: "אחר",
+};
+
+export const DEPOSIT_STATUS_LABELS: Record<string, string> = {
+  open: "פתוח",
+  returned: "הוחזר",
+  refunded: "הוחזר כסף",
 };
 
 export const DOCUMENT_TYPE_OPTIONS = [
@@ -61,7 +83,7 @@ export type IncomeExpensePayload = {
   docDate: string;
   documentType: string;
   paymentMethod: string;
-  /** סכום ששולם במסגרת מסמך זה (הכנסות) */
+  /** סכום ששולם במסגרת מסמך זה (שדה ישן לתאימות) */
   paymentPaidAmount: string;
   /** אמצעי תשלום בפועל — מזומן / אשראי / העברה בנקאית / ביט / צ׳ק */
   paymentInstrument: string;
@@ -69,7 +91,13 @@ export type IncomeExpensePayload = {
   paymentNotes: string;
   /** תשלומים מרובים בפועל — מחליף את שדות התשלום הישנים, שנשארים לתאימות. */
   payments: PaymentLinePayload[];
+  /** alias שמור ב־metadata עבור מסמכים כספיים חדשים. */
+  paymentMethods?: PaymentLinePayload[];
+  includeDeposit: boolean;
   depositAmount: string;
+  depositType: string;
+  depositNote: string;
+  depositStatus: "open" | "returned" | "refunded";
   trayQty: string;
   returnDate: string;
   lines: FinanceLineItemPayload[];
@@ -115,7 +143,12 @@ export function emptyIncomeExpensePayload(kind: "income" | "expense"): IncomeExp
         notes: "",
       },
     ],
+    paymentMethods: [],
+    includeDeposit: false,
     depositAmount: "",
+    depositType: DEPOSIT_TYPE_OPTIONS[0],
+    depositNote: "",
+    depositStatus: "open",
     trayQty: "",
     returnDate: "",
     lines: [{ id: newLineId(), itemName: "", quantity: "1", price: "", vatMode: "includes_vat" }],
@@ -166,7 +199,11 @@ export function parsePayload(raw: unknown): FinanceDocumentPayload | null {
       };
     });
     const docTypeRaw = String(o.documentType ?? "").trim();
-    const paymentsRaw = Array.isArray(o.payments) ? o.payments : [];
+    const paymentsRaw = Array.isArray(o.payments)
+      ? o.payments
+      : Array.isArray(o.paymentMethods)
+        ? o.paymentMethods
+        : [];
     const payments: PaymentLinePayload[] = paymentsRaw.map((row) => {
       const r = row as Record<string, unknown>;
       const instrument = String(r.instrument ?? PAYMENT_INSTRUMENT_OPTIONS[0]).trim();
@@ -196,7 +233,15 @@ export function parsePayload(raw: unknown): FinanceDocumentPayload | null {
       paymentInstrument: String(o.paymentInstrument ?? PAYMENT_INSTRUMENT_OPTIONS[0]),
       paymentNotes: String(o.paymentNotes ?? ""),
       payments,
+      paymentMethods: payments,
+      includeDeposit: Boolean(o.includeDeposit) || (Number(o.depositAmount) || 0) > 0,
       depositAmount: String(o.depositAmount ?? ""),
+      depositType: String(o.depositType ?? DEPOSIT_TYPE_OPTIONS[0]),
+      depositNote: String(o.depositNote ?? ""),
+      depositStatus:
+        o.depositStatus === "returned" || o.depositStatus === "refunded"
+          ? o.depositStatus
+          : "open",
       trayQty: String(o.trayQty ?? ""),
       returnDate: String(o.returnDate ?? ""),
       lines: lines.length ? lines : emptyIncomeExpensePayload(o.kind).lines,
@@ -231,6 +276,15 @@ export function incomeExpenseGrandTotal(payload: IncomeExpensePayload): number {
   return payload.lines.reduce((sum, row) => sum + lineGrossTotal(row.quantity, row.price, row.vatMode), 0);
 }
 
+export function incomeExpenseDepositAmount(payload: IncomeExpensePayload): number {
+  if (!payload.includeDeposit) return 0;
+  return Math.max(0, Number.parseFloat(payload.depositAmount.replace(/,/g, "")) || 0);
+}
+
+export function incomeExpenseTotalToPay(payload: IncomeExpensePayload): number {
+  return incomeExpenseGrandTotal(payload) + incomeExpenseDepositAmount(payload);
+}
+
 export function incomeExpenseNetTotal(payload: IncomeExpensePayload): number {
   return payload.lines.reduce((sum, row) => sum + lineNetTotal(row.quantity, row.price, row.vatMode), 0);
 }
@@ -240,18 +294,20 @@ export function incomeExpenseVatTotal(payload: IncomeExpensePayload): number {
 }
 
 export function paymentLinesTotal(payload: IncomeExpensePayload): number {
-  return payload.payments.reduce((sum, row) => {
+  const rows = payload.payments?.length ? payload.payments : payload.paymentMethods ?? [];
+  return rows.reduce((sum, row) => {
     const amount = Math.max(0, Number.parseFloat(row.amount.replace(/,/g, "")) || 0);
     return sum + amount;
   }, 0);
 }
 
-/** שורת notes במסמך — תקבול קיים + הערות תשלום מהכרטיס החדש */
+  /** שורת notes במסמך — שדות ישנים + הערות תשלום מהכרטיס המשותף */
 export function combineIncomeNotes(ie: IncomeExpensePayload): string | null {
   const chunks: string[] = [];
   if (ie.paymentMethod.trim()) chunks.push(`תקבול: ${ie.paymentMethod.trim()}`);
   if (ie.paymentNotes.trim()) chunks.push(`הערות תשלום: ${ie.paymentNotes.trim()}`);
-  for (const p of ie.payments) {
+  const rows = ie.payments?.length ? ie.payments : ie.paymentMethods ?? [];
+  for (const p of rows) {
     const amount = p.amount.trim();
     const note = p.notes.trim();
     if (amount || note) {

@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
   combineIncomeNotes,
+  incomeExpenseDepositAmount,
   incomeExpenseGrandTotal,
   lineGrossTotal,
+  paymentLinesTotal,
   type FinanceDocumentPayload,
   type IncomeExpensePayload,
   type VatMode,
@@ -22,13 +24,13 @@ import { getSessionFromCookie } from "@/lib/auth/get-session";
 import { logActivity } from "@/lib/activity-log";
 import { parseNum } from "@/lib/format-shekel";
 import { getSupabaseServiceClient } from "@/lib/supabase/server";
+import { bucketForStoragePath } from "@/lib/pdf/constants";
 import type { Prisma } from "@prisma/client";
 
 function asJson(value: unknown): Prisma.InputJsonValue {
   return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
 }
 
-const BUCKET = process.env.NEXT_PUBLIC_SUPABASE_STORAGE_BUCKET?.trim() || "pdf_photo";
 
 function zTotal(z: ZReportPayload): number {
   return z.cashTaxable + z.cashExempt + z.creditTaxable + z.creditExempt + z.transfers;
@@ -112,7 +114,7 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
             totalAmount: total,
             paidAmount: total,
             remainingAmount: 0,
-            paymentStatus: total <= 0 ? "UNPAID" : "PAID",
+            paymentStatus: total <= 0 ? "unpaid" : "paid",
             metadata: asJson(meta),
             docDate: z.zDate ? new Date(z.zDate) : undefined,
             sentToCpa: body.sent_to_cpa ?? undefined,
@@ -123,19 +125,25 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
       } else {
         const ie = meta as IncomeExpensePayload;
         const items = buildItemsFromIncomeExpense(ie);
-        const calculatedTotal =
+        const productTotal =
           items.reduce((s, r) => s + r.total, 0) || incomeExpenseGrandTotal(ie);
+        const depositAmount = incomeExpenseDepositAmount(ie);
+        const calculatedTotal = productTotal + depositAmount;
         const customerId =
           ie.kind === "income" ? await ensureCustomerByName(ie.counterpartyName) : null;
 
         const category = body.category ?? existing.category;
         const isIncomeRegister = ie.kind === "income" && category === "הכנסה";
+        const isIncomeExpenseDocument = ie.kind === "income" || ie.kind === "expense";
+        const paidRaw = paymentLinesTotal(ie);
 
-        if (isIncomeRegister) {
-          const paidRaw = normalizedPaymentLines(ie).reduce((sum, p) => sum + parseNum(p.amount), 0);
-          if (paidRaw > calculatedTotal + 1e-9) {
+        if (isIncomeExpenseDocument) {
+          if (paidRaw < -1e-6) {
+            return NextResponse.json({ ok: false, error: "סכום תשלום לא יכול להיות שלילי" }, { status: 400 });
+          }
+          if (paidRaw > calculatedTotal + 1e-6) {
             return NextResponse.json(
-              { ok: false, error: "סכום תשלום לא יכול לעלות על סה״כ המסמך" },
+              { ok: false, error: "סכום אמצעי התשלום לא יכול לעלות על סה״כ המסמך" },
               { status: 400 },
             );
           }
@@ -153,6 +161,10 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
             documentType: ie.documentType,
             customerId,
             totalAmount: calculatedTotal,
+            depositAmount,
+            depositType: depositAmount > 0 ? ie.depositType?.trim() || null : null,
+            depositNote: depositAmount > 0 ? ie.depositNote?.trim() || null : null,
+            depositStatus: depositAmount > 0 ? ie.depositStatus || "open" : "open",
             metadata: asJson(meta),
             notes: combineIncomeNotes(ie),
             docDate: ie.docDate ? new Date(ie.docDate) : body.doc_date ? new Date(body.doc_date) : undefined,
@@ -166,9 +178,9 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
                         itemName: "סיכום",
                         productName: "סיכום",
                         quantity: 1,
-                        unitPrice: calculatedTotal,
+                        unitPrice: productTotal,
                         vatType: null,
-                        total: calculatedTotal,
+                        total: productTotal,
                       },
                     ],
             },
@@ -234,7 +246,8 @@ export async function DELETE(_req: NextRequest, ctx: { params: Promise<{ id: str
     if (existing.pdfStoragePath) {
       const supabase = getSupabaseServiceClient();
       if (supabase) {
-        await supabase.storage.from(BUCKET).remove([existing.pdfStoragePath]);
+        const path = existing.pdfStoragePath;
+        await supabase.storage.from(bucketForStoragePath(path)).remove([path]);
       }
     }
 

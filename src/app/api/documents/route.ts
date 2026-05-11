@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
   combineIncomeNotes,
+  incomeExpenseDepositAmount,
   incomeExpenseGrandTotal,
   lineGrossTotal,
+  paymentLinesTotal,
   type FinanceDocumentPayload,
   type IncomeExpensePayload,
   type VatMode,
@@ -108,7 +110,7 @@ export async function POST(req: NextRequest) {
           totalAmount: total,
           paidAmount: total,
           remainingAmount: 0,
-          paymentStatus: total <= 0 ? "UNPAID" : "PAID",
+          paymentStatus: total <= 0 ? "unpaid" : "paid",
           notes: null,
           metadata: asJson(meta),
           docDate: z.zDate ? new Date(z.zDate) : body.docDate ? new Date(body.docDate) : null,
@@ -123,20 +125,25 @@ export async function POST(req: NextRequest) {
 
     const ie = meta as IncomeExpensePayload;
     const items = buildItemsFromIncomeExpense(ie);
-    const calculatedTotal =
+    const productTotal =
       items.reduce((s, r) => s + r.total, 0) || incomeExpenseGrandTotal(ie);
+    const depositAmount = incomeExpenseDepositAmount(ie);
+    const calculatedTotal = productTotal + depositAmount;
 
     const customerId =
       ie.kind === "income" ? await ensureCustomerByName(ie.counterpartyName) : null;
 
-    const isIncomeRegister =
-      ie.kind === "income" && body.category === "הכנסה";
+    const isIncomeRegister = ie.kind === "income" && body.category === "הכנסה";
+    const isIncomeExpenseDocument = ie.kind === "income" || ie.kind === "expense";
+    const paidRaw = paymentLinesTotal(ie);
 
-    if (isIncomeRegister) {
-      const paidRaw = normalizedPaymentLines(ie).reduce((sum, p) => sum + parseNum(p.amount), 0);
-      if (paidRaw > calculatedTotal + 1e-9) {
+    if (isIncomeExpenseDocument) {
+      if (paidRaw < -1e-6) {
+        return NextResponse.json({ ok: false, error: "סכום תשלום לא יכול להיות שלילי" }, { status: 400 });
+      }
+      if (paidRaw > calculatedTotal + 1e-6) {
         return NextResponse.json(
-          { ok: false, error: "סכום תשלום לא יכול לעלות על סה״כ המסמך" },
+          { ok: false, error: "סכום אמצעי התשלום לא יכול לעלות על סה״כ המסמך" },
           { status: 400 },
         );
       }
@@ -153,7 +160,7 @@ export async function POST(req: NextRequest) {
         totalAmount: calculatedTotal,
         paidAmount: 0,
         remainingAmount: calculatedTotal,
-        paymentStatus: "UNPAID",
+        paymentStatus: "unpaid",
         notes: combineIncomeNotes(ie),
         metadata: asJson(meta),
         docDate: ie.docDate ? new Date(ie.docDate) : body.docDate ? new Date(body.docDate) : null,
@@ -167,12 +174,16 @@ export async function POST(req: NextRequest) {
                   itemName: "סיכום",
                   productName: "סיכום",
                   quantity: 1,
-                  unitPrice: calculatedTotal,
+                  unitPrice: productTotal,
                   vatType: null,
-                  total: calculatedTotal,
+                  total: productTotal,
                 },
               ],
         },
+        depositAmount,
+        depositType: depositAmount > 0 ? ie.depositType?.trim() || null : null,
+        depositNote: depositAmount > 0 ? ie.depositNote?.trim() || null : null,
+        depositStatus: depositAmount > 0 ? ie.depositStatus || "open" : "open",
       },
     });
 

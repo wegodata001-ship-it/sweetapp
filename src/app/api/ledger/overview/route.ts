@@ -168,6 +168,7 @@ export async function GET(req: NextRequest) {
             where: { customerId: { in: custIds } },
             select: {
               customerId: true,
+              category: true,
               totalAmount: true,
               paidAmount: true,
               remainingAmount: true,
@@ -192,12 +193,12 @@ export async function GET(req: NextRequest) {
 
     for (const d of docsForPage) {
       if (!d.customerId) continue;
+      if (d.category !== "הכנסה") continue;
       const entryDate = docEntryDate(d);
       if (!inDateRange(entryDate, dateFrom, dateTo)) continue;
       const row = debitCreditMoves.get(d.customerId);
       if (!row) continue;
-      const openLine = Math.max(0, d.totalAmount - d.paidAmount);
-      row.debit += openLine;
+      row.debit += Math.max(0, d.totalAmount);
       row.count += 1;
     }
 

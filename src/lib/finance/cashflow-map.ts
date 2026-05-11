@@ -8,9 +8,9 @@ export function prismaCashFlowToRow(entry: PrismaCf): CashFlowRow {
   let inflow = 0;
   let outflow = 0;
   if (Number.isFinite(raw)) {
-    if (t === "income") {
+    if (t === "income" || t === "deposit") {
       inflow = raw >= 0 ? raw : 0;
-    } else if (["expense", "refund", "supplier_payment", "salary"].includes(t)) {
+    } else if (["expense", "refund", "supplier_payment", "salary", "deposit_refund"].includes(t)) {
       outflow = raw >= 0 ? raw : -raw;
     }
   }

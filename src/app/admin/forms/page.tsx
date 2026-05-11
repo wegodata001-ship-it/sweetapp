@@ -1,20 +1,69 @@
 "use client";
 
-import { ClipboardList, LayoutGrid, Plus, Trash2 } from "lucide-react";
+import { ClipboardList, LayoutGrid, Trash2 } from "lucide-react";
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import type { Dispatch, SetStateAction } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { DynamicFormFieldInput, type DynamicFieldDefinition } from "@/components/dynamic-form-field-input";
+import {
+  FORM_FIELD_TYPE_KEYS,
+  FORM_FIELD_TYPE_LABELS,
+  optionsJsonToText,
+  parseOptionsJson,
+  validateDynamicFieldValue,
+  type FormFieldTypeKey,
+} from "@/lib/forms/field-types";
 
-type Field = {
+type ApiField = {
   id: string;
   label: string;
+  fieldType: string;
+  placeholder: string | null;
+  required: boolean;
+  optionsJson: unknown;
+  sortOrder: number;
 };
 
+type Draft = {
+  label: string;
+  fieldType: FormFieldTypeKey;
+  placeholder: string;
+  required: boolean;
+  optionsText: string;
+};
+
+const emptyDraft = (): Draft => ({
+  label: "",
+  fieldType: "STRING",
+  placeholder: "",
+  required: false,
+  optionsText: "",
+});
+
+const cellInput =
+  "h-[42px] w-full rounded-lg border border-slate-300 bg-white px-3 text-right text-[14px] font-semibold text-slate-900 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/25";
+
+const rowClass = "min-h-[58px] items-center gap-2 border-b border-slate-100 py-2 last:border-b-0";
+
+function toDynamicDef(f: ApiField): DynamicFieldDefinition {
+  return {
+    id: f.id,
+    label: f.label,
+    fieldType: f.fieldType,
+    placeholder: f.placeholder,
+    required: f.required,
+    optionsJson: f.optionsJson,
+  };
+}
+
 export default function AdminFormsPage() {
-  const [fields, setFields] = useState<Field[]>([]);
-  const [newFieldLabel, setNewFieldLabel] = useState("");
-  const [editingFieldId, setEditingFieldId] = useState<string | null>(null);
-  const [editFieldDraft, setEditFieldDraft] = useState("");
+  const [fields, setFields] = useState<ApiField[]>([]);
+  const [newDraft, setNewDraft] = useState<Draft>(emptyDraft);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editDraft, setEditDraft] = useState<Draft>(emptyDraft);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [previewValues, setPreviewValues] = useState<Record<string, unknown>>({});
+  const [previewErrors, setPreviewErrors] = useState<Record<string, string>>({});
 
   const loadFields = useCallback(async () => {
     setLoadError(null);
@@ -24,8 +73,12 @@ export default function AdminFormsPage() {
         setLoadError("אין חיבור למסד — הגדרו DATABASE_URL");
         return;
       }
-      const fj = (await fRes.json()) as { data?: { id: string; label: string }[] };
-      if (fj.data) setFields(fj.data.map((r) => ({ id: r.id, label: r.label })));
+      const fj = (await fRes.json()) as { data?: ApiField[] };
+      if (fj.data) {
+        setFields(fj.data);
+        setPreviewValues({});
+        setPreviewErrors({});
+      }
     } catch {
       setLoadError("טעינה נכשלה");
     }
@@ -35,18 +88,30 @@ export default function AdminFormsPage() {
     void loadFields();
   }, [loadFields]);
 
+  const sortedFields = useMemo(
+    () => [...fields].sort((a, b) => a.sortOrder - b.sortOrder || a.label.localeCompare(b.label, "he")),
+    [fields],
+  );
+
   const addField = async () => {
-    if (!newFieldLabel.trim()) return;
+    if (!newDraft.label.trim()) return;
     const res = await fetch("/api/form-fields", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ label: newFieldLabel.trim(), sortOrder: fields.length }),
+      body: JSON.stringify({
+        label: newDraft.label.trim(),
+        fieldType: newDraft.fieldType,
+        placeholder: newDraft.placeholder.trim() || null,
+        required: newDraft.required,
+        sortOrder: fields.length,
+        ...(newDraft.fieldType === "SELECT" ? { optionsText: newDraft.optionsText } : {}),
+      }),
       credentials: "same-origin",
     });
     if (!res.ok) return;
-    const j = (await res.json()) as { data?: { id: string; label: string } };
-    if (j.data) setFields((prev) => [...prev, { id: j.data!.id, label: j.data!.label }]);
-    setNewFieldLabel("");
+    const j = (await res.json()) as { data?: ApiField };
+    if (j.data) setFields((prev) => [...prev, j.data!]);
+    setNewDraft(emptyDraft());
   };
 
   const removeField = async (id: string) => {
@@ -55,37 +120,156 @@ export default function AdminFormsPage() {
       credentials: "same-origin",
     });
     setFields((prev) => prev.filter((f) => f.id !== id));
-    if (editingFieldId === id) {
-      setEditingFieldId(null);
-      setEditFieldDraft("");
+    if (editingId === id) {
+      setEditingId(null);
+      setEditDraft(emptyDraft());
     }
+    setPreviewValues((pv) => {
+      const next = { ...pv };
+      delete next[id];
+      return next;
+    });
   };
 
-  const startEditField = (field: Field) => {
-    setEditingFieldId(field.id);
-    setEditFieldDraft(field.label);
+  const startEditField = (field: ApiField) => {
+    setEditingId(field.id);
+    setEditDraft({
+      label: field.label,
+      fieldType: (FORM_FIELD_TYPE_KEYS as readonly string[]).includes(field.fieldType)
+        ? (field.fieldType as FormFieldTypeKey)
+        : "STRING",
+      placeholder: field.placeholder ?? "",
+      required: field.required,
+      optionsText: optionsJsonToText(field.optionsJson),
+    });
   };
 
   const saveFieldEdit = async () => {
-    if (!editingFieldId || !editFieldDraft.trim()) return;
-    await fetch(`/api/form-fields/${encodeURIComponent(editingFieldId)}`, {
+    if (!editingId || !editDraft.label.trim()) return;
+    const res = await fetch(`/api/form-fields/${encodeURIComponent(editingId)}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ label: editFieldDraft.trim() }),
+      body: JSON.stringify({
+        label: editDraft.label.trim(),
+        fieldType: editDraft.fieldType,
+        placeholder: editDraft.placeholder.trim() || null,
+        required: editDraft.required,
+        ...(editDraft.fieldType === "SELECT" ? { optionsText: editDraft.optionsText } : {}),
+      }),
       credentials: "same-origin",
     });
-    setFields((prev) =>
-      prev.map((f) => (f.id === editingFieldId ? { ...f, label: editFieldDraft.trim() } : f)),
-    );
-    setEditingFieldId(null);
-    setEditFieldDraft("");
+    if (!res.ok) return;
+    const j = (await res.json()) as { data?: ApiField };
+    if (j.data) {
+      setFields((prev) => prev.map((f) => (f.id === editingId ? j.data! : f)));
+    }
+    setEditingId(null);
+    setEditDraft(emptyDraft());
   };
 
-  const inputClass =
-    "mt-1 block w-full rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-right text-sm font-semibold text-slate-900 outline-none focus:border-luxury-gold focus:ring-2 focus:ring-luxury-gold/25";
+  const runPreviewValidate = () => {
+    const nextErr: Record<string, string> = {};
+    for (const f of sortedFields) {
+      const opts = parseOptionsJson(f.optionsJson);
+      const msg = validateDynamicFieldValue(f.fieldType, previewValues[f.id], f.required, opts);
+      if (msg) nextErr[f.id] = msg;
+    }
+    setPreviewErrors(nextErr);
+  };
+
+  const renderDraftRow = (
+    draft: Draft,
+    setDraft: Dispatch<SetStateAction<Draft>>,
+    onSubmit: () => void | Promise<void>,
+    submitLabel: string,
+    showCancel?: () => void,
+  ) => (
+    <div className="space-y-3">
+      <div className={`grid grid-cols-1 gap-2 md:grid-cols-12 md:gap-x-3 ${rowClass}`}>
+        <div className="md:col-span-3">
+          <label className="mb-1 block text-[11px] font-bold text-slate-500">שם שדה</label>
+          <input
+            value={draft.label}
+            onChange={(e) => setDraft((d) => ({ ...d, label: e.target.value }))}
+            className={cellInput}
+            placeholder="שם מלא / טלפון / מחיר…"
+          />
+        </div>
+        <div className="md:col-span-2">
+          <label className="mb-1 block text-[11px] font-bold text-slate-500">סוג שדה</label>
+          <select
+            value={draft.fieldType}
+            onChange={(e) =>
+              setDraft((d) => ({
+                ...d,
+                fieldType: e.target.value as FormFieldTypeKey,
+              }))
+            }
+            className={cellInput}
+          >
+            {FORM_FIELD_TYPE_KEYS.map((k) => (
+              <option key={k} value={k}>
+                {FORM_FIELD_TYPE_LABELS[k]}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="flex flex-col justify-end md:col-span-2">
+          <label className="mb-1 flex cursor-pointer items-center gap-2 text-[13px] font-bold text-slate-800">
+            <input
+              type="checkbox"
+              checked={draft.required}
+              onChange={(e) => setDraft((d) => ({ ...d, required: e.target.checked }))}
+              className="h-4 w-4 rounded border-slate-300"
+            />
+            חובה
+          </label>
+        </div>
+        <div className="md:col-span-4">
+          <label className="mb-1 block text-[11px] font-bold text-slate-500">placeholder</label>
+          <input
+            value={draft.placeholder}
+            onChange={(e) => setDraft((d) => ({ ...d, placeholder: e.target.value }))}
+            className={cellInput}
+            placeholder="לדוגמה: הכנס מספר טלפון"
+          />
+        </div>
+        <div className="flex flex-wrap items-end gap-2 md:col-span-1 md:justify-end">
+          <button
+            type="button"
+            onClick={() => void onSubmit()}
+            className="h-[42px] rounded-lg bg-indigo-600 px-4 text-[13px] font-black text-white hover:bg-indigo-700"
+          >
+            {submitLabel}
+          </button>
+          {showCancel ? (
+            <button
+              type="button"
+              onClick={showCancel}
+              className="h-[42px] rounded-lg border border-slate-300 px-3 text-[13px] font-bold text-slate-700 hover:bg-slate-50"
+            >
+              ביטול
+            </button>
+          ) : null}
+        </div>
+      </div>
+      {draft.fieldType === "SELECT" ? (
+        <div>
+          <label className="mb-1 block text-[11px] font-bold text-slate-500">אפשרויות (שורה לכל ערך)</label>
+          <textarea
+            value={draft.optionsText}
+            onChange={(e) => setDraft((d) => ({ ...d, optionsText: e.target.value }))}
+            rows={3}
+            className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-right text-[14px] font-semibold text-slate-900 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/25"
+            placeholder={"רגיל\nדחוף\nVIP"}
+          />
+        </div>
+      ) : null}
+    </div>
+  );
 
   return (
-    <div className="mx-auto max-w-4xl space-y-6">
+    <div className="mx-auto max-w-6xl space-y-6">
       <section className="app-panel p-8">
         <p className="flex items-center gap-2 text-sm font-bold tracking-[0.12em] text-violet-700">
           <ClipboardList className="h-4 w-4" aria-hidden />
@@ -93,7 +277,7 @@ export default function AdminFormsPage() {
         </p>
         <h1 className="mt-3 text-3xl font-black text-slate-950">בונה טפסים</h1>
         <p className="mt-2 max-w-2xl text-sm text-slate-600">
-          ניהול שדות לטפסי ספירת מלאי וביצוע משימות — נפרד ממסך הקצאת משימות.
+          הגדרת שדות עם סוג אמתי (אימייל, טלפון, מספר, תאריך וכו׳) — לשימוש בטפסי ספירה ובמשימות.
         </p>
         <Link
           href="/admin/tasks"
@@ -101,11 +285,11 @@ export default function AdminFormsPage() {
         >
           חזרה להקצאת משימות
         </Link>
-        {loadError && (
+        {loadError ? (
           <p className="mt-4 text-sm font-bold text-amber-800" role="alert">
             {loadError}
           </p>
-        )}
+        ) : null}
       </section>
 
       <section className="app-panel p-6 md:p-8">
@@ -113,85 +297,124 @@ export default function AdminFormsPage() {
           <LayoutGrid className="h-5 w-5 text-indigo-600" aria-hidden />
           <h2 className="text-xl font-black text-slate-950">שדות טופס</h2>
         </div>
-        <p className="mt-2 text-sm text-slate-600">יצירה ועריכה של שדות בעברית.</p>
+        <p className="mt-2 text-sm text-slate-600">
+          הוסיפו שורה עם שם שדה, סוג, חובה ו-placeholder — לא רק טקסט חופשי.
+        </p>
 
-        <div className="mt-6 flex flex-col gap-3 sm:flex-row">
-          <input
-            value={newFieldLabel}
-            onChange={(event) => setNewFieldLabel(event.target.value)}
-            className="flex-1 rounded-xl border border-slate-300 px-3 py-3 text-right font-semibold text-slate-900 outline-none focus:border-luxury-gold focus:ring-2 focus:ring-luxury-gold/25"
-            placeholder="שם שדה חדש בעברית"
-          />
-          <button
-            type="button"
-            onClick={() => void addField()}
-            className="inline-flex items-center justify-center gap-2 rounded-xl bg-indigo-600 px-5 py-3 font-black text-white hover:bg-indigo-700"
-          >
-            <Plus className="h-4 w-4" aria-hidden />
-            הוספת שדה
-          </button>
+        <div className="mt-6 rounded-2xl border border-indigo-200/80 bg-indigo-50/40 p-4 md:p-5">
+          <p className="mb-3 text-[13px] font-black text-indigo-950">הוספת שדה חדש</p>
+          {renderDraftRow(newDraft, setNewDraft, addField, "הוספה")}
         </div>
 
-        <div className="mt-6 space-y-3">
-          {fields.map((field) => {
-            const isEditing = editingFieldId === field.id;
-            return (
-              <div
-                key={field.id}
-                className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 sm:flex-row sm:items-center sm:justify-between"
-              >
-                {isEditing ? (
-                  <input
-                    value={editFieldDraft}
-                    onChange={(e) => setEditFieldDraft(e.target.value)}
-                    className={`${inputClass} flex-1`}
-                  />
-                ) : (
-                  <span className="flex-1 text-base font-bold text-slate-900">{field.label}</span>
-                )}
-                <div className="flex flex-wrap gap-2">
+        <div className="mt-8 overflow-hidden rounded-2xl border border-slate-200">
+          <div className="hidden grid-cols-12 gap-2 border-b border-slate-200 bg-slate-50 px-3 py-2 text-[11px] font-black text-slate-600 md:grid">
+            <div className="col-span-3">שם שדה</div>
+            <div className="col-span-2">סוג</div>
+            <div className="col-span-2">חובה</div>
+            <div className="col-span-4">placeholder</div>
+            <div className="col-span-1 text-end">פעולות</div>
+          </div>
+          <div className="divide-y divide-slate-100">
+            {sortedFields.map((field) => {
+              const isEditing = editingId === field.id;
+              return (
+                <div key={field.id} className="px-3 py-3">
                   {isEditing ? (
-                    <>
-                      <button
-                        type="button"
-                        onClick={() => void saveFieldEdit()}
-                        className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-black text-white hover:bg-emerald-700"
-                      >
-                        שמירה
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setEditingFieldId(null);
-                          setEditFieldDraft("");
-                        }}
-                        className="rounded-lg border border-slate-300 px-3 py-2 text-xs font-bold text-slate-700 hover:bg-white"
-                      >
-                        ביטול
-                      </button>
-                    </>
+                    renderDraftRow(editDraft, setEditDraft, saveFieldEdit, "שמירה", () => {
+                      setEditingId(null);
+                      setEditDraft(emptyDraft());
+                    })
                   ) : (
-                    <button
-                      type="button"
-                      onClick={() => startEditField(field)}
-                      className="rounded-lg border border-indigo-300 px-3 py-2 text-xs font-black text-indigo-700 hover:bg-indigo-50"
-                    >
-                      עריכה
-                    </button>
+                    <div className={`grid grid-cols-1 gap-2 md:grid-cols-12 md:gap-x-3 ${rowClass}`}>
+                      <div className="font-bold text-slate-900 md:col-span-3">{field.label}</div>
+                      <div className="text-[13px] text-slate-700 md:col-span-2">
+                        {(FORM_FIELD_TYPE_KEYS as readonly string[]).includes(field.fieldType)
+                          ? FORM_FIELD_TYPE_LABELS[field.fieldType as FormFieldTypeKey]
+                          : field.fieldType}
+                      </div>
+                      <div className="text-[13px] md:col-span-2">{field.required ? "כן" : "לא"}</div>
+                      <div className="truncate text-[13px] text-slate-600 md:col-span-4">{field.placeholder ?? "—"}</div>
+                      <div className="flex flex-wrap gap-2 md:col-span-1 md:justify-end">
+                        <button
+                          type="button"
+                          onClick={() => startEditField(field)}
+                          className="rounded-lg border border-indigo-300 px-3 py-2 text-[12px] font-black text-indigo-700 hover:bg-indigo-50"
+                        >
+                          עריכה
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void removeField(field.id)}
+                          className="inline-flex items-center gap-1 rounded-lg border border-rose-300 px-3 py-2 text-[12px] font-black text-rose-700 hover:bg-rose-50"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" aria-hidden />
+                          מחיקה
+                        </button>
+                      </div>
+                    </div>
                   )}
-                  <button
-                    type="button"
-                    onClick={() => void removeField(field.id)}
-                    className="inline-flex items-center gap-1 rounded-lg border border-rose-300 px-3 py-2 text-xs font-black text-rose-700 hover:bg-rose-50"
-                  >
-                    <Trash2 className="h-3.5 w-3.5" aria-hidden />
-                    מחיקה
-                  </button>
+                  {!isEditing && field.fieldType === "SELECT" ? (
+                    <pre className="mt-2 whitespace-pre-wrap rounded-lg bg-slate-50 px-3 py-2 text-[12px] text-slate-600">
+                      {optionsJsonToText(field.optionsJson) || "—"}
+                    </pre>
+                  ) : null}
                 </div>
+              );
+            })}
+          </div>
+          {sortedFields.length === 0 ? (
+            <p className="px-4 py-8 text-center text-sm font-semibold text-slate-500">עדיין אין שדות — הוסיפו משורת ההוספה למעלה.</p>
+          ) : null}
+        </div>
+      </section>
+
+      <section className="app-panel p-6 md:p-8">
+        <h2 className="text-lg font-black text-slate-950">תצוגה מקדימה — יצירת טופס</h2>
+        <p className="mt-1 text-sm text-slate-600">
+          הרינדור לפי סוג השדה בפועל; לחיצה על «בדיקת ולידציה» תאמת פורמט אימייל, טלפון וכו׳.
+        </p>
+        <div className="mt-5 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+          {sortedFields.map((field) => {
+            const def = toDynamicDef(field);
+            const showLabel = field.fieldType !== "BOOLEAN";
+            return (
+              <div key={field.id} className="rounded-xl border border-slate-200 bg-slate-50/60 p-4">
+                {showLabel ? (
+                  <label className="mb-2 block text-[13px] font-black text-slate-900">
+                    {field.label}
+                    {field.required ? <span className="text-rose-600"> *</span> : null}
+                  </label>
+                ) : null}
+                <DynamicFormFieldInput
+                  field={
+                    showLabel
+                      ? { ...def, label: "\u200b" }
+                      : def
+                  }
+                  value={previewValues[field.id]}
+                  onChange={(v) =>
+                    setPreviewValues((pv) => ({
+                      ...pv,
+                      [field.id]: v,
+                    }))
+                  }
+                  error={previewErrors[field.id]}
+                />
               </div>
             );
           })}
         </div>
+        {sortedFields.length === 0 ? (
+          <p className="mt-4 text-sm text-slate-500">הוסיפו שדות כדי לראות תצוגה מקדימה.</p>
+        ) : (
+          <button
+            type="button"
+            onClick={runPreviewValidate}
+            className="mt-6 rounded-xl bg-slate-900 px-5 py-3 text-sm font-black text-white hover:bg-slate-800"
+          >
+            בדיקת ולידציה (דמו)
+          </button>
+        )}
       </section>
     </div>
   );

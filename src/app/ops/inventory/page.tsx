@@ -7,12 +7,11 @@ import {
   ChevronDown,
   Clock,
   Package,
-  Pencil,
   Search,
   TrendingUp,
   Warehouse as WarehouseIcon,
 } from "lucide-react";
-import Link from "next/link";
+import type { CSSProperties } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   INVENTORY_MOVEMENT_KEYS,
@@ -20,15 +19,25 @@ import {
   type InventoryMovementKey,
 } from "@/lib/inventory/movement";
 
-type ProductRow = {
+/** מוצר מכירה — לתנועות יומיות בלבד */
+type MovementProductPick = {
   id: string;
   name: string;
   currentStock: number;
-  minStock: number;
-  category: { id: string; name: string } | null;
-  supplier: { id: string; name: string } | null;
-  lastStockAt?: string | null;
-  lastStockBy?: { id: string; fullName: string; email: string } | null;
+};
+
+/** שורת מצב מלאי — מקור: InventoryProduct + ספירה אחרונה */
+type InventoryStockRow = {
+  id: string;
+  name: string;
+  category: string;
+  location: string;
+  unit: string | null;
+  currentQuantity: number | null;
+  minimumQuantity: number;
+  lastCountedAt: string | null;
+  countedBy: { id: string; fullName: string; email: string } | null;
+  status: "חסר" | "נמוך" | "תקין";
 };
 
 type Stats = {
@@ -56,8 +65,46 @@ type MovementRow = {
   createdBy: { id: string; fullName: string; email: string } | null;
 };
 
+type InventoryCountProductRow = {
+  id: string;
+  name: string;
+  location: string;
+  unit: string | null;
+  previousQuantity: number;
+  lastCountedAt: string | null;
+};
+
+type ManagedInventoryProductRow = {
+  id: string;
+  name: string;
+  location: string;
+  category: string;
+  minimumQuantity: number;
+  unit: string | null;
+  countsCount: number;
+  createdAt: string;
+};
+
+type InventoryCountHistoryRow = {
+  id: string;
+  countDate: string;
+  previousQuantity: number;
+  currentQuantity: number;
+  difference: number;
+  note: string | null;
+  countedBy?: { id: string; fullName: string; email: string } | null;
+  product: {
+    id: string;
+    name: string;
+    location: string;
+    unit: string | null;
+  };
+};
+
 const TABS = [
-  { id: "monthly", label: "ספירה חודשית" },
+  { id: "monthly", label: "ספירה חדשה" },
+  { id: "history", label: "היסטוריית ספירות" },
+  { id: "products", label: "מוצרי ספירה" },
   { id: "daily", label: "תנועות יומיות" },
   { id: "stock", label: "מצב מלאי נוכחי" },
 ] as const;
@@ -65,19 +112,53 @@ const TABS = [
 type TabId = (typeof TABS)[number]["id"];
 
 function countDiffMeta(diff: number) {
-  if (diff < 0) return { label: "חסר", diffClass: "text-rose-700 font-black", badge: "bg-rose-100 text-rose-900" };
-  if (diff > 0) return { label: "עודף", diffClass: "text-emerald-700 font-black", badge: "bg-emerald-100 text-emerald-800" };
-  return { label: "תקין", diffClass: "text-emerald-600 font-bold", badge: "bg-emerald-50 text-emerald-800" };
+  if (diff < 0) {
+    return {
+      label: "חוסר",
+      diffStyle: { color: "#dc2626" } as CSSProperties,
+      badgeClass: "font-black",
+      badgeStyle: { backgroundColor: "rgba(220, 38, 38, 0.12)", color: "#dc2626" } as CSSProperties,
+    };
+  }
+  if (diff > 0) {
+    return {
+      label: "תוספת",
+      diffStyle: { color: "#16a34a" } as CSSProperties,
+      badgeClass: "font-black",
+      badgeStyle: { backgroundColor: "rgba(22, 163, 74, 0.12)", color: "#16a34a" } as CSSProperties,
+    };
+  }
+  return {
+    label: "ללא שינוי",
+    diffStyle: { color: "#64748b" } as CSSProperties,
+    badgeClass: "font-bold",
+    badgeStyle: { backgroundColor: "rgba(100, 116, 139, 0.14)", color: "#64748b" } as CSSProperties,
+  };
 }
 
-function stockStatusMeta(p: Pick<ProductRow, "currentStock" | "minStock">) {
-  if (p.currentStock <= 0) {
-    return { label: "חסר", row: "bg-rose-50/50", badge: "bg-rose-100 text-rose-900" };
+const INVENTORY_FILTER_CATEGORIES = ["חומרי גלם", "אריזות", "קירור", "מדבקות", "כללי", "מיקום"] as const;
+
+function inventoryStockPresentation(status: InventoryStockRow["status"]) {
+  switch (status) {
+    case "חסר":
+      return {
+        label: "חסר",
+        row: "bg-rose-50/75",
+        badge: "bg-rose-100 text-rose-900",
+      };
+    case "נמוך":
+      return {
+        label: "נמוך",
+        row: "bg-amber-50/55",
+        badge: "bg-amber-100 text-amber-950",
+      };
+    default:
+      return {
+        label: "תקין",
+        row: "bg-emerald-50/45",
+        badge: "bg-emerald-100 text-emerald-900",
+      };
   }
-  if (p.minStock > 0 && p.currentStock <= p.minStock) {
-    return { label: "נמוך", row: "bg-amber-50/40", badge: "bg-amber-100 text-amber-950" };
-  }
-  return { label: "תקין", row: "", badge: "bg-emerald-100 text-emerald-900" };
 }
 
 function movementRowClass(type: string) {
@@ -165,22 +246,30 @@ export default function InventoryPage() {
   const [tab, setTab] = useState<TabId>("monthly");
   const [stats, setStats] = useState<Stats | null>(null);
   const [meta, setMeta] = useState<Meta | null>(null);
-  const [products, setProducts] = useState<ProductRow[]>([]);
-  const [stockRows, setStockRows] = useState<ProductRow[]>([]);
+  const [countProducts, setCountProducts] = useState<InventoryCountProductRow[]>([]);
+  const [managedCountProducts, setManagedCountProducts] = useState<ManagedInventoryProductRow[]>([]);
+  const [historyRows, setHistoryRows] = useState<InventoryCountHistoryRow[]>([]);
+  const [stockRows, setStockRows] = useState<InventoryStockRow[]>([]);
   const [movements, setMovements] = useState<MovementRow[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
 
   const [countDate, setCountDate] = useState(() => new Date().toISOString().slice(0, 10));
-  const [warehouseId, setWarehouseId] = useState("");
   const [actualById, setActualById] = useState<Record<string, string>>({});
   const [notesById, setNotesById] = useState<Record<string, string>>({});
+  const [newCountProduct, setNewCountProduct] = useState({ name: "", location: "", unit: "" });
+  const [addInventoryOpen, setAddInventoryOpen] = useState(false);
+  const [historyDateFrom, setHistoryDateFrom] = useState("");
+  const [historyDateTo, setHistoryDateTo] = useState("");
+  const [historyProductId, setHistoryProductId] = useState("");
+  const [historyOnlyShortage, setHistoryOnlyShortage] = useState(false);
+  const [historyOnlySurplus, setHistoryOnlySurplus] = useState(false);
 
   const [movementDate, setMovementDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [productQuery, setProductQuery] = useState("");
-  const [productPick, setProductPick] = useState<ProductRow | null>(null);
-  const [suggestions, setSuggestions] = useState<ProductRow[]>([]);
+  const [productPick, setProductPick] = useState<MovementProductPick | null>(null);
+  const [suggestions, setSuggestions] = useState<MovementProductPick[]>([]);
   const [showSuggest, setShowSuggest] = useState(false);
   const suggestRef = useRef<HTMLDivElement>(null);
   const [movType, setMovType] = useState<InventoryMovementKey>("STOCK_IN");
@@ -192,10 +281,12 @@ export default function InventoryPage() {
   const [debouncedQ, setDebouncedQ] = useState("");
   const [onlyShortage, setOnlyShortage] = useState(false);
   const [onlyBelowMin, setOnlyBelowMin] = useState(false);
-  const [filterCategory, setFilterCategory] = useState("");
-  const [filterSupplier, setFilterSupplier] = useState("");
-  const [filterLastUser, setFilterLastUser] = useState("");
+  const [filterInventoryCategory, setFilterInventoryCategory] = useState("");
   const [filtersOpen, setFiltersOpen] = useState(false);
+
+  const [stockMovementModalId, setStockMovementModalId] = useState<string | null>(null);
+  const [stockMovementRows, setStockMovementRows] = useState<InventoryCountHistoryRow[]>([]);
+  const [stockMovementLoading, setStockMovementLoading] = useState(false);
 
   const loadStats = useCallback(async () => {
     const res = await fetch("/api/inventory/stats", { credentials: "same-origin" });
@@ -209,11 +300,29 @@ export default function InventoryPage() {
     if (j.data) setMeta(j.data);
   }, []);
 
-  const loadProducts = useCallback(async () => {
-    const res = await fetch("/api/inventory", { credentials: "same-origin" });
-    const j = (await res.json()) as { data?: ProductRow[] };
-    setProducts(j.data ?? []);
+  const loadCountProducts = useCallback(async () => {
+    const res = await fetch("/api/inventory/monthly-count", { credentials: "same-origin" });
+    const j = (await res.json()) as { data?: InventoryCountProductRow[] };
+    setCountProducts(j.data ?? []);
   }, []);
+
+  const loadManagedCountProducts = useCallback(async () => {
+    const res = await fetch("/api/inventory/count-products", { credentials: "same-origin" });
+    const j = (await res.json()) as { data?: ManagedInventoryProductRow[] };
+    setManagedCountProducts(j.data ?? []);
+  }, []);
+
+  const loadCountHistory = useCallback(async () => {
+    const params = new URLSearchParams();
+    if (historyDateFrom) params.set("dateFrom", historyDateFrom);
+    if (historyDateTo) params.set("dateTo", historyDateTo);
+    if (historyProductId) params.set("productId", historyProductId);
+    if (historyOnlyShortage) params.set("onlyShortage", "1");
+    if (historyOnlySurplus) params.set("onlySurplus", "1");
+    const res = await fetch(`/api/inventory/count-history?${params.toString()}`, { credentials: "same-origin" });
+    const j = (await res.json()) as { data?: InventoryCountHistoryRow[] };
+    setHistoryRows(j.data ?? []);
+  }, [historyDateFrom, historyDateTo, historyOnlyShortage, historyOnlySurplus, historyProductId]);
 
   const loadMovements = useCallback(async (date: string) => {
     const res = await fetch(`/api/inventory/movements?date=${encodeURIComponent(date)}`, {
@@ -228,30 +337,53 @@ export default function InventoryPage() {
     if (debouncedQ.trim()) params.set("q", debouncedQ.trim());
     if (onlyShortage) params.set("onlyShortage", "1");
     if (onlyBelowMin) params.set("onlyBelowMin", "1");
-    if (filterCategory) params.set("categoryId", filterCategory);
-    if (filterSupplier) params.set("supplierId", filterSupplier);
-    if (filterLastUser) params.set("lastUpdatedById", filterLastUser);
+    if (filterInventoryCategory) params.set("category", filterInventoryCategory);
     const res = await fetch(`/api/inventory/stock?${params.toString()}`, { credentials: "same-origin" });
-    const j = (await res.json()) as { data?: ProductRow[] };
+    const j = (await res.json()) as { data?: InventoryStockRow[] };
     setStockRows(j.data ?? []);
-  }, [debouncedQ, onlyShortage, onlyBelowMin, filterCategory, filterSupplier, filterLastUser]);
+  }, [debouncedQ, onlyShortage, onlyBelowMin, filterInventoryCategory]);
+
+  const openInventoryMovementModal = useCallback(async (inventoryProductId: string) => {
+    setStockMovementModalId(inventoryProductId);
+    setStockMovementLoading(true);
+    try {
+      const res = await fetch(
+        `/api/inventory/count-history?productId=${encodeURIComponent(inventoryProductId)}`,
+        { credentials: "same-origin" },
+      );
+      const j = (await res.json()) as { data?: InventoryCountHistoryRow[] };
+      setStockMovementRows(j.data ?? []);
+    } finally {
+      setStockMovementLoading(false);
+    }
+  }, []);
 
   const refreshAll = useCallback(async () => {
     setLoadError(null);
     try {
-      await Promise.all([loadStats(), loadMeta(), loadProducts(), loadMovements(movementDate), loadStock()]);
+      await Promise.all([
+        loadStats(),
+        loadMeta(),
+        loadCountProducts(),
+        loadManagedCountProducts(),
+        loadCountHistory(),
+        loadMovements(movementDate),
+        loadStock(),
+      ]);
     } catch {
       setLoadError("טעינה נכשלה");
     }
-  }, [loadMeta, loadMovements, loadProducts, loadStats, loadStock, movementDate]);
+  }, [loadCountHistory, loadCountProducts, loadManagedCountProducts, loadMeta, loadMovements, loadStats, loadStock, movementDate]);
 
   useEffect(() => {
-    void refreshAll();
-  }, []);
+    queueMicrotask(() => {
+      void refreshAll();
+    });
+  }, [refreshAll]);
 
   useEffect(() => {
     if (meta?.users.length && movUserId === "") {
-      setMovUserId(meta.users[0].id);
+      queueMicrotask(() => setMovUserId(meta.users[0].id));
     }
   }, [meta, movUserId]);
 
@@ -261,24 +393,30 @@ export default function InventoryPage() {
   }, [filterQ]);
 
   useEffect(() => {
-    if (tab === "stock") void loadStock();
+    if (tab === "stock") {
+      queueMicrotask(() => {
+        void loadStock();
+      });
+    }
   }, [tab, loadStock]);
 
   useEffect(() => {
-    void loadMovements(movementDate);
+    queueMicrotask(() => {
+      void loadMovements(movementDate);
+    });
   }, [movementDate, loadMovements]);
 
   useEffect(() => {
     const q = productQuery.trim();
     if (q.length < 1) {
-      setSuggestions([]);
+      queueMicrotask(() => setSuggestions([]));
       return;
     }
     const id = window.setTimeout(async () => {
-      const res = await fetch(`/api/inventory/stock?q=${encodeURIComponent(q)}&limit=12`, {
+      const res = await fetch(`/api/inventory/movement-products?q=${encodeURIComponent(q)}&limit=12`, {
         credentials: "same-origin",
       });
-      const j = (await res.json()) as { data?: ProductRow[] };
+      const j = (await res.json()) as { data?: MovementProductPick[] };
       setSuggestions(j.data ?? []);
       setShowSuggest(true);
     }, 200);
@@ -294,13 +432,13 @@ export default function InventoryPage() {
   }, []);
 
   const monthlyRows = useMemo(() => {
-    return products.map((p) => {
+    return countProducts.map((p) => {
       const raw = actualById[p.id] ?? "";
       const actual = raw === "" ? null : Number(raw);
-      const diff = actual === null || Number.isNaN(actual) ? null : Math.trunc(actual) - p.currentStock;
+      const diff = actual === null || Number.isNaN(actual) ? null : actual - p.previousQuantity;
       return { ...p, raw, actual, diff };
     });
-  }, [products, actualById]);
+  }, [countProducts, actualById]);
 
   const saveMonthly = async () => {
     setBusy(true);
@@ -309,9 +447,9 @@ export default function InventoryPage() {
       const lines = monthlyRows
         .filter((r) => r.actual !== null && !Number.isNaN(r.actual))
         .map((r) => ({
-          productId: r.id,
-          actualQty: r.actual as number,
-          notes: notesById[r.id]?.trim() || null,
+          inventoryProductId: r.id,
+          currentQuantity: r.actual as number,
+          note: notesById[r.id]?.trim() || null,
         }));
       if (lines.length === 0) {
         setNotice("הזינו ספירה בפועל לפחות למוצר אחד.");
@@ -324,7 +462,6 @@ export default function InventoryPage() {
         credentials: "same-origin",
         body: JSON.stringify({
           countDate,
-          warehouseId: warehouseId || null,
           lines,
         }),
       });
@@ -334,12 +471,50 @@ export default function InventoryPage() {
         setBusy(false);
         return;
       }
-      setNotice(`נשמרה ספירה חודשית (${lines.length} שורות).`);
+      setNotice(`נשמרה ספירת מלאי (${lines.length} שורות).`);
       setActualById({});
       setNotesById({});
-      await Promise.all([loadStats(), loadProducts(), loadStock()]);
+      await Promise.all([loadStats(), loadCountProducts(), loadCountHistory()]);
     } catch {
       setNotice("שמירה נכשלה");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const createCountProduct = async () => {
+    if (!newCountProduct.name.trim()) {
+      setNotice("חסר שם פריט מלאי.");
+      return;
+    }
+    if (!newCountProduct.location.trim()) {
+      setNotice("חובה לציין מיקום.");
+      return;
+    }
+    setBusy(true);
+    setNotice(null);
+    try {
+      const res = await fetch("/api/inventory/count-products", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({
+          name: newCountProduct.name.trim(),
+          location: newCountProduct.location.trim(),
+          unit: newCountProduct.unit.trim() || null,
+        }),
+      });
+      const j = (await res.json()) as { ok?: boolean; error?: string };
+      if (!res.ok) {
+        setNotice(j.error ?? "יצירת פריט נכשלה");
+        return;
+      }
+      setNewCountProduct({ name: "", location: "", unit: "" });
+      setAddInventoryOpen(false);
+      setNotice("פריט ספירה נוסף למערכת.");
+      await Promise.all([loadCountProducts(), loadManagedCountProducts(), loadStats()]);
+    } catch {
+      setNotice("יצירת פריט נכשלה");
     } finally {
       setBusy(false);
     }
@@ -381,7 +556,7 @@ export default function InventoryPage() {
       setMovQty("1");
       setProductPick(null);
       setProductQuery("");
-      await Promise.all([loadStats(), loadProducts(), loadMovements(movementDate), loadStock()]);
+      await Promise.all([loadStats(), loadCountProducts(), loadMovements(movementDate), loadStock()]);
     } catch {
       setNotice("שמירה נכשלה");
     } finally {
@@ -394,14 +569,14 @@ export default function InventoryPage() {
   const labelClass = "block text-xs font-bold text-slate-600";
 
   return (
-    <div className="mx-auto max-w-7xl space-y-6 px-3 pb-10 sm:px-4" dir="rtl">
-      <section className="app-panel p-5 md:p-8">
-        <p className="flex items-center gap-2 text-sm font-bold tracking-[0.12em] text-luxury-navy-rich">
+    <div className="mx-auto max-w-7xl space-y-[14px] pb-6" dir="rtl">
+      <section className="app-panel mb-[14px] px-5 py-6 md:px-7 md:py-7">
+        <p className="flex items-center gap-2 text-[12px] font-bold tracking-[0.12em] text-luxury-navy-rich opacity-80">
           <Package className="h-4 w-4 shrink-0 text-luxury-gold" aria-hidden />
           מלאי ותנועות
         </p>
-        <h1 className="mt-3 text-2xl font-black text-slate-950 md:text-3xl">ניהול מלאי</h1>
-        <p className="mt-2 max-w-3xl text-sm text-slate-600">
+        <h1 className="erp-page-title mt-2 text-slate-950">ניהול מלאי</h1>
+        <p className="mt-1 max-w-3xl text-[15px] leading-snug text-slate-600 opacity-80">
           מערכת ספירת מלאי ותנועות — בקרה מלאה על המלאי שלך.
         </p>
         {loadError ? (
@@ -416,8 +591,8 @@ export default function InventoryPage() {
         ) : null}
       </section>
 
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        <div className="app-panel border-luxury-navy-rich/15 p-4 shadow-luxury-sm md:p-5">
+      <div className="grid grid-cols-2 gap-2.5 md:grid-cols-4">
+        <div className="app-panel flex min-h-[120px] flex-col justify-between border-luxury-navy-rich/15 p-4 shadow-luxury-sm">
           <div className="flex items-center justify-between gap-2">
             <p className="text-xs font-bold text-slate-500">סה״כ פריטים</p>
             <span className="rounded-xl bg-blue-50 p-2 text-blue-700">
@@ -429,7 +604,7 @@ export default function InventoryPage() {
           </p>
           <p className="mt-1 text-xs font-semibold text-slate-500">פריטים במערכת</p>
         </div>
-        <div className="app-panel border-rose-200/80 p-4 shadow-luxury-sm md:p-5">
+        <div className="app-panel flex min-h-[120px] flex-col justify-between border-rose-200/80 p-4 shadow-luxury-sm">
           <div className="flex items-center justify-between gap-2">
             <p className="text-xs font-bold text-slate-500">פריטים בחוסר</p>
             <span className="rounded-xl bg-rose-50 p-2 text-rose-600">
@@ -441,7 +616,7 @@ export default function InventoryPage() {
           </p>
           <p className="mt-1 text-xs font-semibold text-slate-500">פריטים בחוסר</p>
         </div>
-        <div className="app-panel border-amber-200/80 p-4 shadow-luxury-sm md:p-5">
+        <div className="app-panel flex min-h-[120px] flex-col justify-between border-amber-200/80 p-4 shadow-luxury-sm">
           <div className="flex items-center justify-between gap-2">
             <p className="text-xs font-bold text-slate-500">פריטים במינימום</p>
             <span className="rounded-xl bg-amber-50 p-2 text-amber-700">
@@ -453,7 +628,7 @@ export default function InventoryPage() {
           </p>
           <p className="mt-1 text-xs font-semibold text-slate-500">כמעט נגמרו</p>
         </div>
-        <div className="app-panel col-span-2 border-emerald-200/80 md:col-span-1 p-4 shadow-luxury-sm md:p-5">
+        <div className="app-panel col-span-2 flex min-h-[120px] flex-col justify-between border-emerald-200/80 p-4 shadow-luxury-sm md:col-span-1">
           <div className="flex items-center justify-between gap-2">
             <p className="text-xs font-bold text-slate-500">תנועות היום</p>
             <span className="rounded-xl bg-emerald-50 p-2 text-emerald-700">
@@ -494,125 +669,185 @@ export default function InventoryPage() {
                   <span className={labelClass}>תאריך ספירה</span>
                   <input type="date" value={countDate} onChange={(e) => setCountDate(e.target.value)} className={inputClass} />
                 </label>
-                {meta && meta.warehouses.length > 0 ? (
-                  <label className="min-w-[12rem] flex-1">
-                    <span className={labelClass}>מחסן</span>
-                    <select
-                      value={warehouseId}
-                      onChange={(e) => setWarehouseId(e.target.value)}
-                      className={inputClass}
-                    >
-                      <option value="">— ללא / כללי —</option>
-                      {meta.warehouses.map((w) => (
-                        <option key={w.id} value={w.id}>
-                          {w.name}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                ) : (
-                  <p className="flex items-center gap-2 text-xs font-semibold text-slate-500">
-                    <WarehouseIcon className="h-4 w-4" aria-hidden />
-                    אין מחסנים מוגדרים — ניתן להוסיף במסד (Warehouse).
-                  </p>
-                )}
+                <p className="flex flex-1 items-center gap-2 text-xs font-semibold text-slate-500">
+                  <WarehouseIcon className="h-4 w-4" aria-hidden />
+                  הספירה משווה אוטומטית מול הספירה האחרונה של כל פריט.
+                </p>
                 <button
                   type="button"
-                  disabled={busy || products.length === 0}
+                  disabled={busy}
+                  onClick={() => setAddInventoryOpen(true)}
+                  className="inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-4 text-sm font-black text-luxury-navy-rich shadow-sm hover:bg-slate-50 disabled:opacity-50"
+                >
+                  + הוסף פריט מלאי
+                </button>
+                <button
+                  type="button"
+                  disabled={busy || countProducts.length === 0}
                   onClick={() => void saveMonthly()}
                   className="inline-flex items-center justify-center gap-2 rounded-xl bg-luxury-gold px-5 py-3 text-sm font-black text-luxury-charcoal shadow-luxury-sm hover:bg-luxury-gold-hover disabled:opacity-50"
                 >
-                  שמור ספירה חודשית
+                  שמור ספירת מלאי
                 </button>
               </div>
 
-              {products.length === 0 ? (
+              {addInventoryOpen ? (
+                <div
+                  className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+                  role="dialog"
+                  aria-modal="true"
+                  aria-labelledby="add-inv-title"
+                  onMouseDown={(e) => {
+                    if (e.target === e.currentTarget) setAddInventoryOpen(false);
+                  }}
+                >
+                  <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-5 shadow-xl" dir="rtl">
+                    <h3 id="add-inv-title" className="text-lg font-black text-slate-900">
+                      פריט מלאי חדש
+                    </h3>
+                    <div className="mt-4 grid gap-3">
+                      <label>
+                        <span className={labelClass}>שם פריט</span>
+                        <input
+                          value={newCountProduct.name}
+                          onChange={(e) => setNewCountProduct((p) => ({ ...p, name: e.target.value }))}
+                          className={inputClass}
+                          placeholder="למשל קמח לבן"
+                        />
+                      </label>
+                      <label>
+                        <span className={labelClass}>מיקום</span>
+                        <input
+                          value={newCountProduct.location}
+                          onChange={(e) => setNewCountProduct((p) => ({ ...p, location: e.target.value }))}
+                          className={inputClass}
+                          placeholder="מדף א / מקרר…"
+                        />
+                      </label>
+                      <label>
+                        <span className={labelClass}>יחידה</span>
+                        <input
+                          value={newCountProduct.unit}
+                          onChange={(e) => setNewCountProduct((p) => ({ ...p, unit: e.target.value }))}
+                          className={inputClass}
+                          placeholder="ק״ג, יח׳…"
+                        />
+                      </label>
+                    </div>
+                    <div className="mt-5 flex flex-wrap justify-end gap-2">
+                      <button
+                        type="button"
+                        className="rounded-xl px-4 py-2.5 text-sm font-bold text-slate-600 hover:bg-slate-100"
+                        onClick={() => setAddInventoryOpen(false)}
+                      >
+                        ביטול
+                      </button>
+                      <button
+                        type="button"
+                        disabled={busy}
+                        className="rounded-xl bg-luxury-gold px-5 py-2.5 text-sm font-black text-luxury-charcoal hover:bg-luxury-gold-hover disabled:opacity-50"
+                        onClick={() => void createCountProduct()}
+                      >
+                        שמירה
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+
+              {countProducts.length === 0 ? (
                 <p className="text-sm font-semibold text-slate-600">
-                  אין מוצרים. מוצרים נוצרים אוטומטית מרישום כספי או דרך{" "}
-                  <Link href="/finance/register" className="font-black text-luxury-navy-rich underline">
-                    רישום כספי
-                  </Link>
-                  .
+                  אין מוצרי ספירה קבועים. עברו לטאב{" "}
+                  <button type="button" onClick={() => setTab("products")} className="font-black text-luxury-navy-rich underline">
+                    מוצרי ספירה
+                  </button>{" "}
+                  והוסיפו קמח, סוכר, שמנת, מגשים או כל פריט פנימי אחר.
                 </p>
               ) : (
                 <>
                   <div className="hidden md:block overflow-hidden rounded-2xl border border-slate-200">
                     <div className="max-h-[min(70vh,720px)] overflow-auto">
-                      <table className="min-w-full divide-y divide-slate-200 text-right text-sm">
+                      <table className="inventory-count-table min-w-full divide-y divide-slate-200 text-right text-sm">
                         <thead className="sticky top-0 z-10 bg-slate-50 shadow-sm">
                           <tr>
-                            <th className="px-4 py-3.5 font-bold text-slate-700">פריט</th>
-                            <th className="px-4 py-3.5 font-bold text-slate-700">כמות במערכת</th>
-                            <th className="px-4 py-3.5 font-bold text-slate-700">ספירה בפועל</th>
-                            <th className="px-4 py-3.5 font-bold text-slate-700">הפרש</th>
-                            <th className="px-4 py-3.5 font-bold text-slate-700">סטטוס</th>
-                            <th className="px-4 py-3.5 font-bold text-slate-700">הערות</th>
-                            <th className="px-4 py-3.5 font-bold text-slate-700">פעולות</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100 bg-white">
+                            <th className="px-3 py-3 font-bold text-slate-700">פריט</th>
+                            <th className="px-3 py-3 font-bold text-slate-700">מיקום</th>
+                            <th className="px-3 py-3 font-bold text-slate-700">קודם</th>
+                            <th className="px-3 py-3 font-bold text-slate-700">חדש</th>
+                            <th className="px-3 py-3 font-bold text-slate-700">שינוי</th>
+                            <th className="px-3 py-3 font-bold text-slate-700">סטטוס</th>
+                            <th className="px-3 py-3 font-bold text-slate-700">הערה</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100 bg-white">
                           {monthlyRows.map((row) => {
                             const dm = row.diff === null ? null : countDiffMeta(row.diff);
+                            const countInputStyle: CSSProperties = {
+                              height: 40,
+                              width: 88,
+                              fontSize: 14,
+                            };
                             return (
-                              <tr key={row.id} className="transition hover:bg-slate-50/80">
-                                <td className="px-4 py-3 font-bold text-slate-900">{row.name}</td>
-                                <td className="px-4 py-3 tabular-nums font-semibold text-slate-800">
-                                  {row.currentStock}
+                              <tr key={row.id} className="min-h-[58px] transition hover:bg-slate-50/80">
+                                <td className="max-w-[14rem] px-3 py-2 align-middle font-bold text-slate-900">
+                                  {row.name}
+                                  {row.unit ? (
+                                    <span className="block text-[11px] font-semibold text-slate-500">{row.unit}</span>
+                                  ) : null}
                                 </td>
-                                <td className="px-4 py-3">
-                                  <input
-                                    type="number"
-                                    inputMode="numeric"
-                                    value={row.raw}
-                                    onChange={(e) =>
+                                <td className="px-3 py-2 align-middle text-xs font-semibold text-slate-600">{row.location}</td>
+                                <td className="px-3 py-2 align-middle tabular-nums font-semibold text-slate-800">
+                                  {row.previousQuantity}
+                                </td>
+                                <td className="px-3 py-2 align-middle">
+                  <input
+                    type="number"
+                    inputMode="decimal"
+                                    step="0.01"
+                                    style={countInputStyle}
+                    value={row.raw}
+                    onChange={(e) =>
                                       setActualById((p) => ({ ...p, [row.id]: e.target.value }))
-                                    }
-                                    className="w-28 rounded-xl border border-slate-300 px-2 py-2 text-left font-bold tabular-nums outline-none focus:border-luxury-gold focus:ring-2 focus:ring-luxury-gold/25"
+                    }
+                                    className="rounded-lg border border-slate-300 px-2 text-left font-bold tabular-nums outline-none focus:border-luxury-gold focus:ring-2 focus:ring-luxury-gold/25"
                                     placeholder="ספירה"
                                     id={`actual-${row.id}`}
-                                  />
-                                </td>
-                                <td className="px-4 py-3">
-                                  {row.diff === null ? (
+                  />
+                </td>
+                                <td className="px-3 py-2 align-middle">
+                  {row.diff === null ? (
                                     <span className="text-slate-400">—</span>
                                   ) : (
-                                    <span className={dm?.diffClass}>
+                                    <span className="font-bold tabular-nums" style={dm?.diffStyle}>
                                       {row.diff > 0 ? "+" : ""}
                                       {row.diff}
                                     </span>
                                   )}
                                 </td>
-                                <td className="px-4 py-3">
+                                <td className="px-3 py-2 align-middle">
                                   {dm ? (
-                                    <span className={`rounded-full px-2.5 py-1 text-xs font-black ${dm.badge}`}>
+                    <span
+                                      className={`inline-flex rounded-full px-2.5 py-1 text-xs ${dm.badgeClass}`}
+                                      style={dm.badgeStyle}
+                                    >
                                       {dm.label}
-                                    </span>
+                    </span>
                                   ) : (
                                     "—"
-                                  )}
-                                </td>
-                                <td className="px-4 py-3">
+                  )}
+                </td>
+                                <td className="min-w-[7rem] px-3 py-2 align-middle">
                                   <input
                                     type="text"
                                     value={notesById[row.id] ?? ""}
                                     onChange={(e) =>
                                       setNotesById((p) => ({ ...p, [row.id]: e.target.value }))
                                     }
-                                    className="w-full min-w-[8rem] rounded-xl border border-slate-200 px-2 py-2 text-xs font-semibold outline-none focus:border-luxury-gold"
-                                    placeholder="הוסף הערה…"
+                                    className="h-10 max-w-[12rem] rounded-lg border border-slate-200 px-2 text-xs font-semibold outline-none focus:border-luxury-gold"
+                                    placeholder="למשל נשפך…"
                                   />
                                 </td>
-                                <td className="px-4 py-3">
-                                  <button
-                                    type="button"
-                                    className="rounded-lg p-2 text-luxury-navy-rich hover:bg-luxury-gold/15"
-                                    aria-label="עריכת שורה"
-                                    onClick={() => document.getElementById(`actual-${row.id}`)?.focus()}
-                                  >
-                                    <Pencil className="h-4 w-4" />
-                                  </button>
-                                </td>
-                              </tr>
+              </tr>
                             );
                           })}
                         </tbody>
@@ -629,25 +864,32 @@ export default function InventoryPage() {
                           className="app-panel-muted space-y-3 p-4 shadow-none"
                         >
                           <p className="font-black text-slate-950">{row.name}</p>
-                          <p className="text-xs text-slate-500">במערכת: {row.currentStock}</p>
-                          <label className="block text-xs font-bold text-slate-600">ספירה בפועל</label>
+                          <p className="text-xs text-slate-500">
+                            מיקום: {row.location ?? "—"} · קודם: {row.previousQuantity} {row.unit ?? ""}
+                          </p>
+                          <label className="block text-xs font-bold text-slate-600">כמות חדשה</label>
                           <input
                             type="number"
-                            inputMode="numeric"
+                            inputMode="decimal"
+                            step="0.01"
+                            style={{ height: 40, width: 88, fontSize: 14 }}
                             value={row.raw}
                             onChange={(e) =>
                               setActualById((p) => ({ ...p, [row.id]: e.target.value }))
                             }
-                            className={inputClass}
+                            className="rounded-lg border border-slate-300 px-2 text-left font-bold tabular-nums outline-none focus:border-luxury-gold"
                           />
                           <div className="flex flex-wrap items-center gap-2">
                             {dm ? (
                               <>
-                                <span className={dm.diffClass}>
-                                  הפרש: {row.diff! > 0 ? "+" : ""}
+                                <span className="font-bold tabular-nums" style={dm.diffStyle}>
+                                  שינוי: {row.diff! > 0 ? "+" : ""}
                                   {row.diff}
                                 </span>
-                                <span className={`rounded-full px-2 py-0.5 text-xs font-black ${dm.badge}`}>
+                                <span
+                                  className={`rounded-full px-2 py-0.5 text-xs ${dm.badgeClass}`}
+                                  style={dm.badgeStyle}
+                                >
                                   {dm.label}
                                 </span>
                               </>
@@ -668,6 +910,219 @@ export default function InventoryPage() {
                   </div>
                 </>
               )}
+            </div>
+          ) : null}
+
+          {tab === "history" ? (
+            <div className="space-y-5">
+              <div className="rounded-2xl border border-slate-200 bg-slate-50/60 p-4">
+                <div className="grid gap-3 md:grid-cols-5">
+                  <label>
+                    <span className={labelClass}>מתאריך</span>
+                    <input type="date" value={historyDateFrom} onChange={(e) => setHistoryDateFrom(e.target.value)} className={inputClass} />
+                  </label>
+                  <label>
+                    <span className={labelClass}>עד תאריך</span>
+                    <input type="date" value={historyDateTo} onChange={(e) => setHistoryDateTo(e.target.value)} className={inputClass} />
+                  </label>
+                  <label>
+                    <span className={labelClass}>לפי מוצר</span>
+                    <select value={historyProductId} onChange={(e) => setHistoryProductId(e.target.value)} className={inputClass}>
+                      <option value="">כל המוצרים</option>
+                      {countProducts.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <div className="flex flex-wrap items-end gap-3">
+                    <label className="flex h-11 items-center gap-2 rounded-xl border border-rose-200 bg-white px-3 text-xs font-black text-rose-800">
+                      <input
+                        type="checkbox"
+                        checked={historyOnlyShortage}
+                        onChange={(e) => {
+                          setHistoryOnlyShortage(e.target.checked);
+                          if (e.target.checked) setHistoryOnlySurplus(false);
+                        }}
+                      />
+                      רק חוסרים
+                    </label>
+                    <label className="flex h-11 items-center gap-2 rounded-xl border border-emerald-200 bg-white px-3 text-xs font-black text-emerald-800">
+                      <input
+                        type="checkbox"
+                        checked={historyOnlySurplus}
+                        onChange={(e) => {
+                          setHistoryOnlySurplus(e.target.checked);
+                          if (e.target.checked) setHistoryOnlyShortage(false);
+                        }}
+                      />
+                      רק עודפים
+                    </label>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => void loadCountHistory()}
+                    className="self-end rounded-xl bg-luxury-navy-rich px-4 py-3 text-sm font-black text-white hover:bg-luxury-charcoal"
+                  >
+                    סינון היסטוריה
+                  </button>
+                </div>
+              </div>
+
+              <div className="hidden overflow-hidden rounded-2xl border border-slate-200 md:block">
+                <div className="max-h-[min(70vh,680px)] overflow-auto">
+                  <table className="min-w-full divide-y divide-slate-200 text-right text-sm">
+                    <thead className="sticky top-0 z-10 bg-slate-50 shadow-sm">
+                      <tr>
+                        <th className="px-4 py-3.5 font-bold text-slate-700">תאריך</th>
+                        <th className="px-4 py-3.5 font-bold text-slate-700">פריט</th>
+                        <th className="px-4 py-3.5 font-bold text-slate-700">קודם</th>
+                        <th className="px-4 py-3.5 font-bold text-slate-700">חדש</th>
+                        <th className="px-4 py-3.5 font-bold text-slate-700">שינוי</th>
+                        <th className="px-4 py-3.5 font-bold text-slate-700">עובד</th>
+                        <th className="px-4 py-3.5 font-bold text-slate-700">הערה</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 bg-white">
+                      {historyRows.map((row) => {
+                        const dm = countDiffMeta(row.difference);
+                        return (
+                          <tr key={row.id} className="transition hover:bg-slate-50/80">
+                            <td className="px-4 py-3 text-xs font-semibold text-slate-600">{formatDateTime(row.countDate)}</td>
+                            <td className="px-4 py-3 font-bold text-slate-900">
+                              {row.product.name}
+                              <span className="block text-[11px] font-semibold text-slate-500">{row.product.location}</span>
+                            </td>
+                            <td className="px-4 py-3 tabular-nums font-semibold text-slate-800">{row.previousQuantity}</td>
+                            <td className="px-4 py-3 tabular-nums font-black text-slate-900">{row.currentQuantity}</td>
+                            <td className="px-4 py-3">
+                              <span className="font-bold tabular-nums" style={dm.diffStyle}>
+                                {row.difference > 0 ? "+" : ""}
+                                {row.difference}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 text-xs text-slate-600">{row.countedBy?.fullName ?? "—"}</td>
+                            <td className="px-4 py-3 text-xs text-slate-600">{row.note ?? "—"}</td>
+                          </tr>
+                        );
+                      })}
+          </tbody>
+        </table>
+      </div>
+              </div>
+              <div className="space-y-3 md:hidden">
+                {historyRows.map((row) => {
+                  const dm = countDiffMeta(row.difference);
+                  return (
+                    <div key={row.id} className="app-panel-muted space-y-2 p-4 shadow-none">
+                      <div className="flex items-start justify-between gap-2">
+                        <p className="font-black text-slate-950">{row.product.name}</p>
+                        <span
+                          className={`rounded-full px-2 py-0.5 text-[10px] ${dm.badgeClass}`}
+                          style={dm.badgeStyle}
+                        >
+                          {dm.label}
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-500">{formatDateTime(row.countDate)}</p>
+                      <p className="text-sm font-bold">
+                        קודם {row.previousQuantity} · חדש {row.currentQuantity} ·{" "}
+                        <span className="font-bold tabular-nums" style={dm.diffStyle}>
+                          {row.difference > 0 ? "+" : ""}
+                          {row.difference}
+                        </span>
+                      </p>
+                      {row.note ? <p className="text-xs text-slate-600">{row.note}</p> : null}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ) : null}
+
+          {tab === "products" ? (
+            <div className="space-y-5">
+              <div className="rounded-2xl border border-slate-200 bg-slate-50/60 p-4">
+                <h3 className="text-sm font-black text-slate-900">הוספת פריט מלאי</h3>
+                <div className="mt-3 grid gap-3 md:grid-cols-4">
+                  <label>
+                    <span className={labelClass}>שם פריט *</span>
+                    <input
+                      value={newCountProduct.name}
+                      onChange={(e) => setNewCountProduct((p) => ({ ...p, name: e.target.value }))}
+                      className={inputClass}
+                      placeholder="קמח לבן"
+                    />
+                  </label>
+                  <label>
+                    <span className={labelClass}>מיקום *</span>
+                    <input
+                      value={newCountProduct.location}
+                      onChange={(e) => setNewCountProduct((p) => ({ ...p, location: e.target.value }))}
+                      className={inputClass}
+                      placeholder="מדף א / מקרר…"
+                    />
+                  </label>
+                  <label>
+                    <span className={labelClass}>יחידה</span>
+                    <input
+                      value={newCountProduct.unit}
+                      onChange={(e) => setNewCountProduct((p) => ({ ...p, unit: e.target.value }))}
+                      className={inputClass}
+                      placeholder="ק״ג / יח׳"
+                    />
+                  </label>
+      <button
+        type="button"
+                    disabled={busy}
+                    onClick={() => void createCountProduct()}
+                    className="self-end rounded-xl bg-luxury-gold px-4 py-3 text-sm font-black text-luxury-charcoal hover:bg-luxury-gold-hover disabled:opacity-50"
+      >
+                    הוסף פריט
+      </button>
+    </div>
+              </div>
+
+              <div className="hidden overflow-hidden rounded-2xl border border-slate-200 md:block">
+                <table className="min-w-full divide-y divide-slate-200 text-right text-sm">
+                  <thead className="bg-slate-50">
+                    <tr>
+                      <th className="px-4 py-3.5 font-bold text-slate-700">פריט</th>
+                      <th className="px-4 py-3.5 font-bold text-slate-700">קטגוריה</th>
+                      <th className="px-4 py-3.5 font-bold text-slate-700">מיקום</th>
+                      <th className="px-4 py-3.5 font-bold text-slate-700">יחידה</th>
+                      <th className="px-4 py-3.5 font-bold text-slate-700">מינימום</th>
+                      <th className="px-4 py-3.5 font-bold text-slate-700">מספר ספירות</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 bg-white">
+                    {managedCountProducts.map((row) => (
+                      <tr key={row.id} className="transition hover:bg-slate-50/80">
+                        <td className="px-4 py-3 font-bold text-slate-900">{row.name}</td>
+                        <td className="px-4 py-3 text-xs text-slate-600">{row.category}</td>
+                        <td className="px-4 py-3 text-xs text-slate-600">{row.location}</td>
+                        <td className="px-4 py-3 text-xs text-slate-600">{row.unit ?? "—"}</td>
+                        <td className="px-4 py-3 tabular-nums text-xs text-slate-700">{row.minimumQuantity}</td>
+                        <td className="px-4 py-3 tabular-nums font-semibold text-slate-800">{row.countsCount}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className="space-y-3 md:hidden">
+                {managedCountProducts.map((row) => (
+                  <div key={row.id} className="app-panel-muted space-y-2 p-4 shadow-none">
+                    <p className="font-black text-slate-950">{row.name}</p>
+                    <p className="text-xs text-slate-500">
+                      {row.category} · {row.location} · {row.unit ?? "—"}
+                    </p>
+                    <p className="text-xs font-bold text-slate-700">
+                      מינ׳ {row.minimumQuantity} · ספירות: {row.countsCount}
+                    </p>
+                  </div>
+                ))}
+              </div>
             </div>
           ) : null}
 
@@ -849,6 +1304,76 @@ export default function InventoryPage() {
 
           {tab === "stock" ? (
             <div className="space-y-6">
+              {stockMovementModalId ? (
+                <div
+                  className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+                  role="dialog"
+                  aria-modal="true"
+                  aria-labelledby="stock-movement-modal-title"
+                  onClick={(e) => {
+                    if (e.target === e.currentTarget) setStockMovementModalId(null);
+                  }}
+                >
+                  <div className="flex max-h-[min(85vh,560px)] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl">
+                    <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-4 py-3">
+                      <div>
+                        <h4 id="stock-movement-modal-title" className="text-sm font-black text-slate-900">
+                          תנועת מלאי (ספירות)
+                        </h4>
+                        <p className="text-xs font-semibold text-slate-500">
+                          {stockRows.find((r) => r.id === stockMovementModalId)?.name ?? ""}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setStockMovementModalId(null)}
+                        className="rounded-lg px-3 py-1.5 text-xs font-black text-slate-600 hover:bg-slate-100"
+                      >
+                        סגור
+                      </button>
+                    </div>
+                    <div className="min-h-[200px] overflow-auto p-3 text-[13px]">
+                      {stockMovementLoading ? (
+                        <p className="py-8 text-center text-sm font-semibold text-slate-500">טוען…</p>
+                      ) : stockMovementRows.length === 0 ? (
+                        <p className="py-8 text-center text-sm font-semibold text-slate-500">אין ספירות לפריט זה.</p>
+                      ) : (
+                        <table className="w-full border-collapse text-right text-[13px]">
+                          <thead className="sticky top-0 bg-slate-50 text-[11px] font-bold text-slate-600">
+                            <tr>
+                              <th className="px-2 py-2">תאריך</th>
+                              <th className="px-2 py-2">קודם</th>
+                              <th className="px-2 py-2">חדש</th>
+                              <th className="px-2 py-2">הפרש</th>
+                              <th className="px-2 py-2">עובד</th>
+                              <th className="px-2 py-2">הערה</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100">
+                            {stockMovementRows.map((h) => {
+                              const dm = countDiffMeta(h.difference);
+                              return (
+                                <tr key={h.id} className="align-top">
+                                  <td className="px-2 py-2 tabular-nums text-slate-700">{formatDateTime(h.countDate)}</td>
+                                  <td className="px-2 py-2 tabular-nums font-semibold">{h.previousQuantity}</td>
+                                  <td className="px-2 py-2 tabular-nums font-black text-slate-900">{h.currentQuantity}</td>
+                                  <td className="px-2 py-2 tabular-nums font-bold" style={dm.diffStyle}>
+                                    {h.difference > 0 ? "+" : ""}
+                                    {h.difference}
+                                  </td>
+                                  <td className="px-2 py-2 text-[11px] text-slate-600">{h.countedBy?.fullName ?? "—"}</td>
+                                  <td className="max-w-[8rem] px-2 py-2 text-[11px] text-slate-500">{h.note ?? "—"}</td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ) : null}
+
               <div className="md:hidden">
                 <button
                   type="button"
@@ -861,9 +1386,9 @@ export default function InventoryPage() {
               </div>
 
               <div
-                className={`grid gap-3 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 ${filtersOpen ? "mt-3" : "hidden md:grid"}`}
+                className={`grid gap-3 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-6 ${filtersOpen ? "mt-3" : "hidden md:grid"}`}
               >
-                <label className="xl:col-span-2">
+                <label className="lg:col-span-2">
                   <span className={labelClass}>חיפוש מוצר</span>
                   <input
                     type="search"
@@ -889,49 +1414,19 @@ export default function InventoryPage() {
                     onChange={(e) => setOnlyBelowMin(e.target.checked)}
                     className="h-4 w-4 rounded border-slate-300"
                   />
-                  <span className="text-sm font-bold text-slate-800">רק מתחת למינימום</span>
+                  <span className="text-sm font-bold text-slate-800">מתחת או במינימום</span>
                 </label>
                 <label>
                   <span className={labelClass}>קטגוריה</span>
                   <select
-                    value={filterCategory}
-                    onChange={(e) => setFilterCategory(e.target.value)}
+                    value={filterInventoryCategory}
+                    onChange={(e) => setFilterInventoryCategory(e.target.value)}
                     className={inputClass}
                   >
                     <option value="">הכל</option>
-                    {(meta?.categories ?? []).map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label>
-                  <span className={labelClass}>ספק</span>
-                  <select
-                    value={filterSupplier}
-                    onChange={(e) => setFilterSupplier(e.target.value)}
-                    className={inputClass}
-                  >
-                    <option value="">הכל</option>
-                    {(meta?.suppliers ?? []).map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="md:col-span-2 lg:col-span-3 xl:col-span-2">
-                  <span className={labelClass}>עובד אחרון שערך</span>
-                  <select
-                    value={filterLastUser}
-                    onChange={(e) => setFilterLastUser(e.target.value)}
-                    className={inputClass}
-                  >
-                    <option value="">הכל</option>
-                    {(meta?.users ?? []).map((u) => (
-                      <option key={u.id} value={u.id}>
-                        {u.fullName}
+                    {INVENTORY_FILTER_CATEGORIES.map((c) => (
+                      <option key={c} value={c}>
+                        {c}
                       </option>
                     ))}
                   </select>
@@ -940,53 +1435,54 @@ export default function InventoryPage() {
 
               <div className="hidden md:block overflow-hidden rounded-2xl border border-slate-200">
                 <div className="max-h-[min(55vh,520px)] overflow-auto">
-                  <table className="min-w-full divide-y divide-slate-200 text-right text-sm">
+                  <table className="min-w-full divide-y divide-slate-200 text-right text-[14px] leading-tight">
                     <thead className="sticky top-0 z-10 bg-slate-50 shadow-sm">
                       <tr>
-                        <th className="px-4 py-3.5 font-bold text-slate-700">מוצר</th>
-                        <th className="px-4 py-3.5 font-bold text-slate-700">קטגוריה</th>
-                        <th className="px-4 py-3.5 font-bold text-slate-700">כמות נוכחית</th>
-                        <th className="px-4 py-3.5 font-bold text-slate-700">מינימום</th>
-                        <th className="px-4 py-3.5 font-bold text-slate-700">מצב</th>
-                        <th className="px-4 py-3.5 font-bold text-slate-700">עודכן לאחרונה</th>
-                        <th className="px-4 py-3.5 font-bold text-slate-700">פעולות</th>
+                        <th className="px-3 py-2.5 font-bold text-slate-700">מוצר</th>
+                        <th className="px-3 py-2.5 font-bold text-slate-700">קטגוריה</th>
+                        <th className="px-3 py-2.5 font-bold text-slate-700">מיקום</th>
+                        <th className="px-3 py-2.5 font-bold text-slate-700">כמות נוכחית</th>
+                        <th className="px-3 py-2.5 font-bold text-slate-700">מינימום</th>
+                        <th className="px-3 py-2.5 font-bold text-slate-700">מצב</th>
+                        <th className="px-3 py-2.5 font-bold text-slate-700">עודכן לאחרונה</th>
+                        <th className="px-3 py-2.5 font-bold text-slate-700">פעולות</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 bg-white">
                       {stockRows.map((row) => {
-                        const sm = stockStatusMeta(row);
+                        const sm = inventoryStockPresentation(row.status);
+                        const qtyDisplay =
+                          row.currentQuantity === null || Number.isNaN(row.currentQuantity) ? "—" : row.currentQuantity;
                         return (
                           <tr
                             key={row.id}
-                            className={`h-14 transition hover:bg-slate-50/90 ${sm.row}`}
+                            className={`min-h-[58px] transition hover:brightness-[0.99] ${sm.row}`}
+                            style={{ height: "58px" }}
                           >
-                            <td className="px-4 py-3 font-bold text-slate-900">{row.name}</td>
-                            <td className="px-4 py-3 text-xs text-slate-600">
-                              {row.category?.name ?? "—"}
+                            <td className="px-3 py-2 align-middle font-bold text-slate-900">{row.name}</td>
+                            <td className="px-3 py-2 align-middle text-[13px] text-slate-600">{row.category}</td>
+                            <td className="px-3 py-2 align-middle text-[13px] text-slate-700">{row.location}</td>
+                            <td className="px-3 py-2 align-middle font-black tabular-nums text-lg text-slate-950">
+                              {qtyDisplay}
                             </td>
-                            <td className="px-4 py-3 font-black tabular-nums text-slate-900">
-                              {row.currentStock}
+                            <td className="px-3 py-2 align-middle tabular-nums text-[13px] text-slate-700">
+                              {row.minimumQuantity}
                             </td>
-                            <td className="px-4 py-3 tabular-nums text-slate-700">{row.minStock}</td>
-                            <td className="px-4 py-3">
-                              <span className={`rounded-full px-2.5 py-1 text-xs font-black ${sm.badge}`}>
+                            <td className="px-3 py-2 align-middle">
+                              <span className={`rounded-full px-2.5 py-1 text-[11px] font-black ${sm.badge}`}>
                                 {sm.label}
                               </span>
                             </td>
-                            <td className="px-4 py-3 text-xs text-slate-600">
-                              <span className="block">{formatDateTime(row.lastStockAt)}</span>
-                              <span className="text-slate-400">{row.lastStockBy?.fullName ?? ""}</span>
+                            <td className="px-3 py-2 align-middle text-[12px] text-slate-600">
+                              <span className="block">{formatDateTime(row.lastCountedAt)}</span>
+                              <span className="text-slate-400">{row.countedBy?.fullName ?? ""}</span>
                             </td>
-                            <td className="px-4 py-3">
+                            <td className="px-3 py-2 align-middle">
                               <div className="flex flex-wrap gap-2">
                                 <button
                                   type="button"
                                   className="text-xs font-black text-luxury-navy-rich underline"
-                                  onClick={() => {
-                                    setTab("daily");
-                                    setProductPick(row);
-                                    setProductQuery("");
-                                  }}
+                                  onClick={() => void openInventoryMovementModal(row.id)}
                                 >
                                   תנועה
                                 </button>
@@ -994,19 +1490,22 @@ export default function InventoryPage() {
                                   type="button"
                                   className="text-xs font-bold text-slate-600 underline"
                                   onClick={() => {
-                                    const v = window.prompt("מינימום מלאי לפריט:", String(row.minStock));
+                                    const v = window.prompt("מינימום לפריט ספירה:", String(row.minimumQuantity));
                                     if (v === null) return;
-                                    const n = Math.max(0, parseInt(v, 10));
+                                    const n = Math.max(0, parseFloat(v));
                                     if (!Number.isFinite(n)) return;
                                     void (async () => {
-                                      const res = await fetch(`/api/inventory/products/${encodeURIComponent(row.id)}`, {
-                                        method: "PATCH",
-                                        headers: { "Content-Type": "application/json" },
-                                        credentials: "same-origin",
-                                        body: JSON.stringify({ minStock: n }),
-                                      });
+                                      const res = await fetch(
+                                        `/api/inventory/count-products/${encodeURIComponent(row.id)}`,
+                                        {
+                                          method: "PATCH",
+                                          headers: { "Content-Type": "application/json" },
+                                          credentials: "same-origin",
+                                          body: JSON.stringify({ minimumQuantity: n }),
+                                        },
+                                      );
                                       if (res.ok) {
-                                        await Promise.all([loadStats(), loadStock(), loadProducts()]);
+                                        await Promise.all([loadStats(), loadStock()]);
                                       }
                                     })();
                                   }}
@@ -1025,7 +1524,9 @@ export default function InventoryPage() {
 
               <div className="space-y-3 md:hidden">
                 {stockRows.map((row) => {
-                  const sm = stockStatusMeta(row);
+                  const sm = inventoryStockPresentation(row.status);
+                  const qtyDisplay =
+                    row.currentQuantity === null || Number.isNaN(row.currentQuantity) ? "—" : row.currentQuantity;
                   return (
                     <div key={row.id} className={`app-panel space-y-2 p-4 ${sm.row}`}>
                       <div className="flex items-start justify-between gap-2">
@@ -1034,12 +1535,21 @@ export default function InventoryPage() {
                           {sm.label}
                         </span>
                       </div>
-                      <p className="text-xs text-slate-500">קטגוריה: {row.category?.name ?? "—"}</p>
-                      <p className="text-sm font-bold">
-                        מלאי: {row.currentStock}{" "}
-                        <span className="font-semibold text-slate-500">/ מינ׳ {row.minStock}</span>
+                      <p className="text-xs text-slate-500">
+                        {row.category} · {row.location}
                       </p>
-                      <p className="text-xs text-slate-500">{formatDateTime(row.lastStockAt)}</p>
+                      <p className="text-sm font-bold">
+                        כמות: <span className="text-lg font-black tabular-nums">{qtyDisplay}</span>{" "}
+                        <span className="font-semibold text-slate-500">/ מינ׳ {row.minimumQuantity}</span>
+                      </p>
+                      <p className="text-xs text-slate-500">{formatDateTime(row.lastCountedAt)}</p>
+                      <button
+                        type="button"
+                        className="text-xs font-black text-luxury-navy-rich underline"
+                        onClick={() => void openInventoryMovementModal(row.id)}
+                      >
+                        תנועה
+                      </button>
                     </div>
                   );
                 })}

@@ -7,6 +7,7 @@ import {
   Clock3,
   Filter,
   Flame,
+  Flag,
   LayoutGrid,
   Pencil,
   Plus,
@@ -100,16 +101,11 @@ function formatTaskDay(iso: string) {
 }
 
 function scheduledLabel(task: TaskRow) {
-  return `${formatTaskDay(task.task_date)} · ${task.start_time}`;
+  return `${formatTaskDay(task.task_date)} · ${timeRangeLabel(task)}`;
 }
 
-function formatClock(iso: string | null) {
-  if (!iso) return "—";
-  try {
-    return new Date(iso).toLocaleTimeString("he-IL", { hour: "2-digit", minute: "2-digit" });
-  } catch {
-    return "—";
-  }
+function timeRangeLabel(task: TaskRow) {
+  return `${task.start_time} - ${task.end_time || "..."}`;
 }
 
 function formatRemain(ms: number) {
@@ -156,7 +152,7 @@ function employeeInitials(name: string) {
 
 function cardShell(eff: TaskEffectiveStatus, urgentGlow: boolean) {
   const base =
-    "relative flex h-full min-h-[280px] flex-col rounded-2xl border bg-white p-4 shadow-sm transition";
+    "relative flex h-full min-h-[240px] w-full max-w-[320px] flex-col rounded-[18px] border bg-white p-3 shadow-sm transition";
   if (urgentGlow && eff !== "completed") {
     return `${base} border-red-500 ring-2 ring-red-400/55 shadow-[0_0_22px_rgba(239,68,68,0.28)]`;
   }
@@ -180,8 +176,10 @@ export default function AdminTasksPage() {
   const [taskDescription, setTaskDescription] = useState("");
   const [taskDateField, setTaskDateField] = useState("");
   const [scheduledStartTime, setScheduledStartTime] = useState("08:00");
+  const [scheduledEndTime, setScheduledEndTime] = useState("");
   const [taskDueDate, setTaskDueDate] = useState("");
   const [priority, setPriority] = useState<(typeof MANAGER_TASK_PRIORITIES)[number]>("normal");
+  const [createError, setCreateError] = useState<string | null>(null);
   const [createSuccess, setCreateSuccess] = useState(false);
   const [timeTick, setTimeTick] = useState(0);
 
@@ -282,11 +280,15 @@ export default function AdminTasksPage() {
   ]);
 
   useEffect(() => {
-    void loadEmployees();
+    queueMicrotask(() => {
+      void loadEmployees();
+    });
   }, [loadEmployees]);
 
   useEffect(() => {
-    void loadTasks();
+    queueMicrotask(() => {
+      void loadTasks();
+    });
   }, [loadTasks]);
 
   useEffect(() => {
@@ -308,12 +310,18 @@ export default function AdminTasksPage() {
   const dash = stats?.dashboard;
 
   const submitTask = async () => {
+    setCreateError(null);
     if (
       selectedAssigneeIds.length === 0 ||
       !taskTitle.trim() ||
       !taskDateField.trim() ||
       !scheduledStartTime.trim()
     ) {
+      setCreateError("חובה לבחור עובד, כותרת, תאריך ושעת התחלה.");
+      return;
+    }
+    if (scheduledEndTime.trim() && scheduledEndTime.trim() < scheduledStartTime.trim()) {
+      setCreateError("שעת סיום חייבת להיות אחרי שעת ההתחלה.");
       return;
     }
     const res = await fetch("/api/tasks", {
@@ -325,16 +333,22 @@ export default function AdminTasksPage() {
         description: taskDescription.trim() || null,
         taskDate: taskDateField.trim(),
         startTime: scheduledStartTime.trim(),
+        endTime: scheduledEndTime.trim() || null,
         dueDate: taskDueDate.trim() || null,
         priority,
       }),
       credentials: "same-origin",
     });
-    if (!res.ok) return;
+    if (!res.ok) {
+      const j = (await res.json().catch(() => null)) as { error?: string } | null;
+      setCreateError(j?.error ?? "שמירת המשימה נכשלה.");
+      return;
+    }
     setTaskTitle("");
     setTaskDescription("");
     setTaskDateField("");
     setScheduledStartTime("08:00");
+    setScheduledEndTime("");
     setTaskDueDate("");
     setPriority("normal");
     setSelectedAssigneeIds([]);
@@ -415,6 +429,11 @@ export default function AdminTasksPage() {
             המשימה נשלחה לעובד בהצלחה
           </div>
         ) : null}
+        {createError ? (
+          <p className="mt-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-bold text-rose-800" role="alert">
+            {createError}
+          </p>
+        ) : null}
 
         {employeesError ? (
           <p className="mt-4 text-sm font-bold text-rose-700" role="alert">
@@ -485,18 +504,32 @@ export default function AdminTasksPage() {
             />
           </label>
 
-          <label className={labelClass}>
-            <span className="flex items-center gap-2">
-              <Clock3 className="h-4 w-4 text-slate-500" aria-hidden />
-              שעת התחלה (מתוזמנת)
-            </span>
-            <input
-              type="time"
-              value={scheduledStartTime}
-              onChange={(e) => setScheduledStartTime(e.target.value)}
-              className={inputClass}
-            />
-          </label>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <label className={labelClass}>
+              <span className="flex items-center gap-2">
+                <Clock3 className="h-4 w-4 text-slate-500" aria-hidden />
+                שעת התחלה
+              </span>
+              <input
+                type="time"
+                value={scheduledStartTime}
+                onChange={(e) => setScheduledStartTime(e.target.value)}
+                className={inputClass}
+              />
+            </label>
+            <label className={labelClass}>
+              <span className="flex items-center gap-2">
+                <Flag className="h-4 w-4 text-slate-500" aria-hidden />
+                שעת סיום
+              </span>
+              <input
+                type="time"
+                value={scheduledEndTime}
+                onChange={(e) => setScheduledEndTime(e.target.value)}
+                className={inputClass}
+              />
+            </label>
+        </div>
 
           <label className={labelClass}>
             <span className="flex items-center gap-2">
@@ -551,15 +584,15 @@ export default function AdminTasksPage() {
         </div>
 
         <div className="mt-5 flex flex-wrap gap-3">
-          <button
-            type="button"
+            <button
+              type="button"
             onClick={() => void submitTask()}
             disabled={employees.length === 0 || selectedAssigneeIds.length === 0}
             className="inline-flex items-center justify-center gap-2 rounded-xl bg-luxury-gold px-5 py-3 text-sm font-black text-luxury-charcoal shadow-luxury-sm hover:bg-luxury-gold-hover disabled:pointer-events-none disabled:opacity-50"
-          >
+            >
             <SendMini />
-            הקצאת משימה
-          </button>
+              הקצאת משימה
+            </button>
         </div>
       </section>
 
@@ -593,7 +626,7 @@ export default function AdminTasksPage() {
             >
               <p className="text-[11px] font-bold opacity-80">{c.label}</p>
               <p className="mt-1 text-xl font-black tabular-nums md:text-2xl">{c.value}</p>
-            </div>
+        </div>
           ))}
         </section>
       ) : null}
@@ -603,7 +636,7 @@ export default function AdminTasksPage() {
           <div className="flex items-center gap-2">
             <LayoutGrid className="h-5 w-5 text-luxury-navy-rich" aria-hidden />
             <h2 className="text-lg font-black text-slate-950">לוח משימות</h2>
-          </div>
+                </div>
           <div className="flex flex-wrap items-center gap-2">
             <div className="inline-flex rounded-xl border border-slate-200 bg-slate-50 p-1">
               <button
@@ -616,8 +649,8 @@ export default function AdminTasksPage() {
                 <LayoutGrid className="h-3.5 w-3.5" aria-hidden />
                 כרטיסים
               </button>
-              <button
-                type="button"
+                <button
+                  type="button"
                 onClick={() => setViewMode("table")}
                 className={`inline-flex items-center gap-1 rounded-lg px-3 py-1.5 text-xs font-black ${
                   viewMode === "table" ? "bg-white text-luxury-navy-rich shadow-sm" : "text-slate-600"
@@ -625,8 +658,8 @@ export default function AdminTasksPage() {
               >
                 <Table className="h-3.5 w-3.5" aria-hidden />
                 טבלה
-              </button>
-            </div>
+                </button>
+              </div>
             {stats?.progress && stats.progress.total > 0 ? (
               <p className="text-sm font-bold text-slate-600">
                 התקדמות:{" "}
@@ -652,7 +685,7 @@ export default function AdminTasksPage() {
                 </span>
               </span>
             ))}
-          </div>
+              </div>
         ) : null}
 
         <div className="mt-5 flex flex-wrap gap-2 border-b border-slate-100 pb-3">
@@ -744,7 +777,7 @@ export default function AdminTasksPage() {
             רק פתוחות
           </label>
           <label className="flex cursor-pointer items-center gap-2 text-sm font-bold text-slate-800">
-            <input
+          <input
               type="checkbox"
               checked={onlyOverdue}
               onChange={(e) => setOnlyOverdue(e.target.checked)}
@@ -776,7 +809,7 @@ export default function AdminTasksPage() {
               </div>
             </div>
           ) : viewMode === "cards" ? (
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <div className="grid grid-cols-1 justify-items-stretch gap-2.5 sm:grid-cols-[repeat(auto-fill,minmax(min(100%,300px),320px))]">
               {groupEntries.map(([gid, members]) => {
                 const head = members[0]!;
                 void timeTick;
@@ -785,7 +818,7 @@ export default function AdminTasksPage() {
                 const overdueUi = members.some((m) => m.deadline_passed);
                 const pr = PRIORITY_STYLES[head.priority] ?? PRIORITY_STYLES.normal;
                 return (
-                  <article key={gid} className={`${cardShell(eff, urgentOpen)} min-h-[320px]`}>
+                  <article key={gid} className={cardShell(eff, urgentOpen)}>
                     {urgentOpen ? (
                       <div className="absolute end-3 top-3 flex items-center gap-1 rounded-full bg-red-600 px-2 py-0.5 text-[10px] font-black uppercase text-white shadow-md shadow-red-500/30">
                         <Flame className="h-3 w-3" aria-hidden />
@@ -817,7 +850,7 @@ export default function AdminTasksPage() {
                     <p className="mt-3 line-clamp-3 text-sm leading-snug text-slate-600">{head.description}</p>
                     <p className="mt-2 text-xs font-semibold text-slate-600">
                       <Clock3 className="me-1 inline h-3.5 w-3.5 text-luxury-navy-rich" aria-hidden />
-                      שעת התחלה מתוזמנת:{" "}
+                      שעות מתוכננות:{" "}
                       <span className="font-black text-slate-900">{scheduledLabel(head)}</span>
                     </p>
                     <div className="mt-3 flex flex-wrap gap-1.5">
@@ -857,7 +890,7 @@ export default function AdminTasksPage() {
                 const pr = PRIORITY_STYLES[task.priority] ?? PRIORITY_STYLES.normal;
                 const remainLine = formatRemainOrLateTask(task);
 
-                return (
+            return (
                   <article key={task.id} className={cardShell(eff, urgentOpen)}>
                     {urgentOpen ? (
                       <div className="absolute end-3 top-3 flex items-center gap-1 rounded-full bg-red-600 px-2 py-0.5 text-[10px] font-black uppercase text-white shadow-md shadow-red-500/30">
@@ -901,7 +934,7 @@ export default function AdminTasksPage() {
                     <div className="mt-3 space-y-2 text-xs font-semibold text-slate-600">
                       <p className="flex items-center gap-1.5">
                         <Clock3 className="h-3.5 w-3.5 shrink-0 text-luxury-navy-rich" aria-hidden />
-                        שעת התחלה מתוזמנת:{" "}
+                        שעות מתוכננות:{" "}
                         <span className="font-black text-slate-900">{scheduledLabel(task)}</span>
                       </p>
                       {task.status !== "completed" ? (
@@ -979,14 +1012,16 @@ export default function AdminTasksPage() {
             </div>
           ) : (
             <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
-              <table className="w-full min-w-[720px] border-collapse text-right text-sm">
+              <table className="w-full min-w-[820px] border-collapse text-right text-sm">
                 <thead>
                   <tr className="border-b border-slate-200 bg-slate-50 text-xs font-black text-slate-700">
                     <th className="px-3 py-3">עובד</th>
                     <th className="px-3 py-3">כותרת</th>
                     <th className="px-3 py-3">עדיפות</th>
                     <th className="px-3 py-3">סטטוס</th>
-                    <th className="px-3 py-3">תאריך ושעת התחלה</th>
+                    <th className="px-3 py-3">תאריך</th>
+                    <th className="px-3 py-3">התחלה</th>
+                    <th className="px-3 py-3">סיום</th>
                     <th className="px-3 py-3">מצב זמן</th>
                   </tr>
                 </thead>
@@ -1024,7 +1059,9 @@ export default function AdminTasksPage() {
                             {STATUS_LABELS[eff]}
                           </span>
                         </td>
-                        <td className="px-3 py-2.5 text-slate-700">{scheduledLabel(task)}</td>
+                        <td className="px-3 py-2.5 text-slate-700">{formatTaskDay(task.task_date)}</td>
+                        <td className="px-3 py-2.5 text-slate-700">{task.start_time}</td>
+                        <td className="px-3 py-2.5 text-slate-700">{task.end_time || "..."}</td>
                         <td
                           className={`px-3 py-2.5 text-xs font-bold tabular-nums ${
                             remainLine.overdue ? "text-rose-700" : "text-slate-700"
@@ -1088,24 +1125,24 @@ export default function AdminTasksPage() {
                           </span>
                         </div>
                         <div className="flex shrink-0 gap-2">
-                          <button
-                            type="button"
+                    <button
+                      type="button"
                             onClick={() =>
                               setEditingId((id) => (id === task.id ? null : task.id))
                             }
                             className="rounded-lg border border-slate-200 px-2 py-1 text-[11px] font-bold text-slate-700 hover:bg-white"
-                          >
-                            עריכה
-                          </button>
-                          <button
-                            type="button"
+                    >
+                      עריכה
+                    </button>
+                  <button
+                    type="button"
                             onClick={() => void deleteTask(task.id)}
                             className="rounded-lg border border-rose-200 px-2 py-1 text-[11px] font-bold text-rose-700 hover:bg-rose-50"
-                          >
-                            מחיקה
-                          </button>
-                        </div>
-                      </div>
+                  >
+                    מחיקה
+                  </button>
+                </div>
+              </div>
                       {editingId === task.id ? (
                         <div className="mt-3 rounded-lg border border-luxury-gold/30 bg-white p-3">
                           <QuickEdit
@@ -1116,8 +1153,8 @@ export default function AdminTasksPage() {
                         </div>
                       ) : null}
                     </li>
-                  );
-                })}
+            );
+          })}
             </ul>
           </div>
         </div>
@@ -1160,10 +1197,12 @@ function QuickEdit({
   const [desc, setDesc] = useState(task.description);
   const [taskDateEdit, setTaskDateEdit] = useState(() => formatDateInputLocal(task.task_date));
   const [startTimeEdit, setStartTimeEdit] = useState(task.start_time);
+  const [endTimeEdit, setEndTimeEdit] = useState(task.end_time ?? "");
   const [dueEdit, setDueEdit] = useState(task.due_date ?? "");
   const [empNote, setEmpNote] = useState(task.employee_note ?? "");
   const [pri, setPri] = useState(task.priority);
   const [stat, setStat] = useState(task.status);
+  const [error, setError] = useState<string | null>(null);
 
   return (
     <div className="mt-2 space-y-2">
@@ -1179,20 +1218,33 @@ function QuickEdit({
         className="w-full rounded-lg border border-slate-200 bg-white p-2 text-sm font-semibold"
         rows={3}
       />
-      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
         <input
           type="date"
           value={taskDateEdit}
           onChange={(e) => setTaskDateEdit(e.target.value)}
           className="rounded-lg border border-slate-200 px-2 py-2 text-sm"
         />
-        <input
-          type="time"
-          value={startTimeEdit}
-          onChange={(e) => setStartTimeEdit(e.target.value)}
-          className="rounded-lg border border-slate-200 px-2 py-2 text-sm"
-        />
+        <label className="text-[11px] font-bold text-slate-600">
+          שעת התחלה
+          <input
+            type="time"
+            value={startTimeEdit}
+            onChange={(e) => setStartTimeEdit(e.target.value)}
+            className="mt-1 w-full rounded-lg border border-slate-200 px-2 py-2 text-sm"
+          />
+        </label>
+        <label className="text-[11px] font-bold text-slate-600">
+          שעת סיום
+          <input
+            type="time"
+            value={endTimeEdit}
+            onChange={(e) => setEndTimeEdit(e.target.value)}
+            className="mt-1 w-full rounded-lg border border-slate-200 px-2 py-2 text-sm"
+          />
+        </label>
       </div>
+      {error ? <p className="text-xs font-bold text-rose-700">{error}</p> : null}
       <label className="block text-[11px] font-bold text-slate-600">יעד (אופציונלי)</label>
       <input
         type="date"
@@ -1231,12 +1283,21 @@ function QuickEdit({
           type="button"
           className="rounded-lg bg-luxury-navy-rich px-3 py-1.5 text-xs font-black text-white"
           onClick={() => {
-            if (!title.trim() || !taskDateEdit.trim() || !startTimeEdit.trim()) return;
+            setError(null);
+            if (!title.trim() || !taskDateEdit.trim() || !startTimeEdit.trim()) {
+              setError("חובה למלא כותרת, תאריך ושעת התחלה.");
+              return;
+            }
+            if (endTimeEdit.trim() && endTimeEdit.trim() < startTimeEdit.trim()) {
+              setError("שעת סיום חייבת להיות אחרי שעת ההתחלה.");
+              return;
+            }
             onSave({
               title: title.trim(),
               description: desc,
               taskDate: taskDateEdit.trim(),
               startTime: startTimeEdit.trim(),
+              endTime: endTimeEdit.trim() || null,
               dueDate: dueEdit.trim() || null,
               employeeNote: empNote.trim() || null,
               priority: pri,
