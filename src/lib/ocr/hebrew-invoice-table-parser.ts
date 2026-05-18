@@ -3,25 +3,30 @@
  * Designed for OCR.space output on Israeli tax invoices.
  */
 import type { ScannedItem } from "./types";
-import { splitOcrLines } from "./normalize-ocr-text";
+import { fixRtlLineText, splitOcrLines } from "./normalize-ocr-text";
+import {
+  isFooterLine,
+  isTableHeaderLine,
+  letterCount,
+  shouldSkipItemLine,
+  isReadableProductName,
+} from "./ocr-line-filters";
+import {
+  isUnreasonableTriple,
+  scoreTripleConfidence,
+  violatesNumericCaps,
+  SANITY_MAX_QTY,
+  SANITY_MAX_UNIT_PRICE,
+  SANITY_MAX_LINE_TOTAL,
+} from "./invoice-line-sanity";
 
-const MAX_QTY = 500;
-const MAX_UNIT_PRICE = 10_000;
-const MAX_LINE_TOTAL = 100_000;
+const MAX_QTY = SANITY_MAX_QTY;
+const MAX_UNIT_PRICE = SANITY_MAX_UNIT_PRICE;
+const MAX_LINE_TOTAL = SANITY_MAX_LINE_TOTAL;
 const BARCODE_MIN_DIGITS = 7;
 
 const NUMBER_RE =
   /\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?|\d{1,3}(?:,\d{3})+|\d+\.\d{1,2}|\d+/g;
-
-/** Lines to skip entirely (not product rows). */
-const SKIP_LINE_RE =
-  /^(?:מע[\"']?מ|מעמ|סה[\"']?כ|סהכ|סך\s*הכל|סה[\"']?כ\s*לתשלום|סהכ\s*לתשלום|סה[\"']?כ\s*לפני|הנחה|כולל\s*מע|טלפון|פקס|phone|fax|כתובת|address|ברקוד\s*[:：]?$|עוסק\s*מורשה|ח\.?\s*פ|תאריך\s*[:：]?\s*\d|שעה\s*[:：])/i;
-
-const TABLE_HEADER_RE =
-  /מק[\"']?ט|מקט|שם\s*פריט|תיאור\s*פריט|תאור|כמות|מחיר|מחיר\s*יח|סה[\"']?כ(?!\s*לתשלום)/i;
-
-const FOOTER_ROW_RE =
-  /סה[\"']?כ\s*לפני|סה[\"']?כ\s*לתשלום|סהכ\s*לתשלום|סך\s*הכל|כולל\s*מע[\"']?מ|^מע[\"']?מ\s|^הנחה\s/i;
 
 type ColumnMap = {
   sku?: number;
@@ -48,10 +53,6 @@ export function parseNumber(raw: string): number {
   if (/,\d{3}/.test(s)) s = s.replace(/,/g, "");
   else if (/^\d+,\d{1,2}$/.test(s)) s = s.replace(",", ".");
   return Number.parseFloat(s);
-}
-
-function letterCount(s: string): number {
-  return (s.match(/[a-zA-Z\u0590-\u05FF]/gi) ?? []).length;
 }
 
 function tokenizeNumbers(line: string): number[] {
@@ -95,30 +96,6 @@ export function isBarcodeNumber(n: number, rawToken?: string): boolean {
 
 function lineHasSkuContext(line: string): boolean {
   return /מק[\"']?ט|מקט|ברקוד|barcode|sku/i.test(line);
-}
-
-function isFooterLine(line: string): boolean {
-  return FOOTER_ROW_RE.test(line.trim());
-}
-
-function shouldSkipLine(line: string): boolean {
-  const t = line.trim();
-  if (!t) return true;
-  if (SKIP_LINE_RE.test(t)) return true;
-  if (isFooterLine(t)) return true;
-  if (/^[\d\s.,\-₪%]+$/.test(t) && letterCount(t) === 0) return true;
-  return false;
-}
-
-function isTableHeaderLine(line: string): boolean {
-  if (!TABLE_HEADER_RE.test(line)) return false;
-  const hits = [
-    /מק[\"']?ט|מקט/i.test(line),
-    /שם|תיאור|תאור/i.test(line),
-    /כמות/i.test(line),
-    /מחיר/i.test(line),
-  ].filter(Boolean).length;
-  return hits >= 2;
 }
 
 /** Step 4 — column positions from header row (split on 2+ spaces or tabs). */
@@ -245,6 +222,7 @@ function resolveThreeNumbers(nums: number[]): Triple | null {
       if (q > MAX_QTY || p > MAX_UNIT_PRICE || t > MAX_LINE_TOTAL) continue;
       if (isBarcodeNumber(q) || isBarcodeNumber(p)) continue;
       const expected = q * p;
+      if (isUnreasonableTriple(q, p, t, 0.5)) continue;
       const err = Math.abs(expected - t) / Math.max(t, 1);
       const score = err < 0.06 ? 1 - err : err < 0.15 ? 0.7 - err : 0.2;
       if (!best || score > best.score) {
@@ -272,7 +250,9 @@ function stripNumbersFromLine(line: string): string {
 
 /** Step 3 + 5 — heuristic row without column map. */
 function parseRowHeuristic(line: string, _cols?: ColumnMap): ScannedItem | null {
-  if (shouldSkipLine(line) || isTableHeaderLine(line)) return null;
+  const normalized = fixRtlLineText(line);
+  if (shouldSkipItemLine(normalized) || isTableHeaderLine(normalized)) return null;
+  line = normalized;
 
   const tokens = tokenizeNumberTokens(line);
   const nums = tokens.map((t) => t.value);
@@ -315,39 +295,30 @@ function parseRowHeuristic(line: string, _cols?: ColumnMap): ScannedItem | null 
   return item;
 }
 
-/** Step 8 — confidence → lineStatus. */
-function scoreTriple(q: number, p: number, t: number): number {
-  if (q <= 0 || p <= 0 || t <= 0) return 0.2;
-  const expected = q * p;
-  const err = Math.abs(expected - t) / Math.max(t, expected, 1);
-  if (err <= 0.02) return 0.95;
-  if (err <= 0.06) return 0.82;
-  if (err <= 0.12) return 0.65;
-  if (err <= 0.2) return 0.5;
-  return 0.35;
-}
-
 function buildItem(
   rawName: string,
   quantity: number,
   unitPrice: number,
   lineTotal: number,
 ): ScannedItem | null {
+  if (!isReadableProductName(rawName)) return null;
+  if (isUnreasonableTriple(quantity, unitPrice, lineTotal)) return null;
+
+  const parseConfidence = scoreTripleConfidence(quantity, unitPrice, lineTotal);
+  if (violatesNumericCaps(quantity, unitPrice, lineTotal, parseConfidence)) return null;
   if (quantity <= 0 || quantity > MAX_QTY) return null;
   if (unitPrice <= 0 || unitPrice > MAX_UNIT_PRICE) return null;
   if (lineTotal <= 0 || lineTotal > MAX_LINE_TOTAL) return null;
-  if (letterCount(rawName) < 2) return null;
 
-  const confidenceScore = scoreTriple(quantity, unitPrice, lineTotal);
   let lineStatus: ScannedItem["lineStatus"] = "valid";
   let uncertain = false;
+  let ocrSuspect = false;
 
-  if (confidenceScore >= 0.8) {
-    lineStatus = "valid";
-  } else if (confidenceScore >= 0.55) {
-    lineStatus = "review";
+  if (parseConfidence < 0.55) {
+    lineStatus = "suspect";
     uncertain = true;
-  } else {
+    ocrSuspect = true;
+  } else if (parseConfidence < 0.8) {
     lineStatus = "review";
     uncertain = true;
   }
@@ -360,10 +331,11 @@ function buildItem(
     quantity,
     unitPrice,
     lineTotal,
-    confidenceScore,
+    confidenceScore: parseConfidence,
+    parseConfidence,
     lineStatus,
     uncertain,
-    ocrSuspect: false,
+    ocrSuspect,
     regularPrice: null,
     regularPriceSamples: 0,
     isHigher: false,
@@ -436,8 +408,8 @@ export function parseHebrewInvoiceTable(rawText: string): TableParseResult {
   let skipped = 0;
 
   for (let i = bodyStart; i < bodyEnd; i++) {
-    const line = lines[i];
-    if (shouldSkipLine(line) || isTableHeaderLine(line)) {
+    const line = fixRtlLineText(lines[i]);
+    if (shouldSkipItemLine(line) || isTableHeaderLine(line)) {
       skipped++;
       continue;
     }

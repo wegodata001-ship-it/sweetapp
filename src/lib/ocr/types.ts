@@ -1,3 +1,5 @@
+import type { OcrPositionedLine } from "./ocr-overlay";
+
 /**
  * Shared types for the expense document scanner (OCR + parsing pipeline).
  *
@@ -27,6 +29,8 @@ export type ScannedItem = {
   lineTotal: number;
   /** Parser confidence 0–1 for this line */
   confidenceScore?: number;
+  /** Same as confidenceScore — table/position parse quality */
+  parseConfidence?: number;
   /** valid = green, review = orange, suspect = red (excluded from auto-add) */
   lineStatus?: "valid" | "review" | "suspect";
   /** Huge / invalid OCR amount detected */
@@ -107,4 +111,5 @@ export type OcrEngineResult = {
   engine: string;
   confidence: number;
   pdfPageCount?: number;
+  overlay?: OcrPositionedLine[];
 };

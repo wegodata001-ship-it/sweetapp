@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { stringSimilarity } from "./similarity";
+import { canAutoMatchProductName } from "./ocr-line-filters";
 import { supplierMatchLabels, supplierNamesMatch } from "./supplier-aliases";
 import type { ScannedDocument, ScannedItem } from "./types";
 
@@ -314,7 +315,15 @@ export async function enrichScannedDocument(
 
   const enriched: ScannedItem[] = [];
   for (const item of doc.items) {
-    const productMatch = await matchProduct(item.rawName);
+    const allowAutoMatch =
+      canAutoMatchProductName(item.rawName) &&
+      item.lineStatus !== "suspect" &&
+      !item.ocrSuspect &&
+      (item.parseConfidence ?? item.confidenceScore ?? 0) >= 0.55;
+
+    const productMatch = allowAutoMatch
+      ? await matchProduct(item.rawName)
+      : null;
     let name = productMatch?.name ?? item.rawName;
     const productId = productMatch?.id ?? null;
 
@@ -326,7 +335,7 @@ export async function enrichScannedDocument(
     let suggestedProductName: string | null = null;
     let productMatchScore: number | null = null;
 
-    if (result.supplierId) {
+    if (result.supplierId && allowAutoMatch) {
       const catalog = await supplierCatalogBaseline(result.supplierId, item.rawName);
       if (catalog) {
         baselinePrice = catalog.price;

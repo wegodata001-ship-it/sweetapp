@@ -1,6 +1,8 @@
 import type { ScannedDocument, ScannedItem } from "./types";
 import { normalizeOcrText, splitOcrLines } from "./normalize-ocr-text";
 import { parseHebrewInvoiceTable } from "./hebrew-invoice-table-parser";
+import { parseHebrewInvoiceByPosition } from "./hebrew-invoice-position-parser";
+import type { OcrPositionedLine } from "./ocr-overlay";
 import {
   extractHebrewInvoiceFields,
   parseFallbackLineItems,
@@ -736,15 +738,40 @@ export function summarizeParsed(doc: ScannedDocument): Record<string, unknown> {
   };
 }
 
-export function parseReceiptText(rawText: string): ScannedDocument {
+export function parseReceiptText(
+  rawText: string,
+  options?: { overlay?: OcrPositionedLine[] },
+): ScannedDocument {
   const text = normalizeOcrText(rawText ?? "");
   const lines = splitLines(text);
 
   console.log("[PARSER] lines count:", lines.length, "text length:", text.length);
 
+  let items: ScannedItem[] = [];
+  let skipped = 0;
+  let headerFound = false;
+
+  const overlay = options?.overlay ?? [];
+  if (overlay.length > 0) {
+    const posResult = parseHebrewInvoiceByPosition(overlay);
+    if (posResult.items.length > 0) {
+      items = posResult.items;
+      skipped = posResult.skipped;
+      headerFound = posResult.headerFound;
+      console.log("[PARSER] position-based items:", items.length);
+    }
+  }
+
   const tableResult = parseHebrewInvoiceTable(text);
-  let items = tableResult.items;
-  let skipped = tableResult.skipped;
+  if (items.length === 0) {
+    items = tableResult.items;
+    skipped = tableResult.skipped;
+    headerFound = tableResult.headerFound;
+  } else if (tableResult.items.length > items.length) {
+    items = tableResult.items;
+    skipped = tableResult.skipped;
+    headerFound = tableResult.headerFound;
+  }
 
   if (items.length === 0) {
     const legacy = extractTableItems(lines);
@@ -770,7 +797,7 @@ export function parseReceiptText(rawText: string): ScannedDocument {
   const vat = extractVatAmount(text, lines) ?? fb.vatAmount ?? null;
   const documentType = extractDocumentType(text) ?? fb.documentType;
 
-  console.log("[PARSER] table header found:", tableResult.headerFound);
+  console.log("[PARSER] table header found:", headerFound);
 
   const draft: Omit<ScannedDocument, "confidence"> = {
     supplierRawName,

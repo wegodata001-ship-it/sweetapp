@@ -4,11 +4,13 @@
  */
 
 import { mapOcrSpaceMessageToCode, OcrServiceError } from "./ocr-errors";
+import { extractOverlayFromOcrSpaceJson, type OcrPositionedLine } from "./ocr-overlay";
 
 export type OcrSpaceResult = {
   rawText: string;
   lines: string[];
   confidence: number;
+  overlay: OcrPositionedLine[];
   /** Truncated OCR.space JSON body for debug/cache */
   rawApiResponse?: string | null;
 };
@@ -148,7 +150,9 @@ function normalizeOcrSpaceResponse(json: OcrSpaceApiResponse): OcrSpaceResult {
           : 0.65
         : 0;
 
-  return { rawText, lines: finalLines, confidence };
+  const overlay = extractOverlayFromOcrSpaceJson(json);
+
+  return { rawText, lines: finalLines, confidence, overlay };
 }
 
 /**

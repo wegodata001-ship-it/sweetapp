@@ -99,6 +99,7 @@ export type ScannedItemDto = {
   unitPrice: number;
   lineTotal: number;
   confidenceScore?: number;
+  parseConfidence?: number;
   lineStatus?: "valid" | "review" | "suspect";
   ocrSuspect?: boolean;
   uncertain?: boolean;
@@ -826,7 +827,9 @@ function ExpenseScanDialogContent({
                       <ul className="divide-y divide-slate-100">
                         {result.items.map((it, idx) => {
                           const itemConfTier = confidenceTier(
-                            it.confidenceScore ?? result.confidence,
+                            it.parseConfidence ??
+                              it.confidenceScore ??
+                              result.confidence,
                           );
                           const highlight =
                             it.lineStatus === "suspect" || it.ocrSuspect
@@ -1168,9 +1171,14 @@ function OcrDebugModal({
             <p className="font-bold text-slate-600">{t("scan.ocrDebugFromCache")}</p>
           ) : null}
         </div>
-        <pre className="min-h-[120px] flex-1 overflow-auto bg-slate-900 p-4 text-[11px] leading-relaxed text-slate-100 whitespace-pre-wrap">
-          {rawText || t("scan.noRawText")}
-        </pre>
+        <details className="min-h-0 flex-1 overflow-hidden border-t border-slate-200">
+          <summary className="cursor-pointer bg-slate-100 px-4 py-2 text-xs font-black text-slate-700">
+            {t("scan.showRawOcr")}
+          </summary>
+          <pre className="max-h-[40vh] overflow-auto bg-slate-900 p-4 text-[11px] leading-relaxed text-slate-100 whitespace-pre-wrap">
+            {rawText || t("scan.noRawText")}
+          </pre>
+        </details>
         <div className="border-t border-slate-200 px-4 py-3">
           <button
             type="button"

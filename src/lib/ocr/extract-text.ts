@@ -7,6 +7,7 @@ import {
   truncateRawOcrResponse,
 } from "./ocr-cache";
 import { getPdfPageCount } from "./compress-pdf-for-ocr";
+import { parseOverlayFromRawResponse } from "./ocr-overlay";
 import { ocrSpaceConfigured, runOcrSpace } from "./ocr-space";
 import type { OcrEngineResult } from "./types";
 
@@ -36,11 +37,13 @@ export async function extractTextFromDocument(
 
   const cached = await getOcrFromCache(fileHash);
   if (cached) {
+    const overlay = parseOverlayFromRawResponse(cached.rawResponse);
     return {
       text: cached.rawText,
       engine: `${cached.engine}_cache`,
       confidence: cached.confidence,
       pdfPageCount,
+      overlay,
     };
   }
 
@@ -48,7 +51,7 @@ export async function extractTextFromDocument(
   const ocrStart = Date.now();
 
   try {
-    const { rawText, confidence, rawApiResponse } = await runOcrSpace(
+    const { rawText, confidence, rawApiResponse, overlay } = await runOcrSpace(
       compressed.buffer,
       compressed.mimeType,
       compressed.fileName,

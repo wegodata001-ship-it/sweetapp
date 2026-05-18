@@ -111,7 +111,9 @@ export async function scanDocument(input: {
 
   const parseStart = Date.now();
   console.log("[PARSER] START");
-  const parsed = applyTotalValidation(parseReceiptText(rawText));
+  const parsed = applyTotalValidation(
+    parseReceiptText(rawText, { overlay: ocrResult.overlay }),
+  );
   const parseDurationMs = Date.now() - parseStart;
   console.log("[PARSER] DONE ms:", parseDurationMs, summarizeParsed(parsed));
 
