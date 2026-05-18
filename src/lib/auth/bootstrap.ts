@@ -19,6 +19,7 @@ export async function ensureBootstrapSuperAdmin(): Promise<void> {
       passwordHash,
       role: UserRole.SUPER_ADMIN,
       isActive: true,
+      mustChangePassword: false,
     },
   });
 }

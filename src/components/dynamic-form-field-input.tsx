@@ -1,5 +1,6 @@
 "use client";
 
+import { useI18n } from "@/components/i18n-provider";
 import type { FormFieldTypeKey } from "@/lib/forms/field-types";
 import { parseOptionsJson } from "@/lib/forms/field-types";
 
@@ -24,6 +25,7 @@ const baseInput =
   "h-[42px] w-full rounded-lg border border-slate-300 bg-white px-3 text-right text-[14px] font-semibold text-slate-900 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 disabled:opacity-60";
 
 export function DynamicFormFieldInput({ field, value, onChange, error, disabled }: Props) {
+  const { t } = useI18n();
   const id = `dff-${field.id}`;
   const ph = field.placeholder?.trim() || undefined;
   const req = field.required;
@@ -169,7 +171,7 @@ export function DynamicFormFieldInput({ field, value, onChange, error, disabled 
             value={typeof value === "string" ? value : ""}
             onChange={(e) => onChange(e.target.value)}
           >
-            <option value="">— בחרו —</option>
+            <option value="">{t("common.selectOption")}</option>
             {opts.map((o) => (
               <option key={o} value={o}>
                 {o}

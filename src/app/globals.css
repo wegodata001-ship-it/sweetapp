@@ -80,9 +80,27 @@ textarea {
     @apply inline-flex h-[38px] min-h-[38px] min-w-[38px] items-center justify-center rounded-xl border border-slate-200 bg-white p-0 text-slate-700 shadow-sm transition hover:bg-slate-50;
   }
 
+  @media (max-width: 1023px) {
+    .erp-icon-btn {
+      min-height: 44px;
+      min-width: 44px;
+    }
+  }
+
   /** Primary compact button */
   .erp-btn {
-    @apply inline-flex h-[42px] items-center justify-center rounded-[16px] px-[18px] text-sm font-bold transition disabled:opacity-50;
+    @apply inline-flex h-[42px] min-h-[42px] items-center justify-center rounded-[16px] px-[18px] text-sm font-bold transition disabled:opacity-50;
+  }
+
+  @media (max-width: 1023px) {
+    .erp-btn {
+      min-height: 44px;
+    }
+  }
+
+  /** עטיפה לטבלאות רחבות — גלילה פנימית במקום שבירת מסך */
+  .erp-table-scroll {
+    @apply w-full overflow-x-auto overflow-y-visible [-webkit-overflow-scrolling:touch];
   }
 
   /** Tables: default data tables under main (exclude .erp-table-loose, .inventory-count-table) */
@@ -98,13 +116,13 @@ textarea {
   }
 
   main table.inventory-count-table tbody tr {
-    min-height: 58px;
+    min-height: 44px;
   }
 
   main table.inventory-count-table :is(thead th, tbody td) {
-    padding-block: 8px;
-    padding-inline: 10px;
-    font-size: 14px;
+    padding-block: 6px;
+    padding-inline: 8px;
+    font-size: 13px;
   }
 }
 
@@ -127,5 +145,117 @@ textarea {
   select:focus,
   textarea:focus {
     @apply border-luxury-gold ring-2 ring-luxury-gold/25;
+  }
+}
+
+/* ============================================================================
+ * Workflow runner — Monday/Notion-style ERP page
+ *   • wf-pulse        — subtle pulse for the active step card
+ *   • wf-progress     — animated stripes for in-progress bars
+ *   • wf-step-line    — vertical connector line between step circles
+ * ============================================================================ */
+@layer components {
+  .wf-pulse {
+    animation: wf-pulse 2.2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  }
+  @keyframes wf-pulse {
+    0%, 100% {
+      box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.35);
+    }
+    50% {
+      box-shadow: 0 0 0 12px rgba(37, 99, 235, 0);
+    }
+  }
+
+  .wf-pulse-late {
+    animation: wf-pulse-late 1.4s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  }
+  @keyframes wf-pulse-late {
+    0%, 100% {
+      box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.5);
+    }
+    50% {
+      box-shadow: 0 0 0 14px rgba(220, 38, 38, 0);
+    }
+  }
+
+  .wf-progress-stripes {
+    background-image: linear-gradient(
+      135deg,
+      rgba(255, 255, 255, 0.15) 25%,
+      transparent 25%,
+      transparent 50%,
+      rgba(255, 255, 255, 0.15) 50%,
+      rgba(255, 255, 255, 0.15) 75%,
+      transparent 75%,
+      transparent
+    );
+    background-size: 16px 16px;
+    animation: wf-stripes 1.4s linear infinite;
+  }
+  @keyframes wf-stripes {
+    0% {
+      background-position: 0 0;
+    }
+    100% {
+      background-position: 16px 0;
+    }
+  }
+
+  /* Step row — circle + connector line so the list reads as a workflow */
+  .wf-step-row {
+    position: relative;
+  }
+  .wf-step-row::before {
+    content: "";
+    position: absolute;
+    inset-inline-start: 19px;
+    top: 36px;
+    bottom: -10px;
+    width: 2px;
+    background: rgb(226 232 240); /* slate-200 */
+  }
+  .wf-step-row:last-child::before {
+    display: none;
+  }
+  .wf-step-row.is-completed::before {
+    background: rgb(16 185 129); /* emerald-500 */
+  }
+  .wf-step-row.is-active::before {
+    background: linear-gradient(
+      to bottom,
+      rgb(37 99 235),
+      rgb(226 232 240)
+    );
+  }
+
+  /* Employee task cards — production workflow focus */
+  .etask-card-active {
+    animation: etask-expand 0.35s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  @keyframes etask-expand {
+    from {
+      opacity: 0.85;
+      transform: scale(0.98);
+    }
+    to {
+      opacity: 1;
+      transform: scale(1);
+    }
+  }
+
+  .etask-timer-pulse {
+    animation: etask-timer-tick 1s ease-in-out infinite;
+  }
+  @keyframes etask-timer-tick {
+    0%,
+    100% {
+      opacity: 1;
+      text-shadow: 0 0 0 rgba(37, 99, 235, 0);
+    }
+    50% {
+      opacity: 0.92;
+      text-shadow: 0 0 20px rgba(37, 99, 235, 0.35);
+    }
   }
 }

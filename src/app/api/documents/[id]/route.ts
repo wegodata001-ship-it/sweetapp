@@ -17,8 +17,9 @@ import {
   normalizedPaymentLines,
   replaceCashFlowForDocument,
   saveProductHistoryFromItems,
+  syncCheckPaymentsForDocument,
 } from "@/lib/finance/document-side-effects";
-import { prisma } from "@/lib/prisma";
+import { prisma, prismaAny } from "@/lib/prisma";
 import { requireDb } from "@/lib/api-route";
 import { getSessionFromCookie } from "@/lib/auth/get-session";
 import { logActivity } from "@/lib/activity-log";
@@ -26,6 +27,8 @@ import { parseNum } from "@/lib/format-shekel";
 import { getSupabaseServiceClient } from "@/lib/supabase/server";
 import { bucketForStoragePath } from "@/lib/pdf/constants";
 import type { Prisma } from "@prisma/client";
+
+export const dynamic = "force-dynamic";
 
 function asJson(value: unknown): Prisma.InputJsonValue {
   return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
@@ -68,9 +71,13 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string
   if (block) return block;
   const { id } = await ctx.params;
   try {
-    const row = await prisma.financialDocument.findUnique({
+    const row = await prismaAny.financialDocument.findUnique({
       where: { id },
-      include: { customer: { select: { name: true } } },
+      include: {
+        customer: { select: { name: true } },
+        payments: { select: { amount: true } },
+        sentToCpaBy: { select: { id: true, fullName: true } },
+      },
     });
     if (!row) return NextResponse.json({ ok: false, error: "לא נמצא" }, { status: 404 });
     return NextResponse.json({ ok: true, data: prismaDocToFinanceRow(row) });
@@ -129,8 +136,15 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
           items.reduce((s, r) => s + r.total, 0) || incomeExpenseGrandTotal(ie);
         const depositAmount = incomeExpenseDepositAmount(ie);
         const calculatedTotal = productTotal + depositAmount;
-        const customerId =
+        let customerId =
           ie.kind === "income" ? await ensureCustomerByName(ie.counterpartyName) : null;
+
+        const hasCheckLine =
+          ie.kind === "income" &&
+          (ie.payments ?? []).some((p) => p.instrument === "CHECK");
+        if (ie.kind === "income" && !customerId && hasCheckLine) {
+          customerId = await ensureCustomerByName("ללא לקוח");
+        }
 
         const category = body.category ?? existing.category;
         const isIncomeRegister = ie.kind === "income" && category === "הכנסה";
@@ -205,6 +219,7 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
 
         await syncFinancialDocumentPaymentTotals(id);
         await replaceCashFlowForDocument(id);
+        await syncCheckPaymentsForDocument(id);
       }
     } else {
       await prisma.financialDocument.update({
@@ -220,7 +235,14 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
       await replaceCashFlowForDocument(id);
     }
 
-    const updated = await prisma.financialDocument.findUnique({ where: { id } });
+    const updated = await prismaAny.financialDocument.findUnique({
+      where: { id },
+      include: {
+        customer: { select: { name: true } },
+        payments: { select: { amount: true } },
+        sentToCpaBy: { select: { id: true, fullName: true } },
+      },
+    });
     if (session) await logActivity(session.sub, "document_edit");
     return NextResponse.json({ ok: true, data: updated ? prismaDocToFinanceRow(updated) : null });
   } catch (e) {
@@ -258,6 +280,7 @@ export async function DELETE(_req: NextRequest, ctx: { params: Promise<{ id: str
       },
     });
 
+    await prisma.payment.deleteMany({ where: { documentId: id } });
     await prisma.financialDocument.delete({ where: { id } });
     if (session) await logActivity(session.sub, "document_delete");
     return NextResponse.json({ ok: true });

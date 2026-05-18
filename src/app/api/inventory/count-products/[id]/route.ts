@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { prismaAny } from "@/lib/prisma";
 import { requireDb } from "@/lib/api-route";
 import { getSessionFromCookie } from "@/lib/auth/get-session";
 
@@ -15,6 +15,7 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
     const { id } = await ctx.params;
     const body = (await req.json()) as {
       name?: string;
+      locationId?: string | null;
       location?: string | null;
       unit?: string | null;
       category?: string | null;
@@ -26,7 +27,27 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
       if (!name) return NextResponse.json({ ok: false, error: "שם פריט חובה" }, { status: 400 });
       data.name = name;
     }
-    if (body.location !== undefined) {
+    if (body.locationId !== undefined) {
+      const lid = body.locationId?.trim() || null;
+      if (!lid) {
+        data.locationId = null;
+        if (body.location !== undefined) {
+          const loc = body.location?.trim();
+          if (!loc) return NextResponse.json({ ok: false, error: "מיקום חובה כשאין locationId" }, { status: 400 });
+          data.location = loc;
+        }
+      } else {
+        const loc = await prismaAny.inventoryLocation.findFirst({
+          where: { id: lid, isActive: true },
+          select: { id: true, name: true },
+        });
+        if (!loc) {
+          return NextResponse.json({ ok: false, error: "מיקום לא נמצא או לא פעיל" }, { status: 400 });
+        }
+        data.locationId = lid;
+        data.location = loc.name;
+      }
+    } else if (body.location !== undefined) {
       const loc = body.location?.trim();
       if (!loc) return NextResponse.json({ ok: false, error: "מיקום חובה" }, { status: 400 });
       data.location = loc;
@@ -44,7 +65,11 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
       data.minimumQuantity = n;
     }
 
-    const row = await prisma.inventoryProduct.update({ where: { id }, data });
+    if (Object.keys(data).length === 0) {
+      return NextResponse.json({ ok: false, error: "אין שדות לעדכון" }, { status: 400 });
+    }
+
+    const row = await prismaAny.inventoryProduct.update({ where: { id }, data });
     return NextResponse.json({ ok: true, data: row });
   } catch (e) {
     return NextResponse.json(

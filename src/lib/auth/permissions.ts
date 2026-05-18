@@ -28,6 +28,7 @@ export const PERMISSION_LABELS: Record<PermissionKey, string> = {
 /** דפים — לפי התאמה ארוכה ביותר */
 export const PAGE_ACCESS_RULES: { prefix: string; permission: PermissionKey | "SUPER_ADMIN_ONLY" }[] = [
   { prefix: "/admin/users", permission: "SUPER_ADMIN_ONLY" },
+  { prefix: "/finance/suppliers-prices", permission: "financial_registration" },
   { prefix: "/finance/register", permission: "financial_registration" },
   { prefix: "/finance/archive", permission: "financial_registration" },
   { prefix: "/finance/income", permission: "financial_registration" },
@@ -35,10 +36,12 @@ export const PAGE_ACCESS_RULES: { prefix: string; permission: PermissionKey | "S
   { prefix: "/finance/ledgers", permission: "ledger" },
   { prefix: "/finance/cashflow", permission: "cash_flow" },
   { prefix: "/finance", permission: "financial_registration" },
+  { prefix: "/admin/future-orders", permission: "tasks" },
+  { prefix: "/admin/staff", permission: "tasks" },
   { prefix: "/admin/tasks", permission: "tasks" },
   { prefix: "/admin/forms", permission: "tasks" },
   { prefix: "/ops/inventory", permission: "inventory" },
-  { prefix: "/ops/attendance", permission: "employee_clock" },
+  { prefix: "/ops/recipes", permission: "tasks" },
   { prefix: "/ops/kanban", permission: "tasks" },
   { prefix: "/ops", permission: "tasks" },
   { prefix: "/worker", permission: "employee_clock" },
@@ -47,6 +50,7 @@ export const PAGE_ACCESS_RULES: { prefix: string; permission: PermissionKey | "S
 /** API — נתיב לפי קידומת */
 export const API_ACCESS_RULES: { prefix: string; permission: PermissionKey | "SUPER_ADMIN_ONLY" }[] = [
   { prefix: "/api/admin/users", permission: "SUPER_ADMIN_ONLY" },
+  { prefix: "/api/procurement", permission: "financial_registration" },
   { prefix: "/api/documents", permission: "financial_registration" },
   { prefix: "/api/payments", permission: "financial_registration" },
   { prefix: "/api/pdfs", permission: "financial_registration" },
@@ -62,8 +66,19 @@ export const API_ACCESS_RULES: { prefix: string; permission: PermissionKey | "SU
   { prefix: "/api/suppliers", permission: "ledger" },
   { prefix: "/api/employees", permission: "ledger" },
   { prefix: "/api/inventory", permission: "inventory" },
-  { prefix: "/api/tasks", permission: "tasks" },
+  { prefix: "/api/recipes", permission: "tasks" },
+  { prefix: "/api/admin/work-library", permission: "tasks" },
+  { prefix: "/api/admin/work-templates", permission: "tasks" },
+  { prefix: "/api/admin/work-assign", permission: "tasks" },
+  { prefix: "/api/admin/work-tasks", permission: "tasks" },
+  { prefix: "/api/workflows", permission: "tasks" },
+  { prefix: "/api/future-orders", permission: "tasks" },
   { prefix: "/api/form-fields", permission: "tasks" },
+  { prefix: "/api/staff/attendance/", permission: "tasks" },
+  { prefix: "/api/staff/attendance", permission: "tasks" },
+  { prefix: "/api/staff/shifts/", permission: "tasks" },
+  { prefix: "/api/staff/shifts", permission: "tasks" },
+  { prefix: "/api/staff/dashboard", permission: "tasks" },
 ];
 
 export function matchRule(

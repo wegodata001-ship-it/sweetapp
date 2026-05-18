@@ -1,15 +1,22 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { PERMISSION_KEYS, PERMISSION_LABELS, type PermissionKey } from "@/lib/auth/permissions";
+import { useI18n } from "@/components/i18n-provider";
+import { PERMISSION_KEYS, type PermissionKey } from "@/lib/auth/permissions";
+import { isValidNationalId, normalizeNationalId } from "@/lib/employees/national-id";
+import { translatePermission } from "@/lib/i18n/status-keys";
 
 type RowUser = {
   id: string;
   fullName: string;
   email: string;
-  role: "SUPER_ADMIN" | "EMPLOYEE";
+  nationalId: string | null;
+  phone: string | null;
+  role: "SUPER_ADMIN" | "ADMIN" | "EMPLOYEE";
   isActive: boolean;
+  hourlyRate: number;
   permissions: string[];
+  mustChangePassword?: boolean;
 };
 
 type ModalMode = "create" | "edit" | null;
@@ -17,13 +24,18 @@ type ModalMode = "create" | "edit" | null;
 const emptyForm = {
   fullName: "",
   email: "",
+  nationalId: "",
+  phone: "",
   password: "",
-  role: "EMPLOYEE" as "SUPER_ADMIN" | "EMPLOYEE",
+  role: "EMPLOYEE" as "SUPER_ADMIN" | "ADMIN" | "EMPLOYEE",
+  hourlyRate: 0,
   isActive: true,
+  mustChangePassword: true,
   permissions: [] as PermissionKey[],
 };
 
 export default function AdminUsersPage() {
+  const { t } = useI18n();
   const [users, setUsers] = useState<RowUser[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [modal, setModal] = useState<ModalMode>(null);
@@ -36,22 +48,24 @@ export default function AdminUsersPage() {
     try {
       const res = await fetch("/api/admin/users", { credentials: "same-origin" });
       if (res.status === 401 || res.status === 403) {
-        setLoadError("אין הרשאה לצפות בעמוד זה.");
+        setLoadError(t("admin.users.errors.loadForbidden"));
         return;
       }
       const j = (await res.json()) as { ok?: boolean; data?: RowUser[]; error?: string };
       if (!j.ok || !j.data) {
-        setLoadError(j.error || "שגיאת טעינה");
+        setLoadError(j.error || t("admin.users.errors.loadFailed"));
         return;
       }
       setUsers(j.data);
     } catch {
-      setLoadError("שגיאת רשת");
+      setLoadError(t("common.errorNetwork"));
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
-    void load();
+    queueMicrotask(() => {
+      void load();
+    });
   }, [load]);
 
   function openCreate() {
@@ -65,9 +79,13 @@ export default function AdminUsersPage() {
     setForm({
       fullName: u.fullName,
       email: u.email,
+      nationalId: u.nationalId ?? "",
+      phone: u.phone ?? "",
       password: "",
       role: u.role,
+      hourlyRate: u.hourlyRate ?? 0,
       isActive: u.isActive,
+      mustChangePassword: u.mustChangePassword ?? false,
       permissions: u.permissions.filter((p): p is PermissionKey =>
         (PERMISSION_KEYS as readonly string[]).includes(p),
       ),
@@ -88,6 +106,19 @@ export default function AdminUsersPage() {
     e.preventDefault();
     setSaving(true);
     try {
+      // ולידציות מקדימות ברורות לפני שליחה
+      const nid = normalizeNationalId(form.nationalId);
+      if (form.role === "EMPLOYEE" && !nid) {
+        setLoadError(t("admin.users.errors.nationalIdRequired"));
+        setSaving(false);
+        return;
+      }
+      if (nid && !isValidNationalId(nid)) {
+        setLoadError(t("admin.users.errors.nationalIdInvalid"));
+        setSaving(false);
+        return;
+      }
+
       if (modal === "create") {
         if (!form.password.trim()) {
           setSaving(false);
@@ -99,16 +130,21 @@ export default function AdminUsersPage() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             fullName: form.fullName,
-            email: form.email,
+            email: form.email || null,
+            nationalId: nid || null,
+            phone: form.phone?.trim() || null,
             password: form.password,
             role: form.role,
             isActive: form.isActive,
-            permissions: form.role === "EMPLOYEE" ? form.permissions : [],
+            hourlyRate: form.hourlyRate,
+            mustChangePassword: form.mustChangePassword,
+            permissions:
+              form.role === "EMPLOYEE" || form.role === "ADMIN" ? form.permissions : [],
           }),
         });
         const j = (await res.json()) as { ok?: boolean; error?: string };
         if (!res.ok || !j.ok) {
-          setLoadError(j.error || "שמירה נכשלה");
+          setLoadError(j.error || t("admin.users.errors.saveFailed"));
           setSaving(false);
           return;
         }
@@ -116,11 +152,17 @@ export default function AdminUsersPage() {
         const body: Record<string, unknown> = {
           fullName: form.fullName,
           email: form.email,
+          nationalId: nid || null,
+          phone: form.phone?.trim() || null,
           role: form.role,
           isActive: form.isActive,
+          mustChangePassword: form.mustChangePassword,
         };
         if (form.password.trim()) body.password = form.password;
-        if (form.role === "EMPLOYEE") body.permissions = form.permissions;
+        body.hourlyRate = form.hourlyRate;
+        if (form.role === "EMPLOYEE" || form.role === "ADMIN") {
+          body.permissions = form.permissions;
+        }
 
         const res = await fetch(`/api/admin/users/${editingId}`, {
           method: "PATCH",
@@ -130,7 +172,7 @@ export default function AdminUsersPage() {
         });
         const j = (await res.json()) as { ok?: boolean; error?: string };
         if (!res.ok || !j.ok) {
-          setLoadError(j.error || "עדכון נכשל");
+          setLoadError(j.error || t("admin.users.errors.updateFailed"));
           setSaving(false);
           return;
         }
@@ -143,14 +185,14 @@ export default function AdminUsersPage() {
   }
 
   async function removeUser(id: string) {
-    if (!confirm("למחוק משתמש זה?")) return;
+    if (!confirm(t("admin.users.confirmDelete"))) return;
     const res = await fetch(`/api/admin/users/${id}`, {
       method: "DELETE",
       credentials: "same-origin",
     });
     const j = (await res.json()) as { ok?: boolean; error?: string };
     if (!res.ok || !j.ok) {
-      setLoadError(j.error || "מחיקה נכשלה");
+      setLoadError(j.error || t("admin.users.errors.deleteFailed"));
       return;
     }
     await load();
@@ -161,10 +203,10 @@ export default function AdminUsersPage() {
       <section className="app-panel mb-[14px] p-4 md:p-[18px]">
         <div className="flex flex-wrap items-start justify-between gap-2.5">
           <div>
-            <p className="text-[12px] font-bold tracking-[0.14em] text-luxury-gold opacity-90">ניהול הרשאות</p>
-            <h1 className="erp-page-title mt-1 text-slate-950">משתמשים ועובדים</h1>
+            <p className="text-[12px] font-bold tracking-[0.14em] text-luxury-gold opacity-90">{t("admin.users.kicker")}</p>
+            <h1 className="erp-page-title mt-1 text-slate-950">{t("admin.users.title")}</h1>
             <p className="mt-1 max-w-xl text-[14px] leading-snug text-slate-600 opacity-80">
-              יצירה ועריכה של משתמשים, והגדרת הרשאות לפי מסכים. עובד רואה רק מה שמסומן.
+              {t("admin.users.subtitle")}
             </p>
           </div>
           <button
@@ -172,7 +214,7 @@ export default function AdminUsersPage() {
             onClick={() => openCreate()}
             className="erp-btn bg-luxury-gold text-luxury-charcoal shadow-sm hover:bg-luxury-gold-hover"
           >
-            + משתמש חדש
+            {t("admin.users.addNew")}
           </button>
         </div>
 
@@ -190,15 +232,35 @@ export default function AdminUsersPage() {
             >
               <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-0.5 md:gap-x-5">
                 <p className="truncate font-bold text-slate-950">{u.fullName}</p>
-                <p className="truncate text-[14px] text-slate-600">{u.email}</p>
+                {u.nationalId ? (
+                  <span
+                    className="inline-flex shrink-0 items-center gap-1 rounded-md bg-slate-100 px-2 py-0.5 text-[12px] font-black tabular-nums text-slate-700"
+                    title={t("admin.users.fields.nationalId")}
+                  >
+                    {t("admin.users.list.nationalIdLabel")} {u.nationalId}
+                  </span>
+                ) : null}
+                {!u.email.endsWith("@employees.local") ? (
+                  <p className="truncate text-[14px] text-slate-600">{u.email}</p>
+                ) : null}
+                {u.phone ? (
+                  <p className="truncate text-[12px] font-bold text-slate-500" dir="ltr">
+                    📞 {u.phone}
+                  </p>
+                ) : null}
                 <span className="inline-flex shrink-0 items-center gap-2 text-[12px] font-semibold text-slate-600">
                   <span
                     className={`h-2 w-2 shrink-0 rounded-full ${u.isActive ? "bg-emerald-500" : "bg-slate-300"}`}
-                    title={u.isActive ? "פעיל" : "לא פעיל"}
+                    title={u.isActive ? t("admin.users.list.active") : t("admin.users.list.inactive")}
                     aria-hidden
                   />
-                  {u.role === "SUPER_ADMIN" ? "ADMIN" : "EMPLOYEE"}
+                  {t(`roles.${u.role}`)}
                 </span>
+                {u.mustChangePassword ? (
+                  <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-black text-amber-900">
+                    🔐 {t("admin.users.list.mustChangeBadge")}
+                  </span>
+                ) : null}
               </div>
               <div className="flex flex-wrap gap-2">
                 <button
@@ -206,20 +268,20 @@ export default function AdminUsersPage() {
                   onClick={() => openEdit(u)}
                   className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-bold text-slate-800 hover:bg-slate-50"
                 >
-                  עריכה
+                  {t("admin.users.list.edit")}
                 </button>
                 <button
                   type="button"
                   onClick={() => void removeUser(u.id)}
                   className="rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-bold text-red-700 hover:bg-red-100"
                 >
-                  מחיקה
+                  {t("admin.users.list.delete")}
                 </button>
               </div>
             </div>
           ))}
           {users.length === 0 && !loadError ? (
-            <p className="text-sm text-slate-500">אין משתמשים בטבלה.</p>
+            <p className="text-sm text-slate-500">{t("admin.users.list.noUsers")}</p>
           ) : null}
         </div>
       </section>
@@ -228,11 +290,11 @@ export default function AdminUsersPage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
           <div className="app-panel max-h-[90vh] w-full max-w-lg overflow-y-auto p-6 shadow-luxury-sm">
             <h2 className="text-lg font-black text-slate-950">
-              {modal === "create" ? "משתמש חדש" : "עריכת משתמש"}
+              {modal === "create" ? t("admin.users.modalCreateTitle") : t("admin.users.modalEditTitle")}
             </h2>
             <form onSubmit={(e) => void submitModal(e)} className="mt-6 space-y-4">
               <div>
-                <label className="mb-1 block text-xs font-bold text-slate-600">שם מלא</label>
+                <label className="mb-1 block text-xs font-bold text-slate-600">{t("admin.users.fields.fullName")} *</label>
                 <input
                   className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
                   value={form.fullName}
@@ -241,56 +303,117 @@ export default function AdminUsersPage() {
                 />
               </div>
               <div>
-                <label className="mb-1 block text-xs font-bold text-slate-600">אימייל</label>
+                <label className="mb-1 block text-xs font-bold text-slate-600">
+                  {t("admin.users.fields.nationalId")} {form.role === "EMPLOYEE" ? "*" : ""}
+                  <span className="ms-2 text-[11px] font-semibold text-slate-500">
+                    {t("admin.users.fields.nationalIdHint")}
+                  </span>
+                </label>
+                <input
+                  inputMode="numeric"
+                  dir="ltr"
+                  placeholder="123456789"
+                  className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm font-bold tabular-nums"
+                  value={form.nationalId}
+                  onChange={(e) =>
+                    setForm((f) => ({
+                      ...f,
+                      nationalId: normalizeNationalId(e.target.value),
+                    }))
+                  }
+                  required={form.role === "EMPLOYEE"}
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-bold text-slate-600">{t("admin.users.fields.phone")}</label>
+                <input
+                  type="tel"
+                  dir="ltr"
+                  placeholder="050-0000000"
+                  className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm font-bold tabular-nums"
+                  value={form.phone}
+                  onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))}
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-bold text-slate-600">
+                  {t("admin.users.fields.email")} {form.role !== "EMPLOYEE" ? "*" : t("admin.users.fields.emailOptional")}
+                </label>
                 <input
                   type="email"
                   className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
                   value={form.email}
                   onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))}
-                  required
+                  required={form.role !== "EMPLOYEE"}
                 />
               </div>
               <div>
                 <label className="mb-1 block text-xs font-bold text-slate-600">
-                  סיסמה {modal === "edit" ? "(ללא שינוי — השאירו ריק)" : ""}
+                  {t("admin.users.fields.password")} {modal === "edit" ? t("admin.users.fields.passwordResetHint") : "*"}
                 </label>
                 <input
-                  type="password"
+                  type="text"
                   autoComplete="new-password"
                   className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
                   value={form.password}
                   onChange={(e) => setForm((f) => ({ ...f, password: e.target.value }))}
                   required={modal === "create"}
                 />
+                <label className="mt-2 flex items-center gap-2 text-[12px] font-bold text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={form.mustChangePassword}
+                    onChange={(e) =>
+                      setForm((f) => ({ ...f, mustChangePassword: e.target.checked }))
+                    }
+                  />
+                  {t("admin.users.fields.mustChange")}
+                </label>
               </div>
               <div>
-                <label className="mb-1 block text-xs font-bold text-slate-600">סוג משתמש</label>
+                <label className="mb-1 block text-xs font-bold text-slate-600">{t("admin.users.fields.role")}</label>
                 <select
                   className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
                   value={form.role}
                   onChange={(e) =>
                     setForm((f) => ({
                       ...f,
-                      role: e.target.value as "SUPER_ADMIN" | "EMPLOYEE",
+                      role: e.target.value as "SUPER_ADMIN" | "ADMIN" | "EMPLOYEE",
                     }))
                   }
                 >
-                  <option value="EMPLOYEE">EMPLOYEE</option>
-                  <option value="SUPER_ADMIN">SUPER ADMIN</option>
+                  <option value="EMPLOYEE">{t("roles.EMPLOYEE")}</option>
+                  <option value="ADMIN">{t("roles.ADMIN")}</option>
+                  <option value="SUPER_ADMIN">{t("roles.SUPER_ADMIN")}</option>
                 </select>
               </div>
+              {(form.role === "EMPLOYEE" || form.role === "ADMIN") && (
+                <div>
+                  <label className="mb-1 block text-xs font-bold text-slate-600">{t("admin.users.fields.hourlyRate")}</label>
+                  <input
+                    type="number"
+                    min={0}
+                    step={0.5}
+                    className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
+                    value={form.hourlyRate}
+                    onChange={(e) =>
+                      setForm((f) => ({ ...f, hourlyRate: parseFloat(e.target.value) || 0 }))
+                    }
+                  />
+                </div>
+              )}
               <label className="flex items-center gap-2 text-sm font-semibold text-slate-800">
                 <input
                   type="checkbox"
                   checked={form.isActive}
                   onChange={(e) => setForm((f) => ({ ...f, isActive: e.target.checked }))}
                 />
-                משתמש פעיל
+                {t("admin.users.fields.isActive")}
               </label>
 
-              {form.role === "EMPLOYEE" ? (
+              {form.role === "EMPLOYEE" || form.role === "ADMIN" ? (
                 <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
-                  <p className="mb-3 text-xs font-bold text-slate-600">הרשאות (מסכים)</p>
+                  <p className="mb-3 text-xs font-bold text-slate-600">{t("permissions.title")}</p>
                   <div className="grid gap-2">
                     {PERMISSION_KEYS.map((key) => (
                       <label key={key} className="flex items-center gap-2 text-sm text-slate-800">
@@ -299,13 +422,13 @@ export default function AdminUsersPage() {
                           checked={form.permissions.includes(key)}
                           onChange={() => togglePermission(key)}
                         />
-                        {PERMISSION_LABELS[key]}
+                        {translatePermission(t, key)}
                       </label>
                     ))}
                   </div>
                 </div>
               ) : (
-                <p className="text-xs text-slate-500">SUPER ADMIN רואה את כל המערכת.</p>
+                <p className="text-xs text-slate-500">{t("permissions.superAdminAll")}</p>
               )}
 
               <div className="flex flex-wrap justify-end gap-2 pt-2">
@@ -314,14 +437,14 @@ export default function AdminUsersPage() {
                   onClick={() => setModal(null)}
                   className="rounded-full border border-slate-200 px-4 py-2 text-sm font-bold text-slate-700"
                 >
-                  ביטול
+                  {t("common.cancel")}
                 </button>
                 <button
                   type="submit"
                   disabled={saving}
                   className="rounded-full bg-luxury-gold px-5 py-2 text-sm font-bold text-luxury-charcoal disabled:opacity-60"
                 >
-                  {saving ? "שומר…" : "שמירה"}
+                  {saving ? t("common.saving") : t("common.save")}
                 </button>
               </div>
             </form>

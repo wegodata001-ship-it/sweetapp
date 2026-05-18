@@ -2,6 +2,7 @@
 
 import { Download, Printer, X } from "lucide-react";
 import { useCallback, useEffect, useRef } from "react";
+import { useI18n } from "@/components/i18n-provider";
 
 type Props = {
   open: boolean;
@@ -11,6 +12,7 @@ type Props = {
 };
 
 export function PdfPreviewModal({ open, title, url, onClose }: Props) {
+  const { t, dir } = useI18n();
   const iframeRef = useRef<HTMLIFrameElement>(null);
 
   const handlePrint = useCallback(() => {
@@ -42,6 +44,7 @@ export function PdfPreviewModal({ open, title, url, onClose }: Props) {
 
   return (
     <div
+      dir={dir}
       className="fixed inset-0 z-[100] flex flex-col bg-black/75 backdrop-blur-[2px]"
       role="dialog"
       aria-modal="true"
@@ -62,7 +65,7 @@ export function PdfPreviewModal({ open, title, url, onClose }: Props) {
               className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-white/10 px-3 text-xs font-black hover:bg-white/20"
             >
               <Download className="h-4 w-4" aria-hidden />
-              הורדה
+              {t("common.download")}
             </button>
             <button
               type="button"
@@ -70,7 +73,7 @@ export function PdfPreviewModal({ open, title, url, onClose }: Props) {
               className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-white/10 px-3 text-xs font-black hover:bg-white/20"
             >
               <Printer className="h-4 w-4" aria-hidden />
-              הדפסה
+              {t("common.print")}
             </button>
             <a
               href={url}
@@ -78,16 +81,16 @@ export function PdfPreviewModal({ open, title, url, onClose }: Props) {
               rel="noopener noreferrer"
               className="hidden h-9 items-center rounded-lg border border-white/20 px-3 text-xs font-bold text-white/90 hover:bg-white/10 md:inline-flex"
             >
-              פתיחה בחלון
+              {t("pdfModal.openInWindow")}
             </a>
             <button
               type="button"
               onClick={onClose}
               className="inline-flex h-9 items-center gap-1 rounded-lg bg-rose-600 px-3 text-xs font-black text-white hover:bg-rose-700"
-              aria-label="סגור"
+              aria-label={t("common.close")}
             >
               <X className="h-4 w-4" aria-hidden />
-              סגור
+              {t("common.close")}
             </button>
           </div>
         </div>

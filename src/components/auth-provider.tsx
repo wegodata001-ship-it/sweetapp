@@ -13,7 +13,13 @@ export type AuthUser = {
   id: string;
   fullName: string;
   email: string;
-  role: "SUPER_ADMIN" | "EMPLOYEE";
+  nationalId?: string | null;
+  phone?: string | null;
+  role: "SUPER_ADMIN" | "ADMIN" | "EMPLOYEE";
+  hourlyRate?: number;
+  mustChangePassword?: boolean;
+  /** he | ar | en */
+  language?: string;
   permissions: string[];
 };
 
@@ -38,7 +44,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
-    void refresh();
+    queueMicrotask(() => {
+      void refresh();
+    });
   }, [refresh]);
 
   const logout = useCallback(async () => {

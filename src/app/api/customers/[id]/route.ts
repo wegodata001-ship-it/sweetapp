@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireDb } from "@/lib/api-route";
 
+export const dynamic = "force-dynamic";
+
 export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const block = await requireDb();
   if (block) return block;

@@ -3,6 +3,8 @@ import { prisma } from "@/lib/prisma";
 import { requireDb } from "@/lib/api-route";
 import type { EntityType, LedgerMovementView } from "@/lib/finance/types";
 
+export const dynamic = "force-dynamic";
+
 export async function GET(req: NextRequest) {
   const block = await requireDb();
   if (block) return block;
@@ -25,24 +27,35 @@ export async function GET(req: NextRequest) {
 
       const docs = await prisma.financialDocument.findMany({
         where: { customerId: entityId },
-        include: { payments: true },
         orderBy: [{ docDate: "asc" }, { createdAt: "asc" }],
       });
 
       const payments = await prisma.payment.findMany({
-        where: { customerId: entityId },
-        include: { document: { select: { id: true, title: true, totalAmount: true, paidAmount: true } } },
+        where: {
+          customerId: entityId,
+          document: { is: { category: "הכנסה" } },
+        },
+        include: { document: { select: { id: true, title: true } } },
         orderBy: { createdAt: "asc" },
       });
 
       const movements: LedgerMovementView[] = [];
+      const paymentsByDocument = new Map<string, number>();
+      for (const payment of payments) {
+        if (!payment.documentId) continue;
+        paymentsByDocument.set(
+          payment.documentId,
+          (paymentsByDocument.get(payment.documentId) ?? 0) + Math.max(0, payment.amount),
+        );
+      }
 
       for (const d of docs) {
         if (d.category !== "הכנסה") continue;
         const entryDate = (d.docDate ?? d.createdAt).toISOString().slice(0, 10);
         if (dateFrom && entryDate < dateFrom) continue;
         if (dateTo && entryDate > dateTo) continue;
-        const remainingAmount = Math.max(0, d.remainingAmount);
+        const paidForDocument = paymentsByDocument.get(d.id) ?? 0;
+        const remainingAmount = Math.max(0, d.totalAmount - paidForDocument);
 
         movements.push({
           id: `doc-${d.id}`,
@@ -67,7 +80,6 @@ export async function GET(req: NextRequest) {
         if (dateFrom && entryDate < dateFrom) continue;
         if (dateTo && entryDate > dateTo) continue;
         const note = p.document?.title ? ` — ${p.document.title}` : "";
-        const openBalance = p.document ? Math.max(0, p.document.totalAmount - p.document.paidAmount) : 0;
         movements.push({
           id: `pay-${p.id}`,
           document_id: p.document?.id ?? null,
@@ -79,18 +91,22 @@ export async function GET(req: NextRequest) {
           description: `תשלום${note}`,
           debit: 0,
           credit: p.amount,
-          open_balance: openBalance,
+          open_balance: 0,
         });
       }
 
       movements.sort((a, b) => a.entry_date.localeCompare(b.entry_date));
 
-      const openDebt = docs.reduce((sum, doc) => sum + Math.max(0, doc.remainingAmount), 0);
-      const totalCredit = payments.reduce((sum, payment) => sum + payment.amount, 0);
+      const totalOrders = docs.reduce(
+        (sum, doc) => sum + (doc.category === "הכנסה" ? Math.max(0, doc.totalAmount) : 0),
+        0,
+      );
+      const totalCredit = payments.reduce((sum, payment) => sum + Math.max(0, payment.amount), 0);
+      const openDebt = Math.max(0, totalOrders - totalCredit);
 
       return NextResponse.json({
         ok: true,
-        opening: customer.openingBalance,
+        opening: 0,
         entityName: customer.name,
         openDebt,
         totalCredit,

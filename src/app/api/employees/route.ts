@@ -7,7 +7,7 @@ import { canManageAllTasks } from "@/lib/tasks/task-access";
 
 /**
  * ברירת מחדל: רשומות Employee (כרטסות).
- * ?forTasks=1 — משתמשי EMPLOYEE פעילים להקצאת משימות (טבלת User בלבד).
+ * ?forTasks=1 — משתמשי EMPLOYEE / ADMIN פעילים להקצאת משימות ומשמרות (User).
  */
 export async function GET(req: NextRequest) {
   const block = await requireDb();
@@ -21,7 +21,7 @@ export async function GET(req: NextRequest) {
     try {
       const rows = await prisma.user.findMany({
         where: {
-          role: UserRole.EMPLOYEE,
+          role: { in: [UserRole.EMPLOYEE, UserRole.ADMIN] },
           isActive: true,
         },
         orderBy: { fullName: "asc" },

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { prisma, prismaAny } from "@/lib/prisma";
 import { requireDb } from "@/lib/api-route";
 import { getSessionFromCookie } from "@/lib/auth/get-session";
 import { logActivity } from "@/lib/activity-log";
@@ -8,6 +8,14 @@ import {
   replaceCashFlowForDocument,
   syncCashFlowForPayment,
 } from "@/lib/finance/document-side-effects";
+
+type CheckDetails = {
+  checkNumber?: string;
+  bankName?: string;
+  branch?: string | null;
+  dueDate?: string;
+  notes?: string | null;
+};
 
 export async function GET(req: NextRequest) {
   const block = await requireDb();
@@ -43,9 +51,21 @@ export async function POST(req: NextRequest) {
       amount: number;
       paymentMethod?: string | null;
       notes?: string | null;
+      check?: CheckDetails;
     };
     if (!body.customerId || !(body.amount > 0)) {
       return NextResponse.json({ ok: false, error: "לקוח וסכום חיוביים נדרשים" }, { status: 400 });
+    }
+
+    if (body.paymentMethod === "CHECK") {
+      const c = body.check ?? {};
+      const due = c.dueDate ? new Date(c.dueDate) : null;
+      if (!c.checkNumber?.trim() || !c.bankName?.trim() || !due || !Number.isFinite(due.getTime())) {
+        return NextResponse.json(
+          { ok: false, error: "בעת תשלום בצ'ק חובה למלא מספר צ'ק, בנק ותאריך פירעון" },
+          { status: 400 },
+        );
+      }
     }
 
     if (body.documentId) {
@@ -74,6 +94,29 @@ export async function POST(req: NextRequest) {
         notes: body.notes?.trim() || null,
       },
     });
+
+    if (body.paymentMethod === "CHECK" && body.check) {
+      const c = body.check;
+      try {
+        await prismaAny.checkPayment.create({
+          data: {
+            customerId: body.customerId,
+            paymentId: payment.id,
+            documentId: body.documentId || null,
+            checkNumber: c.checkNumber!.trim(),
+            bankName: c.bankName!.trim(),
+            branch: c.branch?.trim() || null,
+            amount: body.amount,
+            dueDate: new Date(c.dueDate!),
+            notes: c.notes?.trim() || null,
+            status: "PENDING",
+            createdById: session?.sub ?? null,
+          },
+        });
+      } catch {
+        /* לא חוסם תשלום אם רישום צ'ק נכשל — יישאר ב־Payment בלבד */
+      }
+    }
 
     if (body.documentId) {
       await syncFinancialDocumentPaymentTotals(body.documentId);

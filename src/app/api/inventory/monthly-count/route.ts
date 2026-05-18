@@ -1,19 +1,60 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { prismaAny } from "@/lib/prisma";
 import { requireDb } from "@/lib/api-route";
 import { getSessionFromCookie } from "@/lib/auth/get-session";
+import {
+  buildInventoryProductBaseWhere,
+  classifyStockTier,
+  clampPage,
+  clampPageSize,
+  matchesStockFilter,
+  type InventoryListQuery,
+  type StockFilterTier,
+} from "@/lib/inventory/product-filters";
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   const block = await requireDb();
   if (block) return block;
+  const { searchParams } = req.nextUrl;
+
+  const locationEq = searchParams.get("location")?.trim() || undefined;
+
+  const listQuery: InventoryListQuery = {
+    locationEquals: locationEq,
+    q: searchParams.get("q")?.trim() || undefined,
+    category: searchParams.get("category")?.trim() || undefined,
+    stock: (searchParams.get("stock") as StockFilterTier) || "all",
+    page: clampPage(parseInt(searchParams.get("page") || "1", 10)),
+    pageSize: clampPageSize(parseInt(searchParams.get("pageSize") || "120", 10)),
+  };
+
+  if (!locationEq) {
+    const page = listQuery.page ?? 1;
+    const pageSize = listQuery.pageSize ?? 120;
+    const stock = listQuery.stock ?? "all";
+    return NextResponse.json({
+      ok: true,
+      data: [],
+      meta: { total: 0, page, pageSize, stock, needsLocation: true },
+    });
+  }
+
+  const baseWhere = buildInventoryProductBaseWhere(listQuery, null, {
+    excludeUntaggedInZone: false,
+  });
+
   try {
-    const products = await prisma.inventoryProduct.findMany({
-      orderBy: [{ location: "asc" }, { name: "asc" }],
+    const products = await prismaAny.inventoryProduct.findMany({
+      where: baseWhere,
+      orderBy: [{ name: "asc" }],
       select: {
         id: true,
         name: true,
         location: true,
+        locationId: true,
         unit: true,
+        minimumQuantity: true,
+        inventoryLocation: { select: { name: true } },
         counts: {
           orderBy: { countDate: "desc" },
           take: 1,
@@ -25,16 +66,60 @@ export async function GET() {
       },
     });
 
+    type MonthlyMapped = {
+      id: string;
+      name: string;
+      location: string;
+      locationId: string | null;
+      unit: string | null;
+      previousQuantity: number;
+      lastCountedAt: string | null;
+      stockTier: ReturnType<typeof classifyStockTier>;
+    };
+
+    const mapped: MonthlyMapped[] = products.map(
+      (p: {
+        id: string;
+        name: string;
+        location: string;
+        locationId: string | null;
+        unit: string | null;
+        minimumQuantity: number;
+        inventoryLocation?: { name: string } | null;
+        counts: { currentQuantity: number; countDate: Date }[];
+      }) => {
+        const locationName = p.inventoryLocation?.name ?? p.location ?? "";
+        const latestQty = p.counts[0]?.currentQuantity ?? null;
+        const tier = classifyStockTier(latestQty, p.minimumQuantity);
+        return {
+          id: p.id,
+          name: p.name,
+          location: locationName,
+          locationId: p.locationId,
+          unit: p.unit,
+          previousQuantity: latestQty ?? 0,
+          lastCountedAt: p.counts[0]?.countDate ? new Date(p.counts[0].countDate).toISOString() : null,
+          stockTier: tier,
+        };
+      },
+    );
+
+    const stock = listQuery.stock ?? "all";
+    const filtered =
+      stock === "all" ? mapped : mapped.filter((m: MonthlyMapped) => matchesStockFilter(m.stockTier, stock));
+
+    const total = filtered.length;
+    const page = listQuery.page ?? 1;
+    const pageSize = listQuery.pageSize ?? 120;
+    const start = (page - 1) * pageSize;
+    const paged = filtered
+      .slice(start, start + pageSize)
+      .map(({ stockTier: _s, ...rest }: MonthlyMapped) => rest);
+
     return NextResponse.json({
       ok: true,
-      data: products.map((p) => ({
-        id: p.id,
-        name: p.name,
-        location: p.location,
-        unit: p.unit,
-        previousQuantity: p.counts[0]?.currentQuantity ?? 0,
-        lastCountedAt: p.counts[0]?.countDate.toISOString() ?? null,
-      })),
+      data: paged,
+      meta: { total, page, pageSize, stock },
     });
   } catch (e) {
     return NextResponse.json(
@@ -76,7 +161,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: "תאריך ספירה לא תקין" }, { status: 400 });
     }
 
-    const created = await prisma.$transaction(async (tx) => {
+    const created = await prismaAny.$transaction(async (tx: typeof prismaAny) => {
       const out: {
         id: string;
         inventoryProductId: string;

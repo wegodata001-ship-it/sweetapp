@@ -19,17 +19,56 @@ model Customer {
 
   documents FinancialDocument[]
   payments  Payment[]
+  checks    CheckPayment[]
 }
 
 model Supplier {
   id             String   @id @default(cuid())
   name           String
   phone          String?
+  email          String?
+  notes          String?
   openingBalance Float    @default(0)
   createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
 
-  ledgerEntries LedgerEntry[]
-  products      Product[]
+  ledgerEntries    LedgerEntry[]
+  products         Product[]
+  /// מחירון ספק (נפרד ממוצרי מלאי Product) — לרישום הוצאות ו־OCR עתידי
+  supplierProducts SupplierProduct[]
+}
+
+/// שורת מחירון ספק — מקור אמת למילוי הוצאות והיסטוריית מחירים
+model SupplierProduct {
+  id           String   @id @default(cuid())
+  supplierId String
+  supplier     Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+
+  productName  String
+  regularPrice Float
+  unit         String?
+  notes        String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  priceHistory SupplierProductPriceHistory[]
+
+  @@index([supplierId])
+}
+
+/// תצפיות מחיר (שמירה ידנית / רישום הוצאה) — OCR-ready
+model SupplierProductPriceHistory {
+  id                String          @id @default(cuid())
+  supplierProductId String
+  supplierProduct   SupplierProduct @relation(fields: [supplierProductId], references: [id], onDelete: Cascade)
+
+  price      Float
+  recordedAt DateTime @default(now())
+  /// manual | expense
+  source     String?  @default("manual")
+
+  @@index([supplierProductId])
+  @@index([recordedAt])
 }
 
 model Employee {
@@ -41,10 +80,15 @@ model Employee {
   role           String?
   /// מחלקה לצבעי UI
   department     String?
+  /// שכר לשעה (תצוגה/עתידי — חישוב נוכחות לפי User.hourlyRate)
+  hourlyRate     Float    @default(0)
+  isActive       Boolean  @default(true)
   createdAt      DateTime @default(now())
 
-  linkedUsers   User[]
-  ledgerEntries LedgerEntry[]
+  linkedUsers    User[]
+  ledgerEntries  LedgerEntry[]
+  workSessions   EmployeeWorkSession[]
+  assignedTasks  EmployeeTask[]
 }
 
 /// Manual ledger lines for ספק / עובד (לא כרטסת לקוח — היא מחושבת ממסמכים ותשלומים)
@@ -67,44 +111,69 @@ model LedgerEntry {
 }
 
 model FinancialDocument {
-  id              String   @id @default(cuid())
-  title           String
-  category        String
-  documentType    String
-  customerId      String?
-  customer        Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  id           String    @id @default(cuid())
+  title        String
+  category     String
+  documentType String
+  customerId   String?
+  customer     Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
 
   totalAmount     Float
-  paidAmount      Float    @default(0)
+  paidAmount      Float   @default(0)
   remainingAmount Float
   /// paid | partial | unpaid
-  paymentStatus   String   @default("unpaid")
+  paymentStatus   String  @default("unpaid")
   /// פיקדון לקוחות אירועים — נשמר בנפרד מהמוצרים/מכירות
-  depositAmount   Float    @default(0)
+  depositAmount   Float   @default(0)
   depositType     String?
   depositNote     String?
   /// open | returned | refunded
-  depositStatus   String   @default("open")
+  depositStatus   String  @default("open")
 
   notes    String?
   metadata Json?
 
   pdfStoragePath String?
-  sentToCpa      Boolean  @default(false)
+  sentToCpa      Boolean   @default(false)
+  /// מתי סומן כהועבר לרואה חשבון
+  sentToCpaAt    DateTime?
+  /// המשתמש שסימן/ביטל את ההעברה האחרונה
+  sentToCpaById  String?
+  sentToCpaBy    User?     @relation("FinancialDocumentSentToCpaBy", fields: [sentToCpaById], references: [id], onDelete: SetNull)
   docDate        DateTime? @db.Date
-  createdAt      DateTime @default(now())
+  createdAt      DateTime  @default(now())
 
-  items    FinancialDocumentItem[]
-  payments Payment[]
+  items                  FinancialDocumentItem[]
+  payments               Payment[]
+  checks                 CheckPayment[]          @relation("FinancialDocumentChecks")
   /// תנועות תזרים שמקושרות כדוח Z (אותו מסמך כ־FinancialDocument)
-  zReportCashFlowEntries CashFlowEntry[] @relation("CashFlowZReportFinancialDocument")
+  zReportCashFlowEntries CashFlowEntry[]         @relation("CashFlowZReportFinancialDocument")
+  accountantTransferLogs AccountantTransferLog[]
 
   @@index([customerId])
+  @@index([createdAt])
+  @@index([sentToCpa])
+  @@index([sentToCpaAt])
+}
+
+/// יומן העברות לרואה חשבון — מי, מתי, ופעולה
+model AccountantTransferLog {
+  id            String            @id @default(cuid())
+  documentId    String
+  document      FinancialDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  /// marked_sent | marked_not_sent
+  action        String
+  performedById String?
+  performedBy   User?             @relation("AccountantTransferLogPerformedBy", fields: [performedById], references: [id], onDelete: SetNull)
+  createdAt     DateTime          @default(now())
+
+  @@index([documentId])
+  @@index([performedById])
   @@index([createdAt])
 }
 
 model FinancialDocumentItem {
-  id         String @id @default(cuid())
+  id         String            @id @default(cuid())
   documentId String
   document   FinancialDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
 
@@ -122,9 +191,9 @@ model FinancialDocumentItem {
 }
 
 model Payment {
-  id            String   @id @default(cuid())
-  customerId    String
-  customer      Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  id         String   @id @default(cuid())
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
 
   documentId String?
   document   FinancialDocument? @relation(fields: [documentId], references: [id], onDelete: SetNull)
@@ -134,12 +203,78 @@ model Payment {
   notes         String?
   createdAt     DateTime @default(now())
 
+  checks CheckPayment[]
+
   @@index([customerId])
   @@index([documentId])
 }
 
+/// ניהול צ'קים — מעקב מלא לכל צ'ק (פירעון, הפקדה, חזרה).
+model CheckPayment {
+  id         String   @id @default(cuid())
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  /// אופציונלי — קישור לתשלום שנרשם במערכת (Payment)
+  paymentId String?
+  payment   Payment? @relation(fields: [paymentId], references: [id], onDelete: SetNull)
+
+  /// אופציונלי — קישור למסמך פיננסי שאליו שייך הצ'ק
+  documentId String?
+  document   FinancialDocument? @relation("FinancialDocumentChecks", fields: [documentId], references: [id], onDelete: SetNull)
+
+  checkNumber  String
+  bankName     String
+  branch       String?
+  amount       Float
+  /// תאריך פירעון
+  dueDate      DateTime @db.Date
+  /// PENDING | DEPOSITED | CLEARED | BOUNCED | EXPIRED | CANCELLED
+  status       String   @default("PENDING")
+  bounceReason String?
+  notes        String?
+
+  /// סטטוס/אירועים — תאריכי מעבר
+  depositedAt DateTime?
+  clearedAt   DateTime?
+  bouncedAt   DateTime?
+  cancelledAt DateTime?
+
+  /// מי יצר/עדכן (לאודיט)
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  notifications CheckNotificationLog[]
+
+  @@index([customerId])
+  @@index([documentId])
+  @@index([paymentId])
+  @@index([dueDate])
+  @@index([status])
+  @@index([bankName])
+  @@index([createdAt])
+}
+
+/// יומן התראות צ'ק — לשמירת היסטוריית התראות שנשלחו ולמניעת כפילויות יומיות.
+model CheckNotificationLog {
+  id        String       @id @default(cuid())
+  checkId   String
+  check     CheckPayment @relation(fields: [checkId], references: [id], onDelete: Cascade)
+  /// due_in_7 | due_in_3 | due_today | overdue | bounced | deposited
+  kind      String
+  /// staff_alert | sms | email | whatsapp — אפיק שדרכו נשלחה ההתראה
+  channel   String       @default("staff_alert")
+  message   String?
+  createdAt DateTime     @default(now())
+
+  @@index([checkId])
+  @@index([kind])
+  @@index([createdAt])
+}
+
 model CashFlowEntry {
-  id                String   @id @default(cuid())
+  id                String             @id @default(cuid())
   entryType         String
   amount            Float
   description       String?
@@ -155,9 +290,9 @@ model CashFlowEntry {
   /// מזהה דוח Z בפועל — שורת FinancialDocument עם documentType "דוח Z"
   zReportId         String?
   zReport           FinancialDocument? @relation("CashFlowZReportFinancialDocument", fields: [zReportId], references: [id], onDelete: Cascade)
-  entryDate         DateTime @db.Date
-  isDirect          Boolean  @default(false)
-  createdAt         DateTime @default(now())
+  entryDate         DateTime           @db.Date
+  isDirect          Boolean            @default(false)
+  createdAt         DateTime           @default(now())
 
   @@index([entryDate])
   @@index([customerId])
@@ -204,9 +339,9 @@ model ProductHistory {
 }
 
 model ProductCategory {
-  id        String   @id @default(cuid())
-  name      String   @unique
-  createdAt DateTime @default(now())
+  id        String    @id @default(cuid())
+  name      String    @unique
+  createdAt DateTime  @default(now())
   products  Product[]
 }
 
@@ -224,7 +359,7 @@ model Product {
   categoryId String?
   category   ProductCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
   supplierId String?
-  supplier   Supplier? @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+  supplier   Supplier?        @relation(fields: [supplierId], references: [id], onDelete: SetNull)
 
   currentStock  Int       @default(0)
   minStock      Int       @default(0)
@@ -239,20 +374,36 @@ model Product {
   @@index([supplierId])
 }
 
+/// מיקומי מחסן/חנות — נוצרים ע״י מנהל (לא hardcoded)
+model InventoryLocation {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  description String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  products InventoryProduct[] @relation("InventoryProductLocation")
+}
+
 /// חומרי גלם ומלאי פנימי לספירה — לא מוצרי מכירה
 model InventoryProduct {
-  id               String   @id @default(cuid())
-  name             String
-  location         String
+  id                String             @id @default(cuid())
+  name              String
+  /// טקסט חופשי לשורות ישנות לפני שיוך ל־InventoryLocation
+  location          String             @default("")
+  locationId        String?
+  inventoryLocation InventoryLocation? @relation("InventoryProductLocation", fields: [locationId], references: [id], onDelete: SetNull)
   /// חומרי גלם | אריזות | קירור | מדבקות | כללי
-  category         String   @default("כללי")
-  minimumQuantity  Float    @default(0)
-  unit             String?
-  createdAt        DateTime @default(now())
+  category          String             @default("כללי")
+  minimumQuantity   Float              @default(0)
+  unit              String?
+  createdAt         DateTime           @default(now())
 
   counts InventoryCount[]
 
   @@unique([name])
+  @@index([locationId])
+  @@index([category])
 }
 
 /// כל ספירה נשמרת; משווה לספירה הקודמת של אותו פריט
@@ -271,6 +422,7 @@ model InventoryCount {
 
   @@index([inventoryProductId])
   @@index([countDate])
+  @@index([createdAt])
   @@index([difference])
   @@index([countedByUserId])
 }
@@ -293,92 +445,613 @@ model InventoryMovement {
   @@index([createdById])
 }
 
-model EmployeeTask {
+/// ספריית משימות אטומית (תבנית בסיס)
+model TaskTemplate {
+  id               String   @id @default(cuid())
+  title            String
+  description      String?
+  estimatedMinutes Int      @default(15)
+  orderIndex       Int      @default(0)
+  isActive         Boolean  @default(true)
+  createdAt        DateTime @default(now())
+
+  inWorkTemplates WorkTemplateTask[]
+  employeeTasks   EmployeeTask[]
+}
+
+/// תבנית יום עבודה — רשימת משימות לשיוך לעובד
+model WorkTemplate {
   id          String   @id @default(cuid())
-  /// משתמש עם role EMPLOYEE — אין שימוש בטבלת Employee למשימות
-  assigneeId  String
-  assignee    User     @relation(fields: [assigneeId], references: [id], onDelete: Cascade)
-  /// קיבוץ משימות שהוקצו יחד למספר עובדים (אותה הקצאה)
-  groupId     String?
   title       String
   description String?
-  /// normal | low | medium | high | urgent
-  priority    String   @default("normal")
-  /// pending | in_progress | completed (באיחור מחושב לפי שעת התחלה המתוזמנת)
-  status      String   @default("pending")
-  /// תאריך המשימה (יום בלוח)
-  taskDate    DateTime
-  /// שעת התחלה מתוזמנת לעובד (פורמט HH:mm)
-  startTime   String
-  /// שעת סיום מתוזמנת לעובד (פורמט HH:mm) — לא זמן עבודה בפועל
-  endTime     String?
-  startedAt   DateTime?
-  completedAt DateTime?
-  /// יעד (יום) — לא חובה; איחור מחושב גם מ־taskDate+startTime אם לא הוגדר
-  dueDate     DateTime? @db.Date
-  /// הערת עובד (חסר חומר, טופל, וכו׳)
-  employeeNote String?
-  /// משתמש שיצר את המשימה (מנהל)
+  createdAt   DateTime @default(now())
+
+  tasks WorkTemplateTask[]
+
+  @@index([createdAt])
+}
+
+model WorkTemplateTask {
+  id             String       @id @default(cuid())
+  templateId     String
+  template       WorkTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  taskTemplateId String
+  taskTemplate   TaskTemplate @relation(fields: [taskTemplateId], references: [id], onDelete: Restrict)
+  orderIndex     Int          @default(0)
+
+  @@index([templateId, orderIndex])
+}
+
+/// יום עבודה / משמרת משימות של עובד (כרטיס Employee)
+model EmployeeWorkSession {
+  id         String    @id @default(cuid())
+  employeeId String
+  employee   Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  startedAt  DateTime  @default(now())
+  endedAt    DateTime?
+  /// ACTIVE | ENDED
+  status     String    @default("ACTIVE")
+  createdAt  DateTime  @default(now())
+
+  tasks EmployeeTask[]
+
+  @@index([employeeId, status])
+  @@index([startedAt])
+}
+
+/// משימה בפועל — בעלות לפי employeeId בלבד
+model EmployeeTask {
+  id               String              @id @default(cuid())
+  employeeId       String
+  employee         Employee            @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  sessionId        String
+  session          EmployeeWorkSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  taskTemplateId   String?
+  taskTemplate     TaskTemplate?       @relation(fields: [taskTemplateId], references: [id], onDelete: SetNull)
+  title            String
+  description      String?
+  estimatedMinutes Int                 @default(15)
+  startedAt        DateTime?
+  completedAt      DateTime?
+  /// PENDING | IN_PROGRESS | COMPLETED
+  status           String              @default("PENDING")
+  delayReason      String?
+  orderIndex       Int                 @default(0)
+  createdAt        DateTime            @default(now())
+
+  @@index([employeeId, status])
+  @@index([sessionId, orderIndex])
+  @@index([startedAt])
+}
+
+/// קבוצת משימה אד-הוק (workspace) — אגד של משימות + קבצים + עובדים.
+/// מחליפה את מודול ה"טפסים": כל הקבצים והמשימות שמשויכים לקמפיין /
+/// ספק / אירוע נשמרים יחד תחת קבוצה אחת.
+model TaskGroup {
+  id          String   @id @default(cuid())
+  title       String
+  /// HEX color string (#RRGGBB) לעיצוב כרטיס הקבוצה
+  color       String?
+  description String?
+  /// תאריך יעד אופציונלי לכל הקבוצה (משפיע על דשבורד באיחור)
+  dueDate     DateTime?
+  /// OPEN | IN_PROGRESS | COMPLETED | ARCHIVED
+  status      String   @default("OPEN")
+
   createdById String?
+  createdBy   User?    @relation("TaskGroupCreator", fields: [createdById], references: [id], onDelete: SetNull)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  @@index([assigneeId])
-  @@index([taskDate])
-  @@index([groupId])
+  files     TaskFile[]
+  members   TaskGroupMember[]
+
   @@index([status])
+  @@index([dueDate])
   @@index([createdAt])
+}
+
+/// חברות עובדים בקבוצת משימה (ריבוי-לרבים).
+model TaskGroupMember {
+  id        String    @id @default(cuid())
+  groupId   String
+  group     TaskGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User      @relation("TaskGroupMemberUser", fields: [userId], references: [id], onDelete: Cascade)
+  addedAt   DateTime  @default(now())
+
+  @@unique([groupId, userId])
+  @@index([userId])
+}
+
+/// קובץ מצורף לקבוצת משימה (PDF / תמונה / מסמך / ZIP).
+model TaskFile {
+  id           String    @id @default(cuid())
+  groupId      String
+  group        TaskGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  title        String
+  fileUrl      String
+  fileName     String
+  /// MIME type לבחירת אייקון/preview נכון בלקוח
+  fileType     String
+  /// מספר בייטים — לתצוגה ולמיון
+  sizeBytes    Int?
+  /// נתיב בתוך הבאקט — לשימוש מחיקה / חתימה מחדש
+  storagePath  String?
+
+  uploadedById String?
+  uploadedBy   User?     @relation("TaskFileUploader", fields: [uploadedById], references: [id], onDelete: SetNull)
+  createdAt    DateTime  @default(now())
+
+  @@index([groupId])
+  @@index([createdAt])
+}
+
+/// הזמנות עתידיות / אירועים — תפעול (לא כרטסת לקוח)
+model FutureOrder {
+  id               String    @id @default(cuid())
+  /// מספר הזמנה רץ לתצוגה (ייחודי)
+  orderNumber      Int       @unique
+  customerName     String
+  phone            String?
+  /// חתונה | בר מצווה | בת מצווה | יום הולדת | עסקי | אחר
+  eventType        String
+  eventDate        DateTime  @db.Date
+  eventTime        String?
+  itemsDescription String?   @db.Text
+  totalAmount      Float
+  depositAmount    Float     @default(0)
+  remainingAmount  Float
+  depositPaid      Boolean   @default(false)
+  /// PENDING | IN_PREPARATION | READY | COMPLETED | CANCELLED
+  status           String    @default("PENDING")
+  isCompleted      Boolean   @default(false)
+  completedAt      DateTime?
+  notes            String?   @db.Text
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@index([eventDate])
+  @@index([status])
+  @@index([isCompleted])
+}
+
+/// ============================================================================
+/// "Workflow" system — reusable task library + ordered templates + live runs.
+/// Naming uses the "Workflow*" prefix to avoid colliding with work-day
+/// TaskTemplate / WorkTemplate models used for EmployeeTask rows.
+/// ============================================================================
+
+/// מאגר משימות מקצועי — משימה אטומית חוזרת (ניקיון, סידור, בדיקה).
+model WorkflowTask {
+  id                String   @id @default(cuid())
+  title             String
+  description       String?
+  /// זמן יעד בדקות לכל ביצוע. אם 0 — לא יוצג קאונטדאון.
+  estimatedMinutes  Int      @default(10)
+  /// האם חובה להקליד "סיבת איחור" לפני סיום משימה שעברה את הזמן.
+  requireLateReason Boolean  @default(true)
+  /// HEX color string (#RRGGBB) לתצוגת תווית/כרטיס
+  color             String?
+  sortOrder         Int      @default(0)
+  archivedAt        DateTime?
+  createdById       String?
+  createdBy         User?    @relation("WorkflowTaskCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  /// כל פעם שמשתמשים במשימה זו ב־template
+  templateItems     WorkflowTemplateItem[]
+  /// כל ריצה היסטורית של המשימה (snapshot של הכותרת/זמן ב־run)
+  runItems          WorkflowRunItem[]
+
+  @@index([archivedAt])
+  @@index([sortOrder])
+}
+
+/// תבנית קבוצת משימות — סדר משימות מוכן מראש (לדוגמה: "פתיחת משמרת").
+model WorkflowTemplate {
+  id          String   @id @default(cuid())
+  title       String
+  description String?
+  /// צבע ברירת מחדל לתבנית — מועתק ל־run אם רוצים בעתיד
+  color       String?
+  archivedAt  DateTime?
+  createdById String?
+  createdBy   User?    @relation("WorkflowTemplateCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  items WorkflowTemplateItem[]
+  runs  WorkflowRun[]
+
+  @@index([archivedAt])
+}
+
+/// פריט בתוך תבנית — כל שורה היא משימה ממאגר ה־WorkflowTask, עם
+/// אפשרות לדריסת זמן מותאם / שינוי סדר.
+model WorkflowTemplateItem {
+  id           String           @id @default(cuid())
+  templateId   String
+  template     WorkflowTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  taskId       String
+  task         WorkflowTask     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  orderIndex   Int              @default(0)
+  /// דריסת זמן עבור הקונטקסט הזה (null = ערך ברירת המחדל מה־WorkflowTask)
+  minutesOverride Int?
+  /// דריסת כותרת אופציונלית — מאפשרת "בדיקת מלאי קירור" במקום סתם "בדיקת מלאי"
+  titleOverride   String?
+  createdAt    DateTime         @default(now())
+
+  @@index([templateId, orderIndex])
+  @@index([taskId])
+}
+
+/// סטטוס ריצת קבוצה: בתהליך / הושלמה / בוטלה.
+enum WorkflowRunStatus {
+  IN_PROGRESS
+  COMPLETED
+  ABORTED
+}
+
+/// סטטוס פריט בתוך ריצה — Pending / Active / Completed / (Late לבד נמצא ב־isLate).
+enum WorkflowItemStatus {
+  PENDING
+  ACTIVE
+  COMPLETED
+  SKIPPED
+}
+
+/// ריצה חיה של תבנית — לכל עובד שמתחיל "פתיחת משמרת" יש ריצה אישית.
+/// אסור שיהיה יותר מ־item אחד עם status=ACTIVE בכל ריצה (גידור סדרתי).
+model WorkflowRun {
+  id           String            @id @default(cuid())
+  templateId   String?
+  template     WorkflowTemplate? @relation(fields: [templateId], references: [id], onDelete: SetNull)
+  /// העובד שמבצע את הריצה
+  assigneeId   String
+  assignee     User              @relation("WorkflowRunAssignee", fields: [assigneeId], references: [id], onDelete: Cascade)
+  /// snapshot של שם התבנית (גם אם נמחקה / שונתה אחר כך נשמר במקור)
+  title        String
+  status       WorkflowRunStatus @default(IN_PROGRESS)
+  startedAt    DateTime          @default(now())
+  completedAt  DateTime?
+  abortedAt    DateTime?
+  /// אינדקס הפריט הפעיל כעת (לקריאה מהירה ב־UI / mobile)
+  currentIndex Int               @default(0)
+  notes        String?
+  createdById  String?
+  createdBy    User?             @relation("WorkflowRunCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+
+  items WorkflowRunItem[]
+
+  @@index([assigneeId])
+  @@index([status])
   @@index([startedAt])
+}
+
+/// פריט בתוך ריצה חיה — snapshot של ה־TemplateItem בעת התחלת הריצה.
+/// timer מחושב משדה startedAt בלבד — לא local state בלקוח.
+model WorkflowRunItem {
+  id               String             @id @default(cuid())
+  runId            String
+  run              WorkflowRun        @relation(fields: [runId], references: [id], onDelete: Cascade)
+  /// קישור למשימה במאגר (NULL אם הריצה הותחלה לפני שהמשימה נמחקה)
+  sourceTaskId     String?
+  sourceTask       WorkflowTask?      @relation(fields: [sourceTaskId], references: [id], onDelete: SetNull)
+  title            String
+  description      String?
+  color            String?
+  /// יעד דקות (אחרי override של ה־template)
+  estimatedMinutes Int
+  requireLateReason Boolean           @default(true)
+  orderIndex       Int                @default(0)
+  status           WorkflowItemStatus @default(PENDING)
+  startedAt        DateTime?
+  completedAt      DateTime?
+  /// בפועל בדקות — מחושב על completedAt - startedAt (snapshot)
+  actualMinutes    Int?
+  isLate           Boolean            @default(false)
+  lateReason       String?
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+
+  @@unique([runId, orderIndex])
+  @@index([runId, status])
+  @@index([sourceTaskId])
+}
+
+/// סטטוס יום עבודה לעובד
+enum WorkSessionStatus {
+  ACTIVE
+  ENDED
+  CANCELLED
+}
+
+/// יום עבודה של עובד — Clock In עד Clock Out.
+/// בניגוד למודל Attendance שמאחד יום שלם, כאן כל מחזור עבודה נשמר בנפרד
+/// (כך אפשר לתמוך בכניסה/יציאה מרובות באותו יום, אבל ה־Attendance ממשיך
+/// לשמש כסיכום יומי לטובת מסך ניהול הצוות הקיים).
+model WorkSession {
+  id           String            @id @default(cuid())
+  userId       String
+  user         User              @relation("WorkSessionUser", fields: [userId], references: [id], onDelete: Cascade)
+  /// תאריך לוח השנה הישראלי של היום, ליצירת אינדקסים מהירים על "היום"
+  workDate     DateTime          @db.Date
+  clockIn      DateTime          @default(now())
+  clockOut     DateTime?
+  /// מחושב על clockOut - clockIn במעבר ל־ENDED
+  totalMinutes Int?
+  status       WorkSessionStatus @default(ACTIVE)
+  /// הערה חופשית שהעובד הוסיף בכניסה/יציאה
+  note         String?
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+
+  @@index([userId, status])
+  @@index([userId, workDate])
+  @@index([workDate])
 }
 
 /// שדות לטפסים דינמיים — לא רק תווית
 model DynamicFormField {
-  id           String   @id @default(cuid())
-  label        String
+  id          String   @id @default(cuid())
+  label       String
   /// STRING | NUMBER | EMAIL | PHONE | DATE | TIME | TEXTAREA | SELECT | BOOLEAN
-  fieldType    String   @default("STRING")
-  placeholder  String?
-  required     Boolean  @default(false)
+  fieldType   String   @default("STRING")
+  placeholder String?
+  required    Boolean  @default(false)
   /// ל‑SELECT: מערך מחרוזות אפשרויות
-  optionsJson  Json?
-  sortOrder    Int      @default(0)
-  createdAt    DateTime @default(now())
+  optionsJson Json?
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
 
   @@map("FormFieldDef")
 }
 
 model FinanceSettings {
-  id                 Int    @id @default(1)
-  cashOpeningBalance Float  @default(0)
+  id                 Int   @id @default(1)
+  cashOpeningBalance Float @default(0)
 }
 
 enum UserRole {
   SUPER_ADMIN
+  ADMIN
   EMPLOYEE
 }
 
 model User {
-  id           String   @id @default(cuid())
-  fullName     String
-  email        String   @unique
-  passwordHash String
-  role         UserRole
-  isActive     Boolean  @default(true)
-  createdAt    DateTime @default(now())
-  /// אופציונלי — קישור לרשומת Employee בכרטסות (לא למשימות)
-  employeeId   String?
-  employee     Employee? @relation(fields: [employeeId], references: [id], onDelete: SetNull)
+  id                 String    @id @default(cuid())
+  fullName           String
+  email              String    @unique
+  /// תעודת זהות — משמשת כשם משתמש להתחברות עובדים. ייחודית.
+  nationalId         String?   @unique
+  /// טלפון אישי לעובד (לעתיד: שחזור סיסמה דרך OTP)
+  phone              String?
+  passwordHash       String
+  /// סיסמה זמנית שנקבעה על ידי מנהל — חובה לשנותה בכניסה הבאה
+  mustChangePassword Boolean   @default(false)
+  passwordUpdatedAt  DateTime?
+  role               UserRole
+  isActive           Boolean   @default(true)
+  /// שכר לשעה לחישוב נוכחות (₪)
+  hourlyRate         Float     @default(0)
+  createdAt          DateTime  @default(now())
+  /// אופציונלי — קישור לכרטיס Employee; משימות יומיות נשענות על employeeId
+  employeeId         String?
+  employee           Employee? @relation(fields: [employeeId], references: [id], onDelete: SetNull)
 
   permissions   UserPermission[]
   activityLogs  ActivityLog[]
-  assignedTasks EmployeeTask[]
+
+  /// שפת ממשק: he | ar | en (תרגום ב-UI בלבד, לא ב-DB עסקי)
+  language String @default("he")
+
+  workShiftsScheduled WorkShift[]         @relation("WorkShiftUser")
+  workShiftsCreated   WorkShift[]         @relation("WorkShiftCreatedBy")
+  attendances         Attendance[]
+  attendanceEditsMade AttendanceEditLog[]
+  staffAlertsReceived StaffAlert[]        @relation("StaffAlertRecipient")
+  notificationsReceived Notification[]  @relation("NotificationRecipient")
 
   productLastStockUpdates Product[]           @relation("ProductLastStockBy")
   inventoryMovements      InventoryMovement[]
   inventoryCountsRecorded InventoryCount[]    @relation("InventoryCountCountedBy")
   generatedReports        GeneratedReport[]   @relation("GeneratedReportCreatedBy")
 
+  financialDocumentsMarkedSent FinancialDocument[]     @relation("FinancialDocumentSentToCpaBy")
+  accountantTransferLogs       AccountantTransferLog[] @relation("AccountantTransferLogPerformedBy")
+
+  /// קבוצות משימה (אד-הוק) שהמשתמש יצר ושיש לו חברות בהן
+  taskGroupsCreated   TaskGroup[]       @relation("TaskGroupCreator")
+  taskGroupMemberships TaskGroupMember[] @relation("TaskGroupMemberUser")
+  taskFilesUploaded   TaskFile[]        @relation("TaskFileUploader")
+
+  /// Workflow library/templates/runs (מאגר משימות חכם)
+  workflowTasksCreated    WorkflowTask[]     @relation("WorkflowTaskCreator")
+  workflowTemplatesCreated WorkflowTemplate[] @relation("WorkflowTemplateCreator")
+  workflowRunsAssigned    WorkflowRun[]      @relation("WorkflowRunAssignee")
+  workflowRunsCreated     WorkflowRun[]      @relation("WorkflowRunCreator")
+
+  /// Multi-cycle clock-in/out sessions (יום עבודה אמיתי - יכול לכלול מספר כניסות)
+  workSessions WorkSession[] @relation("WorkSessionUser")
+
+  loginAudits         LoginAudit[]
+  passwordResetTokens PasswordResetToken[]
+
+  recipesCreated Recipe[]     @relation("RecipeCreator")
+  recipeRuns     RecipeRun[] @relation("RecipeRunUser")
+
   @@index([employeeId])
+  @@index([nationalId])
+}
+
+/// יומן התחברויות עובדים — login_success / login_failed / logout
+model LoginAudit {
+  id         String   @id @default(cuid())
+  /// המשתמש שזוהה (אם נמצא). יישאר null כשמדובר ב־login_failed עם identifier לא קיים.
+  userId     String?
+  user       User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  /// המזהה שניסה להתחבר (ת.ז / אימייל), שמור כפי שהוזן (אחרי normalize)
+  identifier String
+  /// login_success | login_failed | logout
+  action     String
+  /// סיבת כישלון: not_found | bad_password | inactive
+  reason     String?
+  ip         String?
+  userAgent  String?
+  createdAt  DateTime @default(now())
+
+  @@index([userId])
+  @@index([identifier])
+  @@index([action])
+  @@index([createdAt])
+}
+
+/// טוקני שחזור סיסמה (תשתית עתידית: OTP/SMS/Email)
+/// אין UI כרגע — מבנה DB בלבד כדי לאפשר שחזור סיסמה מאוחר יותר.
+model PasswordResetToken {
+  id         String    @id @default(cuid())
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /// hash של הקוד (bcrypt) — לא לשמור plain
+  codeHash   String
+  /// otp_sms | otp_email | reset_link
+  channel    String    @default("otp_sms")
+  expiresAt  DateTime
+  consumedAt DateTime?
+  attempts   Int       @default(0)
+  createdAt  DateTime  @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+/// משמרת מתוכננת (סידור שבועי)
+model WorkShift {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation("WorkShiftUser", fields: [userId], references: [id], onDelete: Cascade)
+  workDate    DateTime @db.Date
+  startTime   String
+  endTime     String
+  branch      String?
+  notes       String?
+  /// scheduled | cancelled
+  status      String   @default("scheduled")
+  createdById String?
+  createdBy   User?    @relation("WorkShiftCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  attendances Attendance[]
+
+  @@index([userId, workDate])
+  @@index([workDate])
+}
+
+/// נוכחות יומית — שורה אחת לכל משתמש ליום עבודה (ישראל)
+model Attendance {
+  id              String     @id @default(cuid())
+  userId          String
+  user            User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  shiftId         String?
+  shift           WorkShift? @relation(fields: [shiftId], references: [id], onDelete: SetNull)
+  workDate        DateTime   @db.Date
+  clockIn         DateTime
+  clockOut        DateTime?
+  workedMinutes   Int?
+  lateMinutes     Int        @default(0)
+  overtimeMinutes Int        @default(0)
+  isLate          Boolean    @default(false)
+  hasOvertime     Boolean    @default(false)
+  note            String?
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+
+  editLogs AttendanceEditLog[]
+
+  @@unique([userId, workDate])
+  @@index([workDate])
+}
+
+model AttendanceEditLog {
+  id           String     @id @default(cuid())
+  attendanceId String
+  attendance   Attendance @relation(fields: [attendanceId], references: [id], onDelete: Cascade)
+  editorId     String
+  editor       User       @relation(fields: [editorId], references: [id], onDelete: Cascade)
+  changes      Json
+  createdAt    DateTime   @default(now())
+
+  @@index([attendanceId])
+}
+
+/// התראות מנהלים (איחור, חריגה, לא התחיל משמרת)
+model StaffAlert {
+  id                  String    @id @default(cuid())
+  recipientUserId     String
+  recipient           User      @relation("StaffAlertRecipient", fields: [recipientUserId], references: [id], onDelete: Cascade)
+  kind                String
+  title               String
+  body                String
+  subjectUserId       String?
+  relatedAttendanceId String?
+  readAt              DateTime?
+  createdAt           DateTime  @default(now())
+
+  @@index([recipientUserId, readAt])
+  @@index([createdAt])
+  @@index([kind, subjectUserId])
+}
+
+enum NotificationRoleTarget {
+  ADMIN
+  EMPLOYEE
+  BOTH
+}
+
+enum NotificationType {
+  TASK_ASSIGNED
+  TASK_LATE
+  TASK_COMPLETED
+  TASK_STARTED
+  TASK_GROUP_COMPLETED
+  CLOCK_IN_LATE
+  CLOCK_OUT
+  MISSED_CLOCK_IN
+  MISSED_CLOCK_OUT
+  OVERTIME
+  CHECK_DUE
+  CHECK_DEPOSITED
+  CHECK_BOUNCED
+  INVENTORY_LOW
+  INVENTORY_COUNT_INCOMPLETE
+  NEW_ORDER
+  ORDER_DELAYED
+}
+
+/// תיבת דואר נפרדת לעובדים / מנהלים — לא לערבב סוגי התראות בין תפקידים
+model Notification {
+  id              String                   @id @default(cuid())
+  recipientUserId String
+  recipient       User                     @relation("NotificationRecipient", fields: [recipientUserId], references: [id], onDelete: Cascade)
+  subjectUserId   String?
+  roleTarget      NotificationRoleTarget
+  type            NotificationType
+  title           String
+  message         String
+  color           String?
+  isRead          Boolean                  @default(false)
+  actionUrl       String?
+  metadata        Json?
+  createdAt       DateTime                 @default(now())
+
+  @@index([recipientUserId, isRead, createdAt(sort: Desc)])
+  @@index([recipientUserId, createdAt(sort: Desc)])
+  @@index([type, subjectUserId])
 }
 
 model UserPermission {
@@ -400,4 +1073,75 @@ model ActivityLog {
 
   @@index([userId])
   @@index([createdAt])
+}
+
+/// מתכון — תהליך הכנה עם שלבים וזמנים
+model Recipe {
+  id              String   @id @default(cuid())
+  title           String
+  description     String?
+  quantityLabel   String?
+  totalMinutes    Int      @default(0)
+  estimatedOutput String?
+  isActive        Boolean  @default(true)
+  createdById     String?
+  createdBy       User?    @relation("RecipeCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  steps RecipeStep[]
+  runs  RecipeRun[]
+
+  @@index([isActive])
+  @@index([createdById])
+}
+
+model RecipeStep {
+  id               String   @id @default(cuid())
+  recipeId         String
+  recipe           Recipe   @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+  title            String
+  description      String?
+  estimatedMinutes Int
+  orderIndex       Int
+  icon             String?
+  createdAt        DateTime @default(now())
+
+  runSteps RecipeRunStep[]
+
+  @@index([recipeId])
+}
+
+/// הרצת מתכון — מצב ביצוע בסיסי (ריענון שומר מצב)
+model RecipeRun {
+  id            String    @id @default(cuid())
+  recipeId      String
+  recipe        Recipe    @relation(fields: [recipeId], references: [id], onDelete: Cascade)
+  userId        String
+  user          User      @relation("RecipeRunUser", fields: [userId], references: [id], onDelete: Cascade)
+  status        String    @default("active")
+  activeStepId  String?
+  stepStartedAt DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  stepRecords RecipeRunStep[]
+
+  @@index([recipeId, userId, status])
+  @@index([userId])
+}
+
+model RecipeRunStep {
+  id           String     @id @default(cuid())
+  recipeRunId  String
+  recipeRun    RecipeRun  @relation(fields: [recipeRunId], references: [id], onDelete: Cascade)
+  recipeStepId String
+  recipeStep   RecipeStep @relation(fields: [recipeStepId], references: [id], onDelete: Cascade)
+  startedAt    DateTime?
+  completedAt  DateTime?
+  wasLate      Boolean    @default(false)
+  lateReason   String?
+
+  @@unique([recipeRunId, recipeStepId])
+  @@index([recipeRunId])
 }

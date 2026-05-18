@@ -1,14 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useI18n } from "@/components/i18n-provider";
 import type { FinanceDocumentRow } from "@/lib/finance/types";
-
-const currencyFormatter = new Intl.NumberFormat("he-IL", {
-  style: "currency",
-  currency: "ILS",
-  maximumFractionDigits: 0,
-});
 
 type Stats = {
   income: number;
@@ -21,16 +16,28 @@ type Stats = {
 };
 
 export default function FinancePortalPage() {
+  const { t, bcp47 } = useI18n();
+  const currencyFormatter = useMemo(
+    () =>
+      new Intl.NumberFormat(bcp47, {
+        style: "currency",
+        currency: "ILS",
+        maximumFractionDigits: 0,
+      }),
+    [bcp47],
+  );
   const [stats, setStats] = useState<Stats | null>(null);
   const [recent, setRecent] = useState<FinanceDocumentRow[]>([]);
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
     setLoading(true);
+    setStats(null);
+    setRecent([]);
     try {
       const [sRes, dRes] = await Promise.all([
-        fetch("/api/finance/stats", { credentials: "same-origin" }),
-        fetch("/api/documents", { credentials: "same-origin" }),
+        fetch("/api/finance/stats", { credentials: "same-origin", cache: "no-store" }),
+        fetch("/api/documents", { credentials: "same-origin", cache: "no-store" }),
       ]);
       const sj = (await sRes.json()) as { ok?: boolean; data?: Stats };
       if (sj.ok && sj.data) setStats(sj.data);
@@ -49,7 +56,9 @@ export default function FinancePortalPage() {
   }, []);
 
   useEffect(() => {
-    void load();
+    queueMicrotask(() => {
+      void load();
+    });
   }, [load]);
 
   const income = stats?.income ?? 0;
@@ -62,55 +71,53 @@ export default function FinancePortalPage() {
     <div className="mx-auto max-w-7xl space-y-8">
       <section className="app-panel p-8">
         <p className="text-sm font-bold uppercase tracking-[0.2em] text-cyan-600">
-          Finance Portal
+          {t("financePortal.kicker")}
         </p>
         <div className="mt-4 flex flex-col justify-between gap-6 lg:flex-row lg:items-end">
           <div>
             <h1 className="text-4xl font-black tracking-tight text-slate-950">
-              Income, expenses, and cashflow oversight.
+              {t("financePortal.title")}
             </h1>
             <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-500">
-              The finance workspace starts with source-linked documents and
-              ledger entries so every cash movement can be traced to an invoice,
-              Z-report, purchase order, or approved adjustment.
+              {t("financePortal.subtitle")}
             </p>
           </div>
           <Link
             href="/finance/income"
             className="rounded-full bg-luxury-gold px-5 py-3 text-center text-sm font-bold text-luxury-charcoal shadow-luxury-sm transition hover:bg-luxury-gold-hover"
           >
-            New income document
+            {t("financePortal.newIncomeDoc")}
           </Link>
         </div>
       </section>
 
       <section className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
         <div className="app-panel p-6">
-          <p className="text-sm font-semibold text-slate-500">Total income</p>
+          <p className="text-sm font-semibold text-slate-500">{t("financePortal.totalIncome")}</p>
           <p className="mt-3 text-3xl font-black">
             {loading ? "…" : currencyFormatter.format(income)}
           </p>
         </div>
         <div className="app-panel p-6">
-          <p className="text-sm font-semibold text-slate-500">Total expenses</p>
+          <p className="text-sm font-semibold text-slate-500">{t("financePortal.totalExpenses")}</p>
           <p className="mt-3 text-3xl font-black">
             {loading ? "…" : currencyFormatter.format(expenses)}
           </p>
         </div>
         <div className="app-panel p-6">
-          <p className="text-sm font-semibold text-slate-500">Cashflow</p>
+          <p className="text-sm font-semibold text-slate-500">{t("financePortal.cashflow")}</p>
           <p className="mt-3 text-3xl font-black">
             {loading ? "…" : currencyFormatter.format(cashflow)}
           </p>
         </div>
         <div className="app-panel border-orange-200 bg-orange-50/60 p-6">
-          <p className="text-sm font-semibold text-orange-950">יתרות פתוחות (חוב לגבייה)</p>
+          <p className="text-sm font-semibold text-orange-950">{t("financePortal.openBalances")}</p>
           <p className="mt-3 text-3xl font-black text-orange-950">
             {loading ? "…" : currencyFormatter.format(openBalancesTotal)}
           </p>
         </div>
         <div className="app-panel border-amber-200 bg-amber-50/50 p-6">
-          <p className="text-sm font-semibold text-amber-900">סה״כ פיקדונות פתוחים</p>
+          <p className="text-sm font-semibold text-amber-900">{t("financePortal.openDeposits")}</p>
           <p className="mt-3 text-3xl font-black text-amber-950">
             {loading ? "…" : currencyFormatter.format(openDeposits)}
           </p>
@@ -121,12 +128,12 @@ export default function FinancePortalPage() {
         <div className="flex items-center justify-between">
           <div>
             <p className="text-sm font-bold uppercase tracking-[0.18em] text-slate-400">
-              Income Documents
+              {t("financePortal.incomeDocs")}
             </p>
-            <h2 className="mt-2 text-2xl font-black">Recent invoices</h2>
+            <h2 className="mt-2 text-2xl font-black">{t("financePortal.recentInvoices")}</h2>
           </div>
           <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-700">
-            {recent.length} active
+            {t("financePortal.activeN", { count: recent.length })}
           </span>
         </div>
 
@@ -143,7 +150,7 @@ export default function FinancePortalPage() {
                 </div>
                 <div className="flex flex-wrap gap-2">
                   <span className="rounded-full bg-white px-3 py-1 text-xs font-bold text-slate-600">
-                    תאריך: {document.doc_date ?? "—"}
+                    {t("common.date")}: {document.doc_date ?? "—"}
                   </span>
                   <span className="rounded-full bg-white px-3 py-1 text-xs font-bold text-slate-600">
                     ID: {document.id}
@@ -153,7 +160,7 @@ export default function FinancePortalPage() {
             </div>
           ))}
           {!loading && recent.length === 0 && (
-            <p className="text-sm font-semibold text-slate-500">אין מסמכי הכנסה להצגה.</p>
+            <p className="text-sm font-semibold text-slate-500">{t("financePortal.noIncomeDocs")}</p>
           )}
         </div>
       </section>

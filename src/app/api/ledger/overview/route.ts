@@ -3,6 +3,8 @@ import { prisma } from "@/lib/prisma";
 import { requireDb } from "@/lib/api-route";
 import type { EntityType, LedgerOverviewRow } from "@/lib/finance/types";
 
+export const dynamic = "force-dynamic";
+
 type UnifiedEntity = {
   entity_type: EntityType;
   id: string;
@@ -148,20 +150,6 @@ export async function GET(req: NextRequest) {
     const supIds = pageRows.filter((r) => r.entity_type === "supplier").map((r) => r.id);
     const empIds = pageRows.filter((r) => r.entity_type === "employee").map((r) => r.id);
 
-    const remainingByCustomer = new Map<string, number>();
-    if (custIds.length) {
-      const agg = await prisma.financialDocument.groupBy({
-        by: ["customerId"],
-        where: { customerId: { in: custIds } },
-        _sum: { remainingAmount: true },
-      });
-      for (const row of agg) {
-        if (row.customerId) {
-          remainingByCustomer.set(row.customerId, Math.max(0, row._sum.remainingAmount ?? 0));
-        }
-      }
-    }
-
     const docsForPage =
       custIds.length > 0
         ? await prisma.financialDocument.findMany({
@@ -170,8 +158,6 @@ export async function GET(req: NextRequest) {
               customerId: true,
               category: true,
               totalAmount: true,
-              paidAmount: true,
-              remainingAmount: true,
               docDate: true,
               createdAt: true,
             },
@@ -181,19 +167,26 @@ export async function GET(req: NextRequest) {
     const paysForPage =
       custIds.length > 0
         ? await prisma.payment.findMany({
-            where: { customerId: { in: custIds } },
+            where: {
+              customerId: { in: custIds },
+              document: { is: { category: "הכנסה" } },
+            },
             select: { customerId: true, amount: true, createdAt: true },
           })
         : [];
 
+    const customerTotals = new Map<string, { orders: number; payments: number }>();
     const debitCreditMoves = new Map<string, { debit: number; credit: number; count: number }>();
     for (const id of custIds) {
+      customerTotals.set(id, { orders: 0, payments: 0 });
       debitCreditMoves.set(id, { debit: 0, credit: 0, count: 0 });
     }
 
     for (const d of docsForPage) {
       if (!d.customerId) continue;
       if (d.category !== "הכנסה") continue;
+      const totals = customerTotals.get(d.customerId);
+      if (totals) totals.orders += Math.max(0, d.totalAmount);
       const entryDate = docEntryDate(d);
       if (!inDateRange(entryDate, dateFrom, dateTo)) continue;
       const row = debitCreditMoves.get(d.customerId);
@@ -203,6 +196,8 @@ export async function GET(req: NextRequest) {
     }
 
     for (const p of paysForPage) {
+      const totals = customerTotals.get(p.customerId);
+      if (totals) totals.payments += Math.max(0, p.amount);
       if (!inPaymentRange(p.createdAt, dateFrom, dateTo)) continue;
       const row = debitCreditMoves.get(p.customerId);
       if (!row) continue;
@@ -260,7 +255,8 @@ export async function GET(req: NextRequest) {
 
     const rows: LedgerOverviewRow[] = pageRows.map((e): LedgerOverviewRow => {
       if (e.entity_type === "customer") {
-        const openBalance = remainingByCustomer.get(e.id) ?? 0;
+        const totals = customerTotals.get(e.id) ?? { orders: 0, payments: 0 };
+        const openBalance = Math.max(0, totals.orders - totals.payments);
         const m = debitCreditMoves.get(e.id) ?? { debit: 0, credit: 0, count: 0 };
         return {
           entity_type: "customer",

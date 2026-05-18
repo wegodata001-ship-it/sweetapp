@@ -1,4 +1,5 @@
 import type {
+  AccountantTransferLogRow,
   CashFlowRow,
   EntityType,
   FinanceDocumentRow,
@@ -47,7 +48,7 @@ export async function fetchLedgerOverview(params: {
   if (params.page) q.set("page", String(params.page));
   if (params.pageSize) q.set("pageSize", String(params.pageSize));
 
-  const res = await fetch(`/api/ledger/overview?${q}`, { credentials: "same-origin" });
+  const res = await fetch(`/api/ledger/overview?${q}`, { credentials: "same-origin", cache: "no-store" });
   try {
     const j = (await res.json()) as { ok?: boolean } & Partial<LedgerOverviewResponse>;
     if (!j.ok) {
@@ -85,7 +86,7 @@ export async function fetchLedgerForFilters(params: {
   if (params.dateFrom) q.set("dateFrom", params.dateFrom);
   if (params.dateTo) q.set("dateTo", params.dateTo);
 
-  const res = await fetch(`/api/ledger/movements?${q}`, { credentials: "same-origin" });
+  const res = await fetch(`/api/ledger/movements?${q}`, { credentials: "same-origin", cache: "no-store" });
   try {
     const j = (await res.json()) as {
       ok?: boolean;
@@ -209,8 +210,13 @@ export async function insertDirectCashFlow(params: {
   }
 }
 
+export type FinanceDocumentsResponse = {
+  rows: FinanceDocumentRow[];
+  counts: { total: number; sent: number; notSent: number };
+};
+
 export async function fetchFinanceDocuments(): Promise<FinanceDocumentRow[]> {
-  const res = await fetch("/api/documents", { credentials: "same-origin" });
+  const res = await fetch("/api/documents", { credentials: "same-origin", cache: "no-store" });
   try {
     const j = (await res.json()) as { ok?: boolean; data?: FinanceDocumentRow[] };
     if (!j.ok || !j.data) return [];
@@ -220,8 +226,35 @@ export async function fetchFinanceDocuments(): Promise<FinanceDocumentRow[]> {
   }
 }
 
+/**
+ * משיכת מסמכים עם סינון לפי סטטוס רואה חשבון + ספירות סיכום.
+ */
+export async function fetchFinanceDocumentsWithCounts(params: {
+  accountant?: "all" | "sent" | "not_sent";
+}): Promise<FinanceDocumentsResponse> {
+  const q = new URLSearchParams();
+  if (params.accountant && params.accountant !== "all") q.set("accountant", params.accountant);
+  const res = await fetch(`/api/documents?${q}`, { credentials: "same-origin", cache: "no-store" });
+  try {
+    const j = (await res.json()) as {
+      ok?: boolean;
+      data?: FinanceDocumentRow[];
+      counts?: { total: number; sent: number; notSent: number };
+    };
+    if (!j.ok) {
+      return { rows: [], counts: { total: 0, sent: 0, notSent: 0 } };
+    }
+    return {
+      rows: j.data ?? [],
+      counts: j.counts ?? { total: 0, sent: 0, notSent: 0 },
+    };
+  } catch {
+    return { rows: [], counts: { total: 0, sent: 0, notSent: 0 } };
+  }
+}
+
 export async function fetchFinanceDocumentById(id: string): Promise<FinanceDocumentRow | null> {
-  const res = await fetch(`/api/documents/${encodeURIComponent(id)}`, { credentials: "same-origin" });
+  const res = await fetch(`/api/documents/${encodeURIComponent(id)}`, { credentials: "same-origin", cache: "no-store" });
   try {
     const j = (await res.json()) as { ok?: boolean; data?: FinanceDocumentRow };
     if (!j.ok || !j.data) return null;
@@ -267,6 +300,60 @@ export async function deleteFinanceDocument(id: string): Promise<{ ok: boolean; 
     return { ok: Boolean(j.ok), error: j.error };
   } catch {
     return { ok: false, error: "תגובת שרת לא תקינה" };
+  }
+}
+
+/**
+ * סימון / ביטול העברה לרואה חשבון למסמך בודד.
+ * מחזיר את הרשומה המעודכנת לעדכון מיידי ב־UI (ללא refresh מלא).
+ */
+export async function setDocumentAccountantSent(
+  id: string,
+  sent: boolean,
+): Promise<{ ok: boolean; data?: FinanceDocumentRow; error?: string }> {
+  const res = await fetch(`/api/documents/${encodeURIComponent(id)}/accountant`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ sent }),
+    credentials: "same-origin",
+  });
+  try {
+    const j = (await res.json()) as { ok?: boolean; data?: FinanceDocumentRow; error?: string };
+    return { ok: Boolean(j.ok), data: j.data, error: j.error };
+  } catch {
+    return { ok: false, error: "תגובת שרת לא תקינה" };
+  }
+}
+
+export async function bulkSetDocumentsAccountantSent(
+  ids: string[],
+  sent: boolean,
+): Promise<{ ok: boolean; updated?: number; error?: string }> {
+  const res = await fetch(`/api/documents/accountant/bulk`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ids, sent }),
+    credentials: "same-origin",
+  });
+  try {
+    const j = (await res.json()) as { ok?: boolean; updated?: number; error?: string };
+    return { ok: Boolean(j.ok), updated: j.updated, error: j.error };
+  } catch {
+    return { ok: false, error: "תגובת שרת לא תקינה" };
+  }
+}
+
+export async function fetchAccountantTransferLog(documentId: string): Promise<AccountantTransferLogRow[]> {
+  const res = await fetch(
+    `/api/documents/${encodeURIComponent(documentId)}/accountant/log`,
+    { credentials: "same-origin" },
+  );
+  try {
+    const j = (await res.json()) as { ok?: boolean; data?: AccountantTransferLogRow[] };
+    if (!j.ok || !j.data) return [];
+    return j.data;
+  } catch {
+    return [];
   }
 }
 

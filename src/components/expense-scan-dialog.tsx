@@ -1,0 +1,802 @@
+"use client";
+
+import {
+  AlertTriangle,
+  Camera,
+  CheckCircle2,
+  FileText,
+  Loader2,
+  ScanLine,
+  TrendingDown,
+  TrendingUp,
+  Upload,
+  X,
+} from "lucide-react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type DragEvent,
+} from "react";
+import { useI18n } from "@/components/i18n-provider";
+import { ScanSupplierPanel } from "@/components/scan-supplier-panel";
+import { formatShekel } from "@/lib/format-shekel";
+
+export type ScannedItemDto = {
+  rawName: string;
+  name: string;
+  productId?: string | null;
+  supplierProductId?: string | null;
+  unit?: string | null;
+  quantity: number;
+  unitPrice: number;
+  lineTotal: number;
+  confidenceScore?: number;
+  lineStatus?: "valid" | "review" | "suspect";
+  ocrSuspect?: boolean;
+  uncertain?: boolean;
+  regularPrice?: number | null;
+  regularPriceSamples?: number;
+  isHigher?: boolean;
+  isLower?: boolean;
+  priceFlagKey?: "higher" | "lower" | "match" | null;
+  priceDifferencePercent?: number | null;
+  suggestedProductId?: string | null;
+  suggestedProductName?: string | null;
+  productMatchScore?: number | null;
+};
+
+export type ScannedDocumentDto = {
+  supplierRawName: string;
+  supplierName: string;
+  supplierId?: string | null;
+  suggestNewSupplier?: boolean;
+  invoiceNumber: string;
+  date: string;
+  documentType?: string;
+  vatAmount?: number | null;
+  total?: number | null;
+  items: ScannedItemDto[];
+  rawText: string;
+  receiptFileUrl?: string | null;
+  receiptFileName?: string | null;
+  engine: string;
+  confidence: number;
+  skippedLinesCount?: number;
+  time?: string;
+  error?: string;
+};
+
+type Props = {
+  open: boolean;
+  onClose: () => void;
+  onApply: (doc: ScannedDocumentDto) => void;
+};
+
+const ACCEPT = "image/jpeg,image/jpg,image/png,image/webp,application/pdf";
+
+/**
+ * Outer wrapper that mounts the inner dialog component only while open=true.
+ * This lets the inner component own its scan state and reset it naturally
+ * by unmounting (no setState-in-effect anti-pattern).
+ */
+export function ExpenseScanDialog({ open, onClose, onApply }: Props) {
+  if (!open) return null;
+  return <ExpenseScanDialogContent onClose={onClose} onApply={onApply} />;
+}
+
+function ExpenseScanDialogContent({
+  onClose,
+  onApply,
+}: {
+  onClose: () => void;
+  onApply: (doc: ScannedDocumentDto) => void;
+}) {
+  const { t, dir, bcp47 } = useI18n();
+  const [file, setFile] = useState<File | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [scanning, setScanning] = useState(false);
+  const [result, setResult] = useState<ScannedDocumentDto | null>(null);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [dragOver, setDragOver] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
+
+  // Revoke the preview blob URL on unmount to avoid leaking memory.
+  useEffect(() => {
+    return () => {
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+    };
+  }, [previewUrl]);
+
+  const close = useCallback(() => {
+    onClose();
+  }, [onClose]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") close();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [close]);
+
+  const acceptFile = useCallback(
+    (f: File | null | undefined) => {
+      if (!f) return;
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+      setFile(f);
+      const url = URL.createObjectURL(f);
+      setPreviewUrl(url);
+      setResult(null);
+      setErrorMsg(null);
+    },
+    [previewUrl],
+  );
+
+  const onFileInput = (e: ChangeEvent<HTMLInputElement>) => {
+    acceptFile(e.target.files?.[0]);
+  };
+  const onDrop = (e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setDragOver(false);
+    acceptFile(e.dataTransfer.files?.[0]);
+  };
+  const onDragOver = (e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setDragOver(true);
+  };
+  const onDragLeave = () => setDragOver(false);
+
+  const startScan = async () => {
+    if (!file) return;
+    setScanning(true);
+    setErrorMsg(null);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const res = await fetch("/api/expenses/scan", {
+        method: "POST",
+        body: fd,
+        credentials: "same-origin",
+      });
+      const json = (await res.json()) as
+        | { ok: true; data: ScannedDocumentDto }
+        | { ok: false; error?: string };
+      if (!json.ok) {
+        setErrorMsg(json.error ?? t("scan.errorGeneric"));
+        return;
+      }
+      setResult(json.data);
+      const hasPartial =
+        Boolean(json.data.supplierName || json.data.supplierRawName) ||
+        Boolean(json.data.total) ||
+        Boolean(json.data.date) ||
+        Boolean(json.data.invoiceNumber) ||
+        json.data.items.length > 0;
+      if (json.data.error === "OCR_READ_FAILED") {
+        setErrorMsg(
+          hasPartial ? t("scan.errorPartial") : t("scan.errorReadFailed"),
+        );
+      } else if (json.data.error === "OCR_NOT_CONFIGURED") {
+        setErrorMsg(t("scan.errorNotConfigured"));
+      } else if (json.data.error) {
+        setErrorMsg(t("scan.errorPartial"));
+      } else if (json.data.items.length === 0 && !json.data.total && !json.data.supplierName) {
+        setErrorMsg(t("scan.errorEmpty"));
+      }
+    } catch (e) {
+      setErrorMsg(e instanceof Error ? e.message : t("scan.errorGeneric"));
+    } finally {
+      setScanning(false);
+    }
+  };
+
+  const updateField = <K extends keyof ScannedDocumentDto>(
+    key: K,
+    value: ScannedDocumentDto[K],
+  ) => {
+    setResult((prev) => (prev ? { ...prev, [key]: value } : prev));
+  };
+
+  const updateItem = (
+    idx: number,
+    patch: Partial<ScannedItemDto>,
+  ) => {
+    setResult((prev) => {
+      if (!prev) return prev;
+      const items = prev.items.map((it, i) =>
+        i === idx
+          ? {
+              ...it,
+              ...patch,
+              lineTotal:
+                patch.quantity !== undefined || patch.unitPrice !== undefined
+                  ? (patch.quantity ?? it.quantity) *
+                    (patch.unitPrice ?? it.unitPrice)
+                  : it.lineTotal,
+            }
+          : it,
+      );
+      return { ...prev, items };
+    });
+  };
+
+  const removeItem = (idx: number) => {
+    setResult((prev) => {
+      if (!prev) return prev;
+      return { ...prev, items: prev.items.filter((_, i) => i !== idx) };
+    });
+  };
+
+  const addBlankItem = () => {
+    setResult((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        items: [
+          ...prev.items,
+          {
+            rawName: "",
+            name: "",
+            quantity: 1,
+            unitPrice: 0,
+            lineTotal: 0,
+            regularPrice: null,
+            regularPriceSamples: 0,
+            isHigher: false,
+            isLower: false,
+            priceFlagKey: null,
+          },
+        ],
+      };
+    });
+  };
+
+  const isImage = file && file.type.startsWith("image/");
+  const isPdf = file && file.type === "application/pdf";
+
+  const grandTotal = useMemo(() => {
+    if (!result) return 0;
+    if (result.total && result.total > 0) return result.total;
+    return result.items.reduce((s, i) => s + (i.lineTotal || 0), 0);
+  }, [result]);
+
+  return (
+    <div
+      dir={dir}
+      className="fixed inset-0 z-[100] flex items-stretch bg-black/70 backdrop-blur-[2px]"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="expense-scan-title"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) close();
+      }}
+    >
+      <div className="m-0 flex w-full max-w-[1280px] flex-col self-stretch overflow-hidden bg-white shadow-2xl md:m-4 md:max-h-[calc(100vh-2rem)] md:rounded-2xl">
+        {/* Header */}
+        <div className="flex shrink-0 items-center justify-between gap-2 border-b border-slate-200 bg-gradient-to-r from-rose-50 via-amber-50 to-white px-4 py-3">
+          <h2
+            id="expense-scan-title"
+            className="flex items-center gap-2 text-base font-black text-slate-900 md:text-lg"
+          >
+            <ScanLine className="h-5 w-5 text-rose-600" aria-hidden />
+            {t("scan.title")}
+          </h2>
+          <button
+            type="button"
+            onClick={close}
+            className="inline-flex h-9 items-center gap-1 rounded-lg bg-slate-100 px-3 text-xs font-bold text-slate-700 hover:bg-slate-200"
+            aria-label={t("common.close")}
+          >
+            <X className="h-4 w-4" aria-hidden />
+            {t("common.close")}
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="grid min-h-0 flex-1 grid-cols-1 gap-0 overflow-hidden md:grid-cols-2">
+          {/* Left: upload + preview */}
+          <div className="flex min-h-0 flex-col gap-3 overflow-auto border-b border-slate-200 p-4 md:border-b-0 md:border-l md:border-slate-200">
+            {!file && (
+              <div
+                className={`flex flex-1 flex-col items-center justify-center gap-3 rounded-2xl border-2 border-dashed bg-slate-50 px-5 py-10 text-center transition ${
+                  dragOver
+                    ? "border-rose-400 bg-rose-50"
+                    : "border-slate-300 hover:border-slate-400"
+                }`}
+                onDrop={onDrop}
+                onDragOver={onDragOver}
+                onDragLeave={onDragLeave}
+              >
+                <ScanLine className="h-10 w-10 text-rose-500" aria-hidden />
+                <p className="text-base font-black text-slate-800">
+                  {t("scan.dropTitle")}
+                </p>
+                <p className="text-sm text-slate-500">{t("scan.dropSubtitle")}</p>
+                <div className="mt-2 flex flex-wrap items-center justify-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="inline-flex items-center gap-2 rounded-xl bg-rose-600 px-4 py-2 text-sm font-bold text-white shadow-sm hover:bg-rose-700"
+                  >
+                    <Upload className="h-4 w-4" aria-hidden />
+                    {t("scan.chooseFile")}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => cameraInputRef.current?.click()}
+                    className="inline-flex items-center gap-2 rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50 md:hidden"
+                  >
+                    <Camera className="h-4 w-4" aria-hidden />
+                    {t("scan.useCamera")}
+                  </button>
+                </div>
+                <p className="mt-1 text-xs text-slate-500">
+                  {t("scan.acceptedFormats")}
+                </p>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept={ACCEPT}
+                  onChange={onFileInput}
+                  className="hidden"
+                />
+                <input
+                  ref={cameraInputRef}
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  onChange={onFileInput}
+                  className="hidden"
+                />
+              </div>
+            )}
+
+            {file && (
+              <>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-black text-slate-800">
+                      {file.name}
+                    </p>
+                    <p className="text-xs text-slate-500">
+                      {(file.size / 1024).toLocaleString(bcp47, {
+                        maximumFractionDigits: 0,
+                      })}{" "}
+                      KB · {file.type}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-50"
+                    >
+                      {t("scan.replaceFile")}
+                    </button>
+                    {!scanning && !result && (
+                      <button
+                        type="button"
+                        onClick={() => void startScan()}
+                        className="inline-flex items-center gap-2 rounded-lg bg-rose-600 px-3 py-1.5 text-xs font-black text-white shadow-sm hover:bg-rose-700"
+                      >
+                        <ScanLine className="h-4 w-4" aria-hidden />
+                        {t("scan.startScan")}
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept={ACCEPT}
+                  onChange={onFileInput}
+                  className="hidden"
+                />
+
+                <div className="flex-1 overflow-hidden rounded-xl border border-slate-200 bg-slate-50">
+                  {isImage && previewUrl ? (
+                    /* eslint-disable-next-line @next/next/no-img-element */
+                    <img
+                      src={previewUrl}
+                      alt={file.name}
+                      className="h-full max-h-[60vh] w-full object-contain"
+                    />
+                  ) : isPdf && previewUrl ? (
+                    <iframe
+                      title={file.name}
+                      src={previewUrl}
+                      className="h-full min-h-[60vh] w-full bg-white"
+                    />
+                  ) : (
+                    <div className="flex h-full items-center justify-center p-6">
+                      <FileText className="h-10 w-10 text-slate-400" aria-hidden />
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
+
+          {/* Right: parsed data */}
+          <div className="flex min-h-0 flex-col overflow-auto p-4">
+            {scanning && (
+              <div className="flex flex-1 flex-col items-center justify-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-8">
+                <Loader2 className="h-10 w-10 animate-spin text-rose-500" aria-hidden />
+                <p className="text-base font-black text-slate-800">
+                  {t("scan.scanning")}
+                </p>
+                <p className="text-sm text-slate-500">
+                  {t("scan.scanningSubtitle")}
+                </p>
+              </div>
+            )}
+
+            {!scanning && !result && !errorMsg && (
+              <div className="flex flex-1 flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center">
+                <FileText className="h-8 w-8 text-slate-400" aria-hidden />
+                <p className="text-sm font-bold text-slate-600">
+                  {t("scan.previewHint")}
+                </p>
+              </div>
+            )}
+
+            {errorMsg && (
+              <div className="mb-3 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-bold text-amber-900">
+                <AlertTriangle className="mt-0.5 h-4 w-4" aria-hidden />
+                <span className="flex-1 whitespace-pre-wrap">{errorMsg}</span>
+              </div>
+            )}
+
+            {result && (
+              <div className="flex flex-col gap-3">
+                {result.suggestNewSupplier && !result.supplierId ? (
+                  <ScanSupplierPanel
+                    ocrName={result.supplierRawName || result.supplierName}
+                    onLinked={(s) => {
+                      setResult((prev) =>
+                        prev
+                          ? {
+                              ...prev,
+                              supplierId: s.id,
+                              supplierName: s.name,
+                              suggestNewSupplier: false,
+                            }
+                          : prev,
+                      );
+                    }}
+                  />
+                ) : result.supplierId ? (
+                  <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-bold text-emerald-800">
+                    {t("scan.supplierMatched", { name: result.supplierName })}
+                  </div>
+                ) : null}
+
+                <section className="overflow-hidden rounded-xl border border-slate-200">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="bg-slate-50 text-xs font-black uppercase tracking-wide text-slate-500">
+                        <th className="px-3 py-2 text-start">{t("scan.previewTable.field")}</th>
+                        <th className="px-3 py-2 text-start">{t("scan.previewTable.value")}</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      <PreviewRow label={t("scan.fields.supplier")} value={result.supplierName} />
+                      <PreviewRow label={t("scan.fields.date")} value={result.date || "—"} />
+                      <PreviewRow
+                        label={t("scan.fields.invoiceNumber")}
+                        value={result.invoiceNumber || "—"}
+                      />
+                      <PreviewRow label={t("scan.total")} value={formatShekel(grandTotal)} highlight />
+                    </tbody>
+                  </table>
+                </section>
+
+                <section className="grid gap-2 sm:grid-cols-2">
+                  <label className="block text-[13px] font-bold text-slate-700">
+                    {t("scan.fields.supplier")}
+                    <input
+                      type="text"
+                      value={result.supplierName}
+                      onChange={(e) => updateField("supplierName", e.target.value)}
+                      className="mt-1 block h-10 w-full rounded-lg border border-slate-300 px-3 text-sm shadow-sm focus:border-rose-400 focus:ring-2 focus:ring-rose-200"
+                    />
+                  </label>
+                  <label className="block text-[13px] font-bold text-slate-700">
+                    {t("scan.fields.date")}
+                    <input
+                      type="date"
+                      value={result.date || ""}
+                      onChange={(e) => updateField("date", e.target.value)}
+                      className="mt-1 block h-10 w-full rounded-lg border border-slate-300 px-3 text-sm shadow-sm focus:border-rose-400 focus:ring-2 focus:ring-rose-200"
+                    />
+                  </label>
+                  <label className="block text-[13px] font-bold text-slate-700">
+                    {t("scan.fields.invoiceNumber")}
+                    <input
+                      type="text"
+                      value={result.invoiceNumber}
+                      onChange={(e) =>
+                        updateField("invoiceNumber", e.target.value)
+                      }
+                      className="mt-1 block h-10 w-full rounded-lg border border-slate-300 px-3 text-sm shadow-sm focus:border-rose-400 focus:ring-2 focus:ring-rose-200"
+                    />
+                  </label>
+                  <label className="block text-[13px] font-bold text-slate-700">
+                    {t("scan.fields.documentType")}
+                    <input
+                      type="text"
+                      value={result.documentType ?? ""}
+                      onChange={(e) =>
+                        updateField("documentType", e.target.value)
+                      }
+                      className="mt-1 block h-10 w-full rounded-lg border border-slate-300 px-3 text-sm shadow-sm focus:border-rose-400 focus:ring-2 focus:ring-rose-200"
+                    />
+                  </label>
+                </section>
+
+                {/* Items table */}
+                <section className="rounded-xl border border-slate-200 bg-white">
+                  <div className="flex items-center justify-between border-b border-slate-100 px-3 py-2">
+                    <h3 className="text-sm font-black text-slate-800">
+                      {t("scan.itemsTitle", { count: result.items.length })}
+                    </h3>
+                    <button
+                      type="button"
+                      onClick={addBlankItem}
+                      className="rounded-lg bg-slate-100 px-2 py-1 text-xs font-bold text-slate-700 hover:bg-slate-200"
+                    >
+                      {t("scan.addItem")}
+                    </button>
+                  </div>
+                  {(result.skippedLinesCount ?? 0) > 0 ? (
+                    <p className="border-b border-slate-100 px-3 py-1.5 text-[11px] text-slate-500">
+                      {t("scan.skippedLinesHint", {
+                        count: result.skippedLinesCount ?? 0,
+                      })}
+                    </p>
+                  ) : null}
+                  <div className="max-h-[40vh] overflow-auto">
+                    {result.items.length === 0 ? (
+                      <p className="px-3 py-6 text-center text-sm text-slate-500">
+                        {t("scan.noItems")}
+                      </p>
+                    ) : (
+                      <ul className="divide-y divide-slate-100">
+                        {result.items.map((it, idx) => {
+                          const highlight =
+                            it.lineStatus === "suspect" || it.ocrSuspect
+                              ? "border-red-400 bg-red-50/80"
+                              : it.isHigher
+                                ? "border-rose-300 bg-rose-50/70"
+                                : it.isLower
+                                  ? "border-emerald-300 bg-emerald-50/70"
+                                  : it.lineStatus === "review" || it.uncertain
+                                    ? "border-amber-300 bg-amber-50/50"
+                                    : it.lineStatus === "valid"
+                                      ? "border-emerald-200 bg-emerald-50/30"
+                                      : "border-transparent";
+                          const statusMsg =
+                            it.lineStatus === "suspect" || it.ocrSuspect
+                              ? t("scan.suspectAmount")
+                              : it.lineStatus === "review" || it.uncertain
+                                ? t("scan.reviewLine")
+                                : it.lineStatus === "valid"
+                                  ? t("scan.validLine")
+                                  : null;
+                          return (
+                            <li
+                              key={`${it.rawName}-${idx}`}
+                              className={`grid gap-2 border-l-4 px-3 py-2 sm:grid-cols-[1fr_70px_110px_110px_28px] ${highlight}`}
+                            >
+                              {statusMsg ? (
+                                <p
+                                  className={`col-span-full flex items-center gap-1 text-[11px] font-bold ${
+                                    it.lineStatus === "suspect" || it.ocrSuspect
+                                      ? "text-red-800"
+                                      : it.lineStatus === "valid"
+                                        ? "text-emerald-800"
+                                        : "text-amber-800"
+                                  }`}
+                                >
+                                  {it.lineStatus === "valid" ? (
+                                    <CheckCircle2 className="h-3 w-3 shrink-0" aria-hidden />
+                                  ) : (
+                                    <AlertTriangle className="h-3 w-3 shrink-0" aria-hidden />
+                                  )}
+                                  {statusMsg}
+                                </p>
+                              ) : null}
+                              {it.suggestedProductName && !it.supplierProductId ? (
+                                <div className="col-span-full flex flex-wrap items-center gap-2 rounded-lg border border-sky-200 bg-sky-50 px-2 py-1.5 text-[11px] font-bold text-sky-900">
+                                  <span>
+                                    {t("scan.similarProductFound", {
+                                      name: it.suggestedProductName,
+                                    })}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      updateItem(idx, {
+                                        name: it.suggestedProductName!,
+                                        supplierProductId: it.suggestedProductId,
+                                      })
+                                    }
+                                    className="rounded-md bg-sky-700 px-2 py-0.5 text-[10px] font-black text-white hover:bg-sky-800"
+                                  >
+                                    {t("scan.linkSimilarProduct")}
+                                  </button>
+                                </div>
+                              ) : null}
+                              <input
+                                type="text"
+                                value={it.name}
+                                onChange={(e) =>
+                                  updateItem(idx, { name: e.target.value })
+                                }
+                                placeholder={t("scan.itemNamePlaceholder")}
+                                className="h-9 w-full rounded-lg border border-slate-300 px-2 text-sm focus:border-rose-400 focus:ring-2 focus:ring-rose-200"
+                              />
+                              <input
+                                type="number"
+                                step="0.01"
+                                value={it.quantity}
+                                onChange={(e) =>
+                                  updateItem(idx, {
+                                    quantity: Number(e.target.value) || 0,
+                                  })
+                                }
+                                className="h-9 w-full rounded-lg border border-slate-300 px-2 text-sm focus:border-rose-400 focus:ring-2 focus:ring-rose-200"
+                              />
+                              <div className="min-w-0">
+                                <input
+                                  type="number"
+                                  step="0.01"
+                                  value={it.unitPrice}
+                                  onChange={(e) =>
+                                    updateItem(idx, {
+                                      unitPrice: Number(e.target.value) || 0,
+                                    })
+                                  }
+                                  className={`h-9 w-full rounded-lg border px-2 text-sm focus:ring-2 ${
+                                    it.isHigher
+                                      ? "border-rose-400 bg-rose-50 focus:border-rose-500 focus:ring-rose-200"
+                                      : it.isLower
+                                        ? "border-emerald-400 bg-emerald-50 focus:border-emerald-500 focus:ring-emerald-200"
+                                        : "border-slate-300 focus:border-rose-400 focus:ring-rose-200"
+                                  }`}
+                                />
+                                {it.regularPrice ? (
+                                  <p
+                                    className={`mt-1 inline-flex items-center gap-1 text-[11px] font-bold ${
+                                      it.isHigher
+                                        ? "text-rose-700"
+                                        : it.isLower
+                                          ? "text-emerald-700"
+                                          : "text-slate-500"
+                                    }`}
+                                    title={t("scan.priceTooltip", {
+                                      price: formatShekel(it.regularPrice),
+                                      samples: it.regularPriceSamples ?? 0,
+                                    })}
+                                  >
+                                    {it.isHigher && (
+                                      <>
+                                        <TrendingUp className="h-3 w-3" aria-hidden />
+                                        {t("scan.priceHigher")}
+                                      </>
+                                    )}
+                                    {it.isLower && (
+                                      <>
+                                        <TrendingDown className="h-3 w-3" aria-hidden />
+                                        {t("scan.priceLower")}
+                                      </>
+                                    )}
+                                    {!it.isHigher && !it.isLower && (
+                                      <>
+                                        <CheckCircle2 className="h-3 w-3" aria-hidden />
+                                        {t("scan.priceMatch")}
+                                      </>
+                                    )}
+                                    {it.isHigher && it.priceDifferencePercent != null ? (
+                                      <span className="text-rose-800">
+                                        {t("scan.priceDiff", {
+                                          percent: Math.abs(it.priceDifferencePercent),
+                                        })}
+                                      </span>
+                                    ) : null}
+                                    <span className="opacity-75">
+                                      ({formatShekel(it.regularPrice)})
+                                    </span>
+                                  </p>
+                                ) : null}
+                              </div>
+                              <div className="text-right text-sm font-black tabular-nums text-slate-800">
+                                {formatShekel(it.lineTotal)}
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => removeItem(idx)}
+                                aria-label={t("scan.removeItem")}
+                                className="self-center rounded-lg p-1 text-rose-600 hover:bg-rose-50"
+                              >
+                                <X className="h-4 w-4" aria-hidden />
+                              </button>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    )}
+                  </div>
+                  <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 px-3 py-2 text-sm">
+                    <span className="text-xs font-bold text-slate-500">
+                      {result.vatAmount
+                        ? t("scan.vatLabel", {
+                            amount: formatShekel(result.vatAmount),
+                          })
+                        : t("scan.vatUnknown")}
+                    </span>
+                    <span className="font-black tabular-nums text-slate-900">
+                      {t("scan.total")}: {formatShekel(grandTotal)}
+                    </span>
+                  </div>
+                </section>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-slate-200 bg-slate-50 px-4 py-3">
+          <button
+            type="button"
+            onClick={close}
+            className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50"
+          >
+            {t("common.cancel")}
+          </button>
+          <button
+            type="button"
+            disabled={!result || scanning}
+            onClick={() => {
+              if (result) {
+                onApply(result);
+                close();
+              }
+            }}
+            className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-black text-white shadow-sm hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <CheckCircle2 className="h-4 w-4" aria-hidden />
+            {t("scan.applyToForm")}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PreviewRow({
+  label,
+  value,
+  highlight,
+}: {
+  label: string;
+  value: string;
+  highlight?: boolean;
+}) {
+  return (
+    <tr>
+      <td className="px-3 py-2 font-bold text-slate-600">{label}</td>
+      <td
+        className={`px-3 py-2 font-semibold text-slate-900 ${highlight ? "text-base font-black tabular-nums text-rose-700" : ""}`}
+      >
+        {value}
+      </td>
+    </tr>
+  );
+}

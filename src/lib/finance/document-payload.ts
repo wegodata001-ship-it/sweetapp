@@ -67,6 +67,24 @@ export type FinanceLineItemPayload = {
   quantity: string;
   price: string;
   vatMode: VatMode;
+  /** מזהה שורת מחירון ספק (כשבוחרים מוצר מהמחירון ברישום הוצאה) */
+  supplierProductId?: string | null;
+  /** Optional ephemeral hint produced by the OCR scan flow.
+   *  Persisted in metadata so re-opening an edited expense keeps the warning
+   *  badge until the user resaves with corrected values. */
+  priceFlag?: {
+    regularPrice: number | null;
+    samples: number;
+    flag: "higher" | "lower" | "match";
+  } | null;
+};
+
+export type PaymentCheckDetailsPayload = {
+  checkNumber: string;
+  bankName: string;
+  branch: string;
+  dueDate: string;
+  holderName: string;
 };
 
 export type PaymentLinePayload = {
@@ -74,7 +92,23 @@ export type PaymentLinePayload = {
   instrument: string;
   amount: string;
   notes: string;
+  check?: PaymentCheckDetailsPayload;
 };
+
+export function emptyCheckDetails(): PaymentCheckDetailsPayload {
+  return { checkNumber: "", bankName: "", branch: "", dueDate: "", holderName: "" };
+}
+
+export function hasCheckDetails(check: PaymentCheckDetailsPayload | undefined): boolean {
+  if (!check) return false;
+  return Boolean(
+    check.checkNumber.trim() ||
+      check.bankName.trim() ||
+      check.branch.trim() ||
+      check.dueDate.trim() ||
+      check.holderName.trim(),
+  );
+}
 
 export type IncomeExpensePayload = {
   kind: "income" | "expense";
@@ -101,6 +135,11 @@ export type IncomeExpensePayload = {
   trayQty: string;
   returnDate: string;
   lines: FinanceLineItemPayload[];
+  /** מזהה ספק ממחירון — רק הוצאות; מסנכרן עם שם הספק בכותרת המסמך */
+  supplierId?: string | null;
+  /** When the form was filled via the OCR scanner: link to the uploaded file. */
+  receiptFileUrl?: string | null;
+  receiptFileName?: string | null;
 };
 
 export type ZReportPayload = {
@@ -151,6 +190,7 @@ export function emptyIncomeExpensePayload(kind: "income" | "expense"): IncomeExp
     depositStatus: "open",
     trayQty: "",
     returnDate: "",
+    supplierId: null,
     lines: [{ id: newLineId(), itemName: "", quantity: "1", price: "", vatMode: "includes_vat" }],
   };
 }
@@ -190,12 +230,25 @@ export function parsePayload(raw: unknown): FinanceDocumentPayload | null {
       const vm = r.vatMode;
       const vatMode: VatMode =
         vm === "before_vat" || vm === "exempt" ? vm : "includes_vat";
+      const pfRaw = r.priceFlag as Record<string, unknown> | undefined;
+      const priceFlag =
+        pfRaw &&
+        (pfRaw.flag === "higher" || pfRaw.flag === "lower" || pfRaw.flag === "match")
+          ? {
+              regularPrice:
+                typeof pfRaw.regularPrice === "number" ? pfRaw.regularPrice : null,
+              samples: typeof pfRaw.samples === "number" ? pfRaw.samples : 0,
+              flag: pfRaw.flag as "higher" | "lower" | "match",
+            }
+          : null;
       return {
         id: typeof r.id === "string" ? r.id : newLineId(),
         itemName: String(r.itemName ?? ""),
         quantity: String(r.quantity ?? "1"),
         price: String(r.price ?? ""),
         vatMode,
+        supplierProductId: typeof r.supplierProductId === "string" ? r.supplierProductId : null,
+        ...(priceFlag ? { priceFlag } : {}),
       };
     });
     const docTypeRaw = String(o.documentType ?? "").trim();
@@ -207,11 +260,22 @@ export function parsePayload(raw: unknown): FinanceDocumentPayload | null {
     const payments: PaymentLinePayload[] = paymentsRaw.map((row) => {
       const r = row as Record<string, unknown>;
       const instrument = String(r.instrument ?? PAYMENT_INSTRUMENT_OPTIONS[0]).trim();
+      const checkRaw = r.check as Record<string, unknown> | undefined;
+      const check: PaymentCheckDetailsPayload | undefined = checkRaw
+        ? {
+            checkNumber: String(checkRaw.checkNumber ?? ""),
+            bankName: String(checkRaw.bankName ?? ""),
+            branch: String(checkRaw.branch ?? ""),
+            dueDate: String(checkRaw.dueDate ?? ""),
+            holderName: String(checkRaw.holderName ?? ""),
+          }
+        : undefined;
       return {
         id: typeof r.id === "string" ? r.id : newPaymentId(),
         instrument: instrument || PAYMENT_INSTRUMENT_OPTIONS[0],
         amount: String(r.amount ?? ""),
         notes: String(r.notes ?? ""),
+        ...(check ? { check } : {}),
       };
     });
     if (!payments.length) {
@@ -244,7 +308,12 @@ export function parsePayload(raw: unknown): FinanceDocumentPayload | null {
           : "open",
       trayQty: String(o.trayQty ?? ""),
       returnDate: String(o.returnDate ?? ""),
+      supplierId: typeof o.supplierId === "string" && o.supplierId.trim() ? o.supplierId.trim() : null,
       lines: lines.length ? lines : emptyIncomeExpensePayload(o.kind).lines,
+      receiptFileUrl:
+        typeof o.receiptFileUrl === "string" ? o.receiptFileUrl : null,
+      receiptFileName:
+        typeof o.receiptFileName === "string" ? o.receiptFileName : null,
     };
   }
   return null;

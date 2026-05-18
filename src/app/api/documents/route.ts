@@ -17,27 +17,52 @@ import {
   normalizedPaymentLines,
   replaceCashFlowForDocument,
   saveProductHistoryFromItems,
+  syncCheckPaymentsForDocument,
 } from "@/lib/finance/document-side-effects";
-import { prisma } from "@/lib/prisma";
+import { recordSupplierPriceHistoryFromExpense } from "@/lib/procurement/record-expense-prices";
+import { prisma, prismaAny } from "@/lib/prisma";
 import { requireDb } from "@/lib/api-route";
 import { getSessionFromCookie } from "@/lib/auth/get-session";
 import { logActivity } from "@/lib/activity-log";
 import { parseNum } from "@/lib/format-shekel";
 import type { Prisma } from "@prisma/client";
 
+export const dynamic = "force-dynamic";
+
 function asJson(value: unknown): Prisma.InputJsonValue {
   return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
 }
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   const block = await requireDb();
   if (block) return block;
   try {
-    const rows = await prisma.financialDocument.findMany({
-      include: { customer: { select: { name: true } } },
+    const { searchParams } = req.nextUrl;
+    const accountant = searchParams.get("accountant"); // all | sent | not_sent
+    const where: Record<string, unknown> = {};
+    if (accountant === "sent") where.sentToCpa = true;
+    else if (accountant === "not_sent") where.sentToCpa = false;
+
+    const rows = await prismaAny.financialDocument.findMany({
+      where,
+      include: {
+        customer: { select: { name: true } },
+        payments: { select: { amount: true } },
+        sentToCpaBy: { select: { id: true, fullName: true } },
+      },
       orderBy: { createdAt: "desc" },
     });
-    return NextResponse.json({ ok: true, data: rows.map(prismaDocToFinanceRow) });
+    const data = rows.map((r: Parameters<typeof prismaDocToFinanceRow>[0]) => prismaDocToFinanceRow(r));
+
+    const totalCount = await prismaAny.financialDocument.count();
+    const notSentCount = await prismaAny.financialDocument.count({ where: { sentToCpa: false } });
+    const sentCount = totalCount - notSentCount;
+
+    return NextResponse.json({
+      ok: true,
+      data,
+      counts: { total: totalCount, sent: sentCount, notSent: notSentCount },
+    });
   } catch (e) {
     return NextResponse.json(
       { ok: false, error: e instanceof Error ? e.message : "שגיאה" },
@@ -130,8 +155,17 @@ export async function POST(req: NextRequest) {
     const depositAmount = incomeExpenseDepositAmount(ie);
     const calculatedTotal = productTotal + depositAmount;
 
-    const customerId =
+    let customerId =
       ie.kind === "income" ? await ensureCustomerByName(ie.counterpartyName) : null;
+
+    // If income with CHECK payment lines but no counterparty, fall back to a
+    // placeholder customer so the check can still be tracked.
+    const hasCheckLine =
+      ie.kind === "income" &&
+      (ie.payments ?? []).some((p) => p.instrument === "CHECK");
+    if (ie.kind === "income" && !customerId && hasCheckLine) {
+      customerId = await ensureCustomerByName("ללא לקוח");
+    }
 
     const isIncomeRegister = ie.kind === "income" && body.category === "הכנסה";
     const isIncomeExpenseDocument = ie.kind === "income" || ie.kind === "expense";
@@ -189,6 +223,10 @@ export async function POST(req: NextRequest) {
 
     await saveProductHistoryFromItems(items);
 
+    if (body.category === "הוצאה" && ie.kind === "expense") {
+      await recordSupplierPriceHistoryFromExpense(ie);
+    }
+
     if (isIncomeRegister) {
       const payments = normalizedPaymentLines(ie);
       if (payments.length > 0 && customerId) {
@@ -206,6 +244,7 @@ export async function POST(req: NextRequest) {
 
     await syncFinancialDocumentPaymentTotals(doc.id);
     await replaceCashFlowForDocument(doc.id);
+    await syncCheckPaymentsForDocument(doc.id);
     if (session) await logActivity(session.sub, "document_create");
     return NextResponse.json({ ok: true, id: doc.id });
   } catch (e) {

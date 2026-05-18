@@ -10,12 +10,14 @@ import {
   Pencil,
   Plus,
   Trash2,
+  ScanLine,
   Wallet,
   X,
 } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { PdfPreviewModal } from "@/components/pdf-preview-modal";
+import { useI18n } from "@/components/i18n-provider";
 import {
   deleteCashFlowEntry,
   fetchCashFlowEntries,
@@ -34,6 +36,7 @@ function isZReportCashFlow(row: CashFlowRow): boolean {
 }
 
 export default function CashflowPage() {
+  const { t, bcp47 } = useI18n();
   const [rows, setRows] = useState<CashFlowRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [notice, setNotice] = useState<string | null>(null);
@@ -99,8 +102,8 @@ export default function CashflowPage() {
       const p = r.payment_method?.trim();
       if (p) set.add(p);
     }
-    return Array.from(set).sort((a, b) => a.localeCompare(b, "he"));
-  }, [rows]);
+    return Array.from(set).sort((a, b) => a.localeCompare(b, bcp47));
+  }, [rows, bcp47]);
 
   const filteredRows = useMemo(() => {
     const q = filterCustomer.trim().toLowerCase();
@@ -121,7 +124,7 @@ export default function CashflowPage() {
   const persistPatch = async (row: CashFlowRow, patch: Parameters<typeof updateCashFlowEntry>[1]) => {
     const res = await updateCashFlowEntry(row.id, patch);
     if (!res.ok) {
-      setNotice(res.error ?? "שגיאת שמירה");
+      setNotice(res.error ?? t("cashflow.errorSave"));
       return false;
     }
     setNotice(null);
@@ -173,10 +176,10 @@ export default function CashflowPage() {
   };
 
   const removeRow = async (row: CashFlowRow) => {
-    if (!window.confirm("למחוק תנועה זו מהיומן?")) return;
+    if (!window.confirm(t("cashflow.confirmDelete"))) return;
     const res = await deleteCashFlowEntry(row.id);
     if (!res.ok) {
-      setNotice(res.error ?? "מחיקה נכשלה");
+      setNotice(res.error ?? t("common.errorDelete"));
       return;
     }
     setNotice(null);
@@ -190,7 +193,7 @@ export default function CashflowPage() {
     const parsed = parseNum(directAmount);
     const amt = parsed >= 0 ? parsed : -parsed;
     if (!directDate || !Number.isFinite(amt) || amt <= 0) {
-      setNotice("נא למלא תאריך וסכום חיובי.");
+      setNotice(t("cashflow.fillDateAmount"));
       return;
     }
     setSavingDirect(true);
@@ -202,7 +205,7 @@ export default function CashflowPage() {
     });
     setSavingDirect(false);
     if (!res.ok) {
-      setNotice(res.error ?? "שגיאה");
+      setNotice(res.error ?? t("common.error"));
       return;
     }
     setNotice(null);
@@ -230,17 +233,17 @@ export default function CashflowPage() {
         {isExp ? (
           <>
             <Minus className="h-3 w-3 shrink-0 stroke-[3]" aria-hidden />
-            הוצאה
+            {t("cashflow.expense")}
           </>
         ) : isZ ? (
           <>
             <Plus className="h-3 w-3 shrink-0 stroke-[3]" aria-hidden />
-            הכנסה · דוח Z <span aria-hidden>🧾</span>
+            {t("cashflow.incomeWithZ")} <span aria-hidden>🧾</span>
           </>
         ) : (
           <>
             <Plus className="h-3 w-3 shrink-0 stroke-[3]" aria-hidden />
-            הכנסה
+            {t("cashflow.income")}
           </>
         )}
       </span>
@@ -257,23 +260,23 @@ export default function CashflowPage() {
             isExp ? "bg-rose-100 text-rose-800" : "bg-emerald-100 text-emerald-800"
           }`}
         >
-          {isExp ? (
-            <>
-              <Minus className="h-3 w-3 shrink-0 stroke-[3]" aria-hidden />
-              הוצאה
-            </>
-          ) : isZ ? (
-            <>
-              <Plus className="h-3 w-3 shrink-0 stroke-[3]" aria-hidden />
-              הכנסה · דוח Z <span aria-hidden>🧾</span>
-            </>
-          ) : (
-            <>
-              <Plus className="h-3 w-3 shrink-0 stroke-[3]" aria-hidden />
-              הכנסה
-            </>
-          )}
-        </span>
+        {isExp ? (
+          <>
+            <Minus className="h-3 w-3 shrink-0 stroke-[3]" aria-hidden />
+            {t("cashflow.expense")}
+          </>
+        ) : isZ ? (
+          <>
+            <Plus className="h-3 w-3 shrink-0 stroke-[3]" aria-hidden />
+            {t("cashflow.incomeWithZ")} <span aria-hidden>🧾</span>
+          </>
+        ) : (
+          <>
+            <Plus className="h-3 w-3 shrink-0 stroke-[3]" aria-hidden />
+            {t("cashflow.income")}
+          </>
+        )}
+      </span>
         {isZ ? (
           <span className="rounded-md bg-emerald-50 px-1 py-px text-[9px] font-extrabold uppercase tracking-tight text-emerald-900 ring-1 ring-emerald-200/80">
             Z REPORT
@@ -281,7 +284,7 @@ export default function CashflowPage() {
         ) : null}
         <button
           type="button"
-          title="שינוי סוג"
+          title={t("cashflow.changeType")}
           className="rounded-md p-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-800"
           onClick={() => setOpenTypeMenuId((id) => (id === row.id ? null : row.id))}
         >
@@ -294,14 +297,14 @@ export default function CashflowPage() {
               className="block w-full px-3 py-2 text-right text-xs font-semibold text-emerald-900 hover:bg-emerald-50"
               onClick={() => void applyEntryType(row, "income")}
             >
-              הכנסה
+              {t("cashflow.income")}
             </button>
             <button
               type="button"
               className="block w-full px-3 py-2 text-right text-xs font-semibold text-rose-900 hover:bg-rose-50"
               onClick={() => void applyEntryType(row, "expense")}
             >
-              הוצאה
+              {t("cashflow.expense")}
             </button>
           </div>
         )}
@@ -367,14 +370,14 @@ export default function CashflowPage() {
               <input
                 type="text"
                 className={compactInput}
-                placeholder="אמצעי"
+                placeholder={t("cashflow.thMethod")}
                 value={editForm.payment_method}
                 onChange={(e) => setEditForm((f) => (f ? { ...f, payment_method: e.target.value } : f))}
               />
               <input
                 type="text"
                 className={compactInput}
-                placeholder="לקוח"
+                placeholder={t("entities.customer")}
                 value={editForm.customer_name}
                 onChange={(e) => setEditForm((f) => (f ? { ...f, customer_name: e.target.value } : f))}
               />
@@ -444,7 +447,7 @@ export default function CashflowPage() {
               <>
                 <button
                   type="button"
-                  title="שמירה"
+                  title={t("cashflow.actionSave")}
                   className="rounded-lg border border-emerald-200 bg-emerald-50 p-1.5 text-emerald-800 hover:bg-emerald-100"
                   onClick={() => void saveEdit(row)}
                 >
@@ -452,7 +455,7 @@ export default function CashflowPage() {
                 </button>
                 <button
                   type="button"
-                  title="ביטול"
+                  title={t("common.cancel")}
                   className="rounded-lg border border-slate-200 bg-white p-1.5 text-slate-600 hover:bg-slate-50"
                   onClick={cancelEdit}
                 >
@@ -463,7 +466,7 @@ export default function CashflowPage() {
               <>
                 <button
                   type="button"
-                  title="עריכה"
+                  title={t("common.edit")}
                   className="rounded-lg border border-slate-200 bg-white p-1.5 text-slate-700 shadow-sm hover:bg-slate-50"
                   onClick={() => startEdit(row)}
                 >
@@ -471,7 +474,7 @@ export default function CashflowPage() {
                 </button>
                 <button
                   type="button"
-                  title="מחיקה"
+                  title={t("cashflow.actionDelete")}
                   className="rounded-lg border border-slate-200 bg-white p-1.5 text-rose-700 shadow-sm hover:bg-rose-50"
                   onClick={() => void removeRow(row)}
                 >
@@ -479,7 +482,7 @@ export default function CashflowPage() {
                 </button>
                 {row.document_id ? (
                   <Link
-                    title="צפייה במסמך"
+                    title={t("cashflow.viewDocument")}
                     href={`/finance/register?edit=${encodeURIComponent(row.document_id)}`}
                     className="rounded-lg border border-cyan-200 bg-cyan-50 p-1.5 text-cyan-900 hover:bg-cyan-100"
                   >
@@ -487,7 +490,7 @@ export default function CashflowPage() {
                   </Link>
                 ) : (
                   <span
-                    title="אין מסמך מקושר"
+                    title={t("cashflow.noLinkedDocument")}
                     className="inline-flex rounded-lg border border-slate-100 bg-slate-50 p-1.5 text-slate-300"
                   >
                     <Eye className="h-4 w-4" aria-hidden />
@@ -542,14 +545,14 @@ export default function CashflowPage() {
               <input
                 type="text"
                 className={compactInput}
-                placeholder="אמצעי"
+                placeholder={t("cashflow.thMethod")}
                 value={editForm.payment_method}
                 onChange={(e) => setEditForm((f) => (f ? { ...f, payment_method: e.target.value } : f))}
               />
               <input
                 type="text"
                 className={compactInput}
-                placeholder="לקוח"
+                placeholder={t("entities.customer")}
                 value={editForm.customer_name}
                 onChange={(e) => setEditForm((f) => (f ? { ...f, customer_name: e.target.value } : f))}
               />
@@ -560,7 +563,7 @@ export default function CashflowPage() {
         </div>
         <div className="mt-3 flex justify-between gap-4 border-t border-slate-100 pt-3 text-sm">
           <div>
-            <p className="text-xs text-slate-500">כניסה</p>
+            <p className="text-xs text-slate-500">{t("cashflow.thIncoming")}</p>
             {editing && editForm ? (
               <input
                 type="number"
@@ -585,7 +588,7 @@ export default function CashflowPage() {
             )}
           </div>
           <div>
-            <p className="text-xs text-slate-500">יציאה</p>
+            <p className="text-xs text-slate-500">{t("cashflow.thOutgoing")}</p>
             {editing && editForm ? (
               <input
                 type="number"
@@ -618,10 +621,10 @@ export default function CashflowPage() {
                 className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-sm font-bold text-emerald-900"
                 onClick={() => void saveEdit(row)}
               >
-                שמירה
+                {t("cashflow.actionSave")}
               </button>
               <button type="button" className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-bold text-slate-700" onClick={cancelEdit}>
-                ביטול
+                {t("common.cancel")}
               </button>
             </>
           ) : (
@@ -651,26 +654,35 @@ export default function CashflowPage() {
         <div>
           <p className="flex items-center gap-2 text-[12px] font-bold tracking-[0.12em] text-cyan-700 opacity-80">
             <Wallet className="h-4 w-4" aria-hidden />
-            תזרים מזומנים
+            {t("cashflow.kicker")}
           </p>
-          <h1 className="erp-page-title mt-1.5 text-slate-950">יומן תנועות מזומן</h1>
+          <h1 className="erp-page-title mt-1.5 text-slate-950">{t("cashflow.journalTitle")}</h1>
           <p className="mt-1 max-w-3xl text-[14px] leading-snug text-slate-600 opacity-80">
-            רישום תנועות בלבד מטבלת התזרים; ללא יתרות לקוח או חוב פתוח — אלו מוצגים במסכי כרטסות וגבייה.
+            {t("cashflow.journalSubtitle")}
           </p>
         </div>
-        <button
-          type="button"
-          onClick={() => {
-            const d = new Date();
-            const pad = (n: number) => String(n).padStart(2, "0");
-            setDirectDate(`${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`);
-            setDirectOpen(true);
-          }}
-          className="erp-btn gap-2 self-start bg-luxury-gold text-luxury-charcoal shadow-sm hover:bg-luxury-gold-hover"
-        >
-          <CirclePlus className="h-4 w-4" aria-hidden />
-          רישום ישירות
-        </button>
+        <div className="flex flex-wrap gap-2 self-start">
+          <Link
+            href="/finance/register?tab=expenses&scan=1"
+            className="erp-btn gap-2 border border-rose-200 bg-rose-50 text-rose-900 shadow-sm hover:bg-rose-100"
+          >
+            <ScanLine className="h-4 w-4" aria-hidden />
+            {t("cashflow.scanExpense")}
+          </Link>
+          <button
+            type="button"
+            onClick={() => {
+              const d = new Date();
+              const pad = (n: number) => String(n).padStart(2, "0");
+              setDirectDate(`${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`);
+              setDirectOpen(true);
+            }}
+            className="erp-btn gap-2 bg-luxury-gold text-luxury-charcoal shadow-sm hover:bg-luxury-gold-hover"
+          >
+            <CirclePlus className="h-4 w-4" aria-hidden />
+            {t("cashflow.directEntry")}
+          </button>
+        </div>
       </div>
 
       {notice && (
@@ -683,25 +695,25 @@ export default function CashflowPage() {
         <div className="flex h-[120px] flex-col justify-between rounded-[18px] border border-emerald-200 bg-emerald-50/70 p-[14px] shadow-sm">
           <p className="flex items-center gap-2 text-xs font-bold text-emerald-800">
             <Plus className="h-4 w-4 shrink-0 stroke-[2.5]" aria-hidden />
-            סה״כ כניסות
+            {t("cashflow.totalIncoming")}
           </p>
-          <p className="mt-1 text-xs font-medium text-emerald-700/90">לפי הסינון בתצוגה</p>
+          <p className="mt-1 text-xs font-medium text-emerald-700/90">{t("cashflow.byFilter")}</p>
           <p className="mt-1 text-xl font-black text-emerald-900">{formatShekel(totalIn)}</p>
         </div>
         <div className="flex h-[120px] flex-col justify-between rounded-[18px] border border-rose-200 bg-rose-50/70 p-[14px] shadow-sm">
           <p className="flex items-center gap-2 text-xs font-bold text-rose-800">
             <Minus className="h-4 w-4 shrink-0 stroke-[2.5]" aria-hidden />
-            סה״כ יציאות
+            {t("cashflow.totalOutgoing")}
           </p>
-          <p className="mt-1 text-xs font-medium text-rose-700/90">לפי הסינון בתצוגה</p>
+          <p className="mt-1 text-xs font-medium text-rose-700/90">{t("cashflow.byFilter")}</p>
           <p className="mt-1 text-xl font-black text-rose-900">{formatShekel(totalOut)}</p>
         </div>
         <div className="flex h-[120px] flex-col justify-between rounded-[18px] border border-cyan-200 bg-cyan-50/80 p-[14px] shadow-sm">
           <p className="flex items-center gap-2 text-xs font-bold text-cyan-900">
             <Wallet className="h-4 w-4 shrink-0" aria-hidden />
-            יתרה כללית
+            {t("cashflow.generalBalance")}
           </p>
-          <p className="mt-1 text-xs font-medium text-cyan-800/90">כניסות − יציאות (לפי הסינון)</p>
+          <p className="mt-1 text-xs font-medium text-cyan-800/90">{t("cashflow.generalBalanceHelp")}</p>
           <p className="mt-1 text-xl font-black text-cyan-950">{formatShekel(totalBalance)}</p>
         </div>
       </div>
@@ -712,16 +724,16 @@ export default function CashflowPage() {
           value={filterCustomer}
           onChange={(e) => setFilterCustomer(e.target.value)}
           className={filterInputClass}
-          placeholder="חיפוש לקוח…"
+          placeholder={t("cashflow.searchCustomer")}
         />
         <select
           value={filterType}
           onChange={(e) => setFilterType(e.target.value as "all" | "income" | "expense")}
           className={filterInputClass}
         >
-          <option value="all">כל הסוגים</option>
-          <option value="income">הכנסות בלבד</option>
-          <option value="expense">הוצאות בלבד</option>
+          <option value="all">{t("cashflow.allTypes")}</option>
+          <option value="income">{t("cashflow.incomeOnly")}</option>
+          <option value="expense">{t("cashflow.expenseOnly")}</option>
         </select>
         <input
           type="date"
@@ -740,7 +752,7 @@ export default function CashflowPage() {
           onChange={(e) => setFilterPaymentMethod(e.target.value)}
           className={filterInputClass}
         >
-          <option value="">כל אמצעי התשלום</option>
+          <option value="">{t("cashflow.allPaymentMethods")}</option>
           {paymentMethodOptions.map((p) => (
             <option key={p} value={p}>
               {p}
@@ -754,21 +766,21 @@ export default function CashflowPage() {
         <table className="min-w-[960px] w-full table-fixed border-collapse text-right text-sm">
           <thead>
             <tr className="border-b border-slate-200 bg-slate-50">
-              <th className={`${cellPad} w-[11%] font-bold text-slate-600`}>תאריך</th>
-              <th className={`${cellPad} w-[12%] font-bold text-slate-600`}>סוג</th>
-              <th className={`${cellPad} w-[28%] font-bold text-slate-600`}>תיאור פעולה</th>
-              <th className={`${cellPad} w-[22%] font-bold text-slate-600`}>לקוח / אמצעי</th>
-              <th className={`${cellPad} w-[10%] font-bold text-emerald-700`}>כניסה</th>
-              <th className={`${cellPad} w-[10%] font-bold text-rose-700`}>יציאה</th>
-              <th className={`${cellPad} w-[7%] font-bold text-slate-600`}>PDF</th>
-              <th className={`${cellPad} w-[7%] font-bold text-slate-600`}>פעולות</th>
+              <th className={`${cellPad} w-[11%] font-bold text-slate-600`}>{t("cashflow.thDate")}</th>
+              <th className={`${cellPad} w-[12%] font-bold text-slate-600`}>{t("cashflow.thType")}</th>
+              <th className={`${cellPad} w-[28%] font-bold text-slate-600`}>{t("cashflow.thActionDescription")}</th>
+              <th className={`${cellPad} w-[22%] font-bold text-slate-600`}>{t("cashflow.thCustomerOrMethod")}</th>
+              <th className={`${cellPad} w-[10%] font-bold text-emerald-700`}>{t("cashflow.thIncoming")}</th>
+              <th className={`${cellPad} w-[10%] font-bold text-rose-700`}>{t("cashflow.thOutgoing")}</th>
+              <th className={`${cellPad} w-[7%] font-bold text-slate-600`}>{t("cashflow.thPdf")}</th>
+              <th className={`${cellPad} w-[7%] font-bold text-slate-600`}>{t("cashflow.thActions")}</th>
             </tr>
           </thead>
           <tbody className="bg-white">
             {loading && (
               <tr>
                 <td colSpan={8} className="px-4 py-10 text-center font-semibold text-slate-500">
-                  טוען…
+                  {t("common.loading")}
                 </td>
               </tr>
             )}
@@ -779,22 +791,22 @@ export default function CashflowPage() {
 
       {/* Mobile cards */}
       <div className="mt-6 space-y-3 md:hidden">
-        {loading && <p className="text-center text-sm font-semibold text-slate-500">טוען…</p>}
+        {loading && <p className="text-center text-sm font-semibold text-slate-500">{t("common.loading")}</p>}
         {!loading && filteredRows.map(renderMobileCard)}
       </div>
 
       {!loading && filteredRows.length === 0 && (
-        <p className="mt-8 text-center text-sm font-semibold text-slate-500">אין תנועות להצגה.</p>
+        <p className="mt-8 text-center text-sm font-semibold text-slate-500">{t("cashflow.noEntriesShown")}</p>
       )}
 
       {directOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4" role="dialog" aria-modal="true">
           <div className="w-full max-w-md app-panel p-6 shadow-xl">
-            <h2 className="text-lg font-black text-slate-950">רישום ישירות</h2>
-            <p className="mt-1 text-sm text-slate-600">זכות = כניסה, חובה = יציאה.</p>
+            <h2 className="text-lg font-black text-slate-950">{t("cashflow.directEntry")}</h2>
+            <p className="mt-1 text-sm text-slate-600">{t("cashflow.directEntryHelp")}</p>
             <form className="mt-4 space-y-4" onSubmit={handleDirectSubmit}>
               <label className="block text-sm font-bold text-slate-800">
-                תאריך
+                {t("common.date")}
                 <input
                   type="date"
                   required
@@ -804,27 +816,27 @@ export default function CashflowPage() {
                 />
               </label>
               <label className="block text-sm font-bold text-slate-800">
-                תיאור
+                {t("common.description")}
                 <input
                   type="text"
                   value={directDesc}
                   onChange={(e) => setDirectDesc(e.target.value)}
                   className="mt-1 w-full rounded-xl border border-slate-300 px-3 py-2 text-right"
-                  placeholder="לדוגמה: תשלום שוטף"
+                  placeholder={t("cashflow.directEntryDescPlaceholder")}
                 />
               </label>
               <div className="flex gap-4">
                 <label className="flex cursor-pointer items-center gap-2 text-sm font-bold">
                   <input type="radio" name="side" checked={directSide === "credit"} onChange={() => setDirectSide("credit")} />
-                  זכות (כניסה)
+                  {t("cashflow.creditIn")}
                 </label>
                 <label className="flex cursor-pointer items-center gap-2 text-sm font-bold">
                   <input type="radio" name="side" checked={directSide === "debit"} onChange={() => setDirectSide("debit")} />
-                  חובה (יציאה)
+                  {t("cashflow.debitOut")}
                 </label>
               </div>
               <label className="block text-sm font-bold text-slate-800">
-                סכום
+                {t("common.amount")}
                 <input
                   type="number"
                   min={0}
@@ -841,14 +853,14 @@ export default function CashflowPage() {
                   disabled={savingDirect}
                   className="rounded-xl bg-cyan-600 px-4 py-2 text-sm font-black text-white hover:bg-cyan-700 disabled:opacity-50"
                 >
-                  {savingDirect ? "שומר…" : "שמירה"}
+                  {savingDirect ? t("common.saving") : t("cashflow.actionSave")}
                 </button>
                 <button
                   type="button"
                   onClick={() => setDirectOpen(false)}
                   className="rounded-xl border border-slate-300 px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50"
                 >
-                  ביטול
+                  {t("common.cancel")}
                 </button>
               </div>
             </form>

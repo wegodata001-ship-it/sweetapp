@@ -8,6 +8,8 @@ export type SessionJwtPayload = {
   email: string;
   role: UserRole;
   permissions: string[];
+  /** When true, middleware blocks the app until the user changes password. */
+  mustChangePassword?: boolean;
 };
 
 function getSecret(): Uint8Array {
@@ -21,6 +23,7 @@ export async function signSessionToken(payload: SessionJwtPayload, maxAgeSec = 6
     email: payload.email,
     role: payload.role,
     permissions: payload.permissions,
+    mustChangePassword: Boolean(payload.mustChangePassword),
   })
     .setProtectedHeader({ alg: "HS256" })
     .setSubject(payload.sub)
@@ -39,7 +42,8 @@ export async function verifySessionToken(token: string): Promise<SessionJwtPaylo
       ? payload.permissions.filter((p): p is string => typeof p === "string")
       : [];
     if (!sub || !email || !role) return null;
-    return { sub, email, role, permissions };
+    const mustChangePassword = payload.mustChangePassword === true;
+    return { sub, email, role, permissions, mustChangePassword };
   } catch {
     return null;
   }

@@ -61,6 +61,14 @@ export async function generateFinancialDocumentPdfBytes(documentId: string): Pro
   const payload = parsePayload(doc.metadata as unknown);
   const isExpense = doc.category === "הוצאה" || payload?.kind === "expense";
   const isZ = payload?.kind === "zreport" || doc.documentType === "דוח Z";
+  const paidAmount = isZ
+    ? doc.totalAmount
+    : doc.category === "הכנסה"
+      ? doc.payments.reduce((sum, payment) => sum + Math.max(0, payment.amount), 0)
+      : doc.paidAmount;
+  const remainingAmount = Math.max(0, doc.totalAmount - paidAmount);
+  const paymentStatus =
+    doc.totalAmount <= 0 ? "unpaid" : remainingAmount <= 0 ? "paid" : paidAmount > 0 ? "partial" : "unpaid";
 
   const depositSource = doc as typeof doc & {
     depositAmount?: number | null;
@@ -109,7 +117,7 @@ export async function generateFinancialDocumentPdfBytes(documentId: string): Pro
       { label: "סוג מסמך", value: doc.documentType || "—" },
       { label: "כותרת", value: doc.title || "—" },
       { label: "תאריך מסמך", value: formatDateIL(docDate) },
-      { label: "סטטוס תשלום", value: paymentStatusLabelHe(doc.paymentStatus) },
+      { label: "סטטוס תשלום", value: paymentStatusLabelHe(paymentStatus) },
     ],
     PDF_MARGIN,
     y,
@@ -234,14 +242,14 @@ export async function generateFinancialDocumentPdfBytes(documentId: string): Pro
     ensureSpace(70);
     drawRtlText(page, fonts.he, `סה״כ מסמך: ${formatCurrencyILS(doc.totalAmount)}`, PDF_MARGIN + CONTENT_W - 18, y, 11, C.text);
     y -= 18;
-    drawRtlText(page, fonts.he, `שולם: ${formatCurrencyILS(doc.paidAmount)}`, PDF_MARGIN + CONTENT_W - 18, y, 11, rgb(5 / 255, 150 / 255, 105 / 255));
+    drawRtlText(page, fonts.he, `שולם: ${formatCurrencyILS(paidAmount)}`, PDF_MARGIN + CONTENT_W - 18, y, 11, rgb(5 / 255, 150 / 255, 105 / 255));
     y -= 18;
-    drawRtlText(page, fonts.he, `יתרה פתוחה: ${formatCurrencyILS(doc.remainingAmount)}`, PDF_MARGIN + CONTENT_W - 18, y, 11, C.text);
+    drawRtlText(page, fonts.he, `יתרה פתוחה: ${formatCurrencyILS(remainingAmount)}`, PDF_MARGIN + CONTENT_W - 18, y, 11, C.text);
     y -= 22;
 
-    if (doc.remainingAmount > 1e-6) {
+    if (remainingAmount > 1e-6) {
       ensureSpace(54);
-      y = drawOpenBalanceBox(page, fonts, formatCurrencyILS(doc.remainingAmount), PDF_MARGIN, y, CONTENT_W);
+      y = drawOpenBalanceBox(page, fonts, formatCurrencyILS(remainingAmount), PDF_MARGIN, y, CONTENT_W);
     }
   }
 

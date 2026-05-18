@@ -1,5 +1,5 @@
 import type { Prisma } from "@prisma/client";
-import { prisma } from "@/lib/prisma";
+import { prisma, prismaAny } from "@/lib/prisma";
 import { parseNum } from "@/lib/format-shekel";
 import {
   incomeExpenseDepositAmount,
@@ -372,6 +372,257 @@ export async function replaceCashFlowForDocument(documentId: string): Promise<vo
 
   if (data.length) {
     await prisma.cashFlowEntry.createMany({ data });
+  }
+}
+
+/**
+ * Sync CheckPayment rows for a financial document.
+ *
+ * - For each payment line on the document with `paymentMethod === "CHECK"` and
+ *   embedded check details, ensure a corresponding `CheckPayment` row exists
+ *   (linked by paymentId + documentId).
+ * - Existing rows are updated in-place (no duplicates on edit).
+ * - Removed payment lines: the orphan CheckPayment rows that are still in
+ *   `PENDING` (not yet actioned) are deleted; rows with progressed status
+ *   (DEPOSITED/CLEARED/BOUNCED/CANCELLED) are preserved as audit history.
+ *
+ * Robust to the "no counterparty name" case: if the document has check lines
+ * but no customer link, a fallback customer is created from the counterparty
+ * name (or "ללא לקוח" if empty) so the check row can still be tracked.
+ */
+export async function syncCheckPaymentsForDocument(documentId: string): Promise<void> {
+  const doc = await prisma.financialDocument.findUnique({
+    where: { id: documentId },
+    select: {
+      id: true,
+      customerId: true,
+      category: true,
+      metadata: true,
+      payments: {
+        select: {
+          id: true,
+          amount: true,
+          paymentMethod: true,
+          notes: true,
+          customerId: true,
+          createdAt: true,
+        },
+      },
+    },
+  });
+  if (!doc) return;
+
+  const meta = parsePayload(doc.metadata as unknown);
+  // Only auto-create check rows for income flows. Accept both Hebrew and
+  // English category labels just in case.
+  const isIncome =
+    meta?.kind === "income" &&
+    (doc.category === "הכנסה" || doc.category.toLowerCase() === "income");
+
+  if (!isIncome) {
+    await deleteOrphanCheckRowsForDocument(documentId, []);
+    return;
+  }
+
+  const meta2 = meta as IncomeExpensePayload;
+  const checkLines = (meta2.payments ?? [])
+    .filter((line) => line.instrument === "CHECK" && line.check)
+    .map((line) => ({ line, check: line.check! }));
+
+  if (checkLines.length === 0) {
+    await deleteOrphanCheckRowsForDocument(documentId, []);
+    return;
+  }
+
+  // Resolve a customerId — required by CheckPayment FK. Order of preference:
+  //   1. doc.customerId (already linked)
+  //   2. existing Payment.customerId (Payment was created earlier)
+  //   3. ensureCustomerByName(counterpartyName)
+  //   4. ensureCustomerByName(check.holderName) (first check holder)
+  //   5. fallback "ללא לקוח" customer
+  let customerId: string | null = doc.customerId ?? null;
+  if (!customerId) {
+    customerId = doc.payments.find((p) => p.customerId)?.customerId ?? null;
+  }
+  if (!customerId) {
+    const candidate = meta2.counterpartyName.trim();
+    if (candidate) customerId = await ensureCustomerByName(candidate);
+  }
+  if (!customerId) {
+    const holder = checkLines.find((c) => c.check.holderName.trim())?.check.holderName ?? "";
+    if (holder.trim()) customerId = await ensureCustomerByName(holder.trim());
+  }
+  if (!customerId) {
+    customerId = await ensureCustomerByName("ללא לקוח");
+  }
+
+  // If we now have a customer and the doc didn't have one before, link them.
+  if (customerId && !doc.customerId) {
+    try {
+      await prisma.financialDocument.update({
+        where: { id: documentId },
+        data: { customerId },
+      });
+    } catch (e) {
+      console.error("[syncCheckPaymentsForDocument] failed to link customer", e);
+    }
+  }
+
+  if (!customerId) {
+    console.error(
+      "[syncCheckPaymentsForDocument] no customerId resolvable for doc",
+      documentId,
+    );
+    await deleteOrphanCheckRowsForDocument(documentId, []);
+    return;
+  }
+
+  // Map payment payload id -> Payment DB row id (best-effort: payments were
+  // re-created on edit so we just take them in order, since payments table
+  // doesn't store the payload `id`).
+  const dbPayments = [...doc.payments].sort(
+    (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
+  );
+  const dbCheckPayments = dbPayments.filter((p) => p.paymentMethod === "CHECK");
+  const checkPaymentsInOrder = (meta2.payments ?? []).filter(
+    (p) => p.instrument === "CHECK",
+  );
+  const paymentIdByPayloadId = new Map<string, string>();
+  for (let i = 0; i < checkPaymentsInOrder.length; i++) {
+    const dbRow = dbCheckPayments[i] ?? dbPayments[i];
+    if (dbRow) paymentIdByPayloadId.set(checkPaymentsInOrder[i].id, dbRow.id);
+  }
+
+  // Existing CheckPayment rows linked to this document
+  const existing = (await prismaAny.checkPayment.findMany({
+    where: { documentId },
+    select: {
+      id: true,
+      paymentId: true,
+      checkNumber: true,
+      status: true,
+    },
+  })) as Array<{
+    id: string;
+    paymentId: string | null;
+    checkNumber: string;
+    status: string;
+  }>;
+
+  const keepIds = new Set<string>();
+  const eps = 1e-9;
+
+  for (const { line, check } of checkLines) {
+    if (!check.checkNumber.trim() || !check.bankName.trim() || !check.dueDate.trim()) {
+      // Skip incomplete check details — UI should validate, but be defensive.
+      continue;
+    }
+    const due = new Date(check.dueDate);
+    if (!Number.isFinite(due.getTime())) continue;
+    const amount = Math.max(0, parseNum(line.amount));
+    if (amount <= eps) continue;
+    const paymentId = paymentIdByPayloadId.get(line.id) ?? null;
+
+    // Find existing row by paymentId first (most reliable), else by checkNumber.
+    let match = paymentId
+      ? existing.find((r) => r.paymentId === paymentId && !keepIds.has(r.id))
+      : null;
+    if (!match) {
+      match = existing.find(
+        (r) => r.checkNumber === check.checkNumber.trim() && !keepIds.has(r.id),
+      );
+    }
+
+    if (match) {
+      keepIds.add(match.id);
+      try {
+        await prismaAny.checkPayment.update({
+          where: { id: match.id },
+          data: {
+            customerId,
+            paymentId,
+            documentId,
+            checkNumber: check.checkNumber.trim(),
+            bankName: check.bankName.trim(),
+            branch: check.branch.trim() || null,
+            amount,
+            dueDate: due,
+            notes: buildCheckNotes(check.holderName, line.notes),
+          },
+        });
+      } catch (e) {
+        console.error("[syncCheckPaymentsForDocument] update failed", {
+          documentId,
+          checkId: match.id,
+          error: e instanceof Error ? e.message : String(e),
+        });
+      }
+    } else {
+      try {
+        const created = (await prismaAny.checkPayment.create({
+          data: {
+            customerId,
+            paymentId,
+            documentId,
+            checkNumber: check.checkNumber.trim(),
+            bankName: check.bankName.trim(),
+            branch: check.branch.trim() || null,
+            amount,
+            dueDate: due,
+            notes: buildCheckNotes(check.holderName, line.notes),
+            status: "PENDING",
+          },
+          select: { id: true },
+        })) as { id: string };
+        keepIds.add(created.id);
+      } catch (e) {
+        console.error("[syncCheckPaymentsForDocument] create failed", {
+          documentId,
+          checkNumber: check.checkNumber,
+          error: e instanceof Error ? e.message : String(e),
+        });
+      }
+    }
+  }
+
+  await deleteOrphanCheckRowsForDocument(documentId, Array.from(keepIds));
+}
+
+/**
+ * Ensure a customer exists by name (idempotent). Internal helper for the
+ * check-sync fallback flow; matches the behavior of the same helper in the
+ * documents API.
+ */
+async function ensureCustomerByName(name: string): Promise<string | null> {
+  const n = name.trim();
+  if (!n) return null;
+  const found = await prisma.customer.findFirst({ where: { name: n } });
+  if (found) return found.id;
+  const c = await prisma.customer.create({ data: { name: n } });
+  return c.id;
+}
+
+function buildCheckNotes(holderName: string, notes: string): string | null {
+  const parts: string[] = [];
+  if (holderName.trim()) parts.push(`Holder: ${holderName.trim()}`);
+  if (notes.trim()) parts.push(notes.trim());
+  return parts.length ? parts.join(" | ") : null;
+}
+
+async function deleteOrphanCheckRowsForDocument(
+  documentId: string,
+  keepIds: string[],
+): Promise<void> {
+  try {
+    await prismaAny.checkPayment.deleteMany({
+      where: {
+        documentId,
+        status: "PENDING",
+        ...(keepIds.length > 0 ? { NOT: { id: { in: keepIds } } } : {}),
+      },
+    });
+  } catch {
+    /* ignore */
   }
 }
 

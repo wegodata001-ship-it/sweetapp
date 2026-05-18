@@ -8,7 +8,7 @@ export type LedgerOverviewRow = {
   id: string;
   name: string;
   opening_balance: number;
-  /** לקוח: סכום remainingAmount במסמכים; ספק/עובד: יתרה נטו מכרטסת ידנית */
+  /** לקוח: מחושב בזמן אמת ממסמכי הכנסה פחות תשלומים; ספק/עובד: יתרה נטו מכרטסת ידנית */
   open_balance: number;
   total_debit: number;
   total_credit: number;
@@ -79,6 +79,17 @@ export type FinanceDocumentRow = {
   /** Legacy PDF path; may be empty when document is DB-only. */
   pdf_storage_path: string | null;
   sent_to_cpa: boolean;
+  sent_to_cpa_at: string | null;
+  sent_to_cpa_by: { id: string; full_name: string } | null;
   created_at: string;
   payload: FinanceDocumentPayload | null;
+};
+
+export type AccountantTransferLogRow = {
+  id: string;
+  document_id: string;
+  /** marked_sent | marked_not_sent */
+  action: "marked_sent" | "marked_not_sent";
+  performed_by: { id: string; full_name: string } | null;
+  created_at: string;
 };

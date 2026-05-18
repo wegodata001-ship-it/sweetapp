@@ -2,30 +2,31 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireDb } from "@/lib/api-route";
 
+export const dynamic = "force-dynamic";
+
 export async function GET() {
   const block = await requireDb();
   if (block) return block;
   try {
-    const [incomeDocs, expenseDocs, cashRows, openInvoices, openDepositDocs, openBalancesSum] = await Promise.all([
+    const [incomeDocs, expenseDocs, payments, cashRows, openDepositDocs] = await Promise.all([
       prisma.financialDocument.findMany({
         where: { category: "הכנסה" },
-        select: { totalAmount: true, depositAmount: true },
+        select: { id: true, totalAmount: true, depositAmount: true },
       }),
       prisma.financialDocument.findMany({
         where: { category: "הוצאה" },
         select: { totalAmount: true, depositAmount: true },
       }),
-      prisma.cashFlowEntry.findMany(),
-      prisma.financialDocument.count({
-        where: { category: "הכנסה", remainingAmount: { gt: 0 } },
+      prisma.payment.findMany({
+        where: {
+          document: { is: { category: "הכנסה" } },
+        },
+        select: { documentId: true, amount: true },
       }),
+      prisma.cashFlowEntry.findMany(),
       prisma.financialDocument.findMany({
         where: { depositStatus: "open" },
         select: { depositAmount: true },
-      }),
-      prisma.financialDocument.aggregate({
-        where: { category: "הכנסה", remainingAmount: { gt: 0 } },
-        _sum: { remainingAmount: true },
       }),
     ]);
 
@@ -55,6 +56,20 @@ export async function GET() {
       (sum, row) => sum + Math.max(0, row.depositAmount ?? 0),
       0,
     );
+    const incomeDocRows = incomeDocs as { id: string; totalAmount: number; depositAmount?: number | null }[];
+    const paymentsByDocument = new Map<string, number>();
+    const totalPayments = payments.reduce((sum, payment) => {
+      const amount = Math.max(0, payment.amount);
+      if (payment.documentId) {
+        paymentsByDocument.set(payment.documentId, (paymentsByDocument.get(payment.documentId) ?? 0) + amount);
+      }
+      return sum + amount;
+    }, 0);
+    const totalOrders = incomeDocRows.reduce((sum, row) => sum + Math.max(0, row.totalAmount), 0);
+    const openInvoices = incomeDocRows.filter(
+      (row) => Math.max(0, row.totalAmount - (paymentsByDocument.get(row.id) ?? 0)) > 0,
+    ).length;
+    const openBalancesTotal = Math.max(0, totalOrders - totalPayments);
 
     return NextResponse.json({
       ok: true,
@@ -65,7 +80,7 @@ export async function GET() {
         openInvoices,
         openDeposits,
         overdueInvoices: 0,
-        openBalancesTotal: Math.max(0, openBalancesSum._sum.remainingAmount ?? 0),
+        openBalancesTotal,
       },
     });
   } catch (e) {

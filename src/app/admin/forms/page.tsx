@@ -13,6 +13,7 @@ import {
   validateDynamicFieldValue,
   type FormFieldTypeKey,
 } from "@/lib/forms/field-types";
+import { useI18n } from "@/components/i18n-provider";
 
 type ApiField = {
   id: string;
@@ -57,6 +58,7 @@ function toDynamicDef(f: ApiField): DynamicFieldDefinition {
 }
 
 export default function AdminFormsPage() {
+  const { t } = useI18n();
   const [fields, setFields] = useState<ApiField[]>([]);
   const [newDraft, setNewDraft] = useState<Draft>(emptyDraft);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -70,7 +72,7 @@ export default function AdminFormsPage() {
     try {
       const fRes = await fetch("/api/form-fields", { credentials: "same-origin" });
       if (fRes.status === 503) {
-        setLoadError("אין חיבור למסד — הגדרו DATABASE_URL");
+        setLoadError(t("admin.forms.errors.noDb"));
         return;
       }
       const fj = (await fRes.json()) as { data?: ApiField[] };
@@ -80,9 +82,9 @@ export default function AdminFormsPage() {
         setPreviewErrors({});
       }
     } catch {
-      setLoadError("טעינה נכשלה");
+      setLoadError(t("admin.forms.errors.loadFailed"));
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     void loadFields();
@@ -187,16 +189,16 @@ export default function AdminFormsPage() {
     <div className="space-y-3">
       <div className={`grid grid-cols-1 gap-2 md:grid-cols-12 md:gap-x-3 ${rowClass}`}>
         <div className="md:col-span-3">
-          <label className="mb-1 block text-[11px] font-bold text-slate-500">שם שדה</label>
+          <label className="mb-1 block text-[11px] font-bold text-slate-500">{t("admin.forms.builder.labelFieldName")}</label>
           <input
             value={draft.label}
             onChange={(e) => setDraft((d) => ({ ...d, label: e.target.value }))}
             className={cellInput}
-            placeholder="שם מלא / טלפון / מחיר…"
+            placeholder={t("admin.forms.builder.placeholderFieldName")}
           />
         </div>
         <div className="md:col-span-2">
-          <label className="mb-1 block text-[11px] font-bold text-slate-500">סוג שדה</label>
+          <label className="mb-1 block text-[11px] font-bold text-slate-500">{t("admin.forms.fields.type")}</label>
           <select
             value={draft.fieldType}
             onChange={(e) =>
@@ -222,16 +224,16 @@ export default function AdminFormsPage() {
               onChange={(e) => setDraft((d) => ({ ...d, required: e.target.checked }))}
               className="h-4 w-4 rounded border-slate-300"
             />
-            חובה
+            {t("admin.forms.fields.required")}
           </label>
         </div>
         <div className="md:col-span-4">
-          <label className="mb-1 block text-[11px] font-bold text-slate-500">placeholder</label>
+          <label className="mb-1 block text-[11px] font-bold text-slate-500">{t("admin.forms.builder.labelPlaceholder")}</label>
           <input
             value={draft.placeholder}
             onChange={(e) => setDraft((d) => ({ ...d, placeholder: e.target.value }))}
             className={cellInput}
-            placeholder="לדוגמה: הכנס מספר טלפון"
+            placeholder={t("admin.forms.builder.placeholderExamplePhone")}
           />
         </div>
         <div className="flex flex-wrap items-end gap-2 md:col-span-1 md:justify-end">
@@ -248,20 +250,20 @@ export default function AdminFormsPage() {
               onClick={showCancel}
               className="h-[42px] rounded-lg border border-slate-300 px-3 text-[13px] font-bold text-slate-700 hover:bg-slate-50"
             >
-              ביטול
+              {t("common.cancel")}
             </button>
           ) : null}
         </div>
       </div>
       {draft.fieldType === "SELECT" ? (
         <div>
-          <label className="mb-1 block text-[11px] font-bold text-slate-500">אפשרויות (שורה לכל ערך)</label>
+          <label className="mb-1 block text-[11px] font-bold text-slate-500">{t("admin.forms.builder.labelOptions")}</label>
           <textarea
             value={draft.optionsText}
             onChange={(e) => setDraft((d) => ({ ...d, optionsText: e.target.value }))}
             rows={3}
             className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-right text-[14px] font-semibold text-slate-900 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/25"
-            placeholder={"רגיל\nדחוף\nVIP"}
+            placeholder={t("admin.forms.builder.placeholderOptions")}
           />
         </div>
       ) : null}
@@ -273,17 +275,17 @@ export default function AdminFormsPage() {
       <section className="app-panel p-8">
         <p className="flex items-center gap-2 text-sm font-bold tracking-[0.12em] text-violet-700">
           <ClipboardList className="h-4 w-4" aria-hidden />
-          טפסים דינמיים
+          {t("admin.forms.kicker")}
         </p>
-        <h1 className="mt-3 text-3xl font-black text-slate-950">בונה טפסים</h1>
+        <h1 className="mt-3 text-3xl font-black text-slate-950">{t("admin.forms.pageTitle")}</h1>
         <p className="mt-2 max-w-2xl text-sm text-slate-600">
-          הגדרת שדות עם סוג אמתי (אימייל, טלפון, מספר, תאריך וכו׳) — לשימוש בטפסי ספירה ובמשימות.
+          {t("admin.forms.pageSubtitle")}
         </p>
         <Link
           href="/admin/tasks"
           className="mt-4 inline-flex text-sm font-bold text-cyan-700 underline underline-offset-2 hover:text-cyan-900"
         >
-          חזרה להקצאת משימות
+          {t("admin.forms.linkBackToTasks")}
         </Link>
         {loadError ? (
           <p className="mt-4 text-sm font-bold text-amber-800" role="alert">
@@ -295,24 +297,24 @@ export default function AdminFormsPage() {
       <section className="app-panel p-6 md:p-8">
         <div className="flex flex-wrap items-center gap-2">
           <LayoutGrid className="h-5 w-5 text-indigo-600" aria-hidden />
-          <h2 className="text-xl font-black text-slate-950">שדות טופס</h2>
+          <h2 className="text-xl font-black text-slate-950">{t("admin.forms.builder.heading")}</h2>
         </div>
         <p className="mt-2 text-sm text-slate-600">
-          הוסיפו שורה עם שם שדה, סוג, חובה ו-placeholder — לא רק טקסט חופשי.
+          {t("admin.forms.builder.help")}
         </p>
 
         <div className="mt-6 rounded-2xl border border-indigo-200/80 bg-indigo-50/40 p-4 md:p-5">
-          <p className="mb-3 text-[13px] font-black text-indigo-950">הוספת שדה חדש</p>
-          {renderDraftRow(newDraft, setNewDraft, addField, "הוספה")}
+          <p className="mb-3 text-[13px] font-black text-indigo-950">{t("admin.forms.builder.addNew")}</p>
+          {renderDraftRow(newDraft, setNewDraft, addField, t("admin.forms.builder.addBtn"))}
         </div>
 
         <div className="mt-8 overflow-hidden rounded-2xl border border-slate-200">
           <div className="hidden grid-cols-12 gap-2 border-b border-slate-200 bg-slate-50 px-3 py-2 text-[11px] font-black text-slate-600 md:grid">
-            <div className="col-span-3">שם שדה</div>
-            <div className="col-span-2">סוג</div>
-            <div className="col-span-2">חובה</div>
-            <div className="col-span-4">placeholder</div>
-            <div className="col-span-1 text-end">פעולות</div>
+            <div className="col-span-3">{t("admin.forms.builder.labelFieldName")}</div>
+            <div className="col-span-2">{t("admin.forms.builder.thType")}</div>
+            <div className="col-span-2">{t("admin.forms.fields.required")}</div>
+            <div className="col-span-4">{t("admin.forms.builder.labelPlaceholder")}</div>
+            <div className="col-span-1 text-end">{t("common.actions")}</div>
           </div>
           <div className="divide-y divide-slate-100">
             {sortedFields.map((field) => {
@@ -320,7 +322,7 @@ export default function AdminFormsPage() {
               return (
                 <div key={field.id} className="px-3 py-3">
                   {isEditing ? (
-                    renderDraftRow(editDraft, setEditDraft, saveFieldEdit, "שמירה", () => {
+                    renderDraftRow(editDraft, setEditDraft, saveFieldEdit, t("common.save"), () => {
                       setEditingId(null);
                       setEditDraft(emptyDraft());
                     })
@@ -332,7 +334,7 @@ export default function AdminFormsPage() {
                           ? FORM_FIELD_TYPE_LABELS[field.fieldType as FormFieldTypeKey]
                           : field.fieldType}
                       </div>
-                      <div className="text-[13px] md:col-span-2">{field.required ? "כן" : "לא"}</div>
+                      <div className="text-[13px] md:col-span-2">{field.required ? t("common.yes") : t("common.no")}</div>
                       <div className="truncate text-[13px] text-slate-600 md:col-span-4">{field.placeholder ?? "—"}</div>
                       <div className="flex flex-wrap gap-2 md:col-span-1 md:justify-end">
                         <button
@@ -340,7 +342,7 @@ export default function AdminFormsPage() {
                           onClick={() => startEditField(field)}
                           className="rounded-lg border border-indigo-300 px-3 py-2 text-[12px] font-black text-indigo-700 hover:bg-indigo-50"
                         >
-                          עריכה
+                          {t("common.edit")}
                         </button>
                         <button
                           type="button"
@@ -348,7 +350,7 @@ export default function AdminFormsPage() {
                           className="inline-flex items-center gap-1 rounded-lg border border-rose-300 px-3 py-2 text-[12px] font-black text-rose-700 hover:bg-rose-50"
                         >
                           <Trash2 className="h-3.5 w-3.5" aria-hidden />
-                          מחיקה
+                          {t("common.delete")}
                         </button>
                       </div>
                     </div>
@@ -363,15 +365,15 @@ export default function AdminFormsPage() {
             })}
           </div>
           {sortedFields.length === 0 ? (
-            <p className="px-4 py-8 text-center text-sm font-semibold text-slate-500">עדיין אין שדות — הוסיפו משורת ההוספה למעלה.</p>
+            <p className="px-4 py-8 text-center text-sm font-semibold text-slate-500">{t("admin.forms.builder.emptyNote")}</p>
           ) : null}
         </div>
       </section>
 
       <section className="app-panel p-6 md:p-8">
-        <h2 className="text-lg font-black text-slate-950">תצוגה מקדימה — יצירת טופס</h2>
+        <h2 className="text-lg font-black text-slate-950">{t("admin.forms.preview.heading")}</h2>
         <p className="mt-1 text-sm text-slate-600">
-          הרינדור לפי סוג השדה בפועל; לחיצה על «בדיקת ולידציה» תאמת פורמט אימייל, טלפון וכו׳.
+          {t("admin.forms.preview.help")}
         </p>
         <div className="mt-5 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
           {sortedFields.map((field) => {
@@ -405,14 +407,14 @@ export default function AdminFormsPage() {
           })}
         </div>
         {sortedFields.length === 0 ? (
-          <p className="mt-4 text-sm text-slate-500">הוסיפו שדות כדי לראות תצוגה מקדימה.</p>
+          <p className="mt-4 text-sm text-slate-500">{t("admin.forms.preview.empty")}</p>
         ) : (
           <button
             type="button"
             onClick={runPreviewValidate}
             className="mt-6 rounded-xl bg-slate-900 px-5 py-3 text-sm font-black text-white hover:bg-slate-800"
           >
-            בדיקת ולידציה (דמו)
+            {t("admin.forms.preview.validateBtn")}
           </button>
         )}
       </section>

@@ -1,9 +1,13 @@
 "use client";
 
-import { CheckCircle2, FileSpreadsheet, FileText, Loader2, XCircle } from "lucide-react";
+import { CheckCircle2, FileSpreadsheet, FileText, Loader2, ScanLine, XCircle } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { PdfPreviewModal } from "@/components/pdf-preview-modal";
+import {
+  ExpenseScanDialog,
+  type ScannedDocumentDto,
+} from "@/components/expense-scan-dialog";
 import {
   fetchFinanceDocumentById,
   insertFinanceDocument,
@@ -12,16 +16,18 @@ import {
 import {
   emptyIncomeExpensePayload,
   emptyZReportPayload,
-  incomeExpenseGrandTotal,
   incomeExpenseTotalToPay,
+  newLineId,
   PAYMENT_METHOD_LABELS,
   PAYMENT_INSTRUMENT_OPTIONS,
   newPaymentId,
   paymentLinesTotal,
+  type FinanceLineItemPayload,
   type IncomeExpensePayload,
   type ZReportPayload,
 } from "@/lib/finance/document-payload";
 import { IncomeExpenseFields } from "@/app/finance/register/income-expense-fields";
+import { useI18n } from "@/components/i18n-provider";
 import { formatShekel, parseNum } from "@/lib/format-shekel";
 
 type TabId = "income" | "zreport" | "expenses";
@@ -38,12 +44,6 @@ type OperationModalState = {
   nextTab?: TabId;
 };
 
-const tabs: { id: TabId; label: string }[] = [
-  { id: "income", label: "מסמכי הכנסה ואירועים" },
-  { id: "zreport", label: "דוח Z" },
-  { id: "expenses", label: "רישום הוצאות" },
-];
-
 function todayInputValue(): string {
   return new Date().toISOString().slice(0, 10);
 }
@@ -53,11 +53,21 @@ function freshIncomeExpensePayload(kind: "income" | "expense"): IncomeExpensePay
 }
 
 function FinanceRegisterPageInner() {
+  const { t, bcp47 } = useI18n();
+  void bcp47;
   const router = useRouter();
   const searchParams = useSearchParams();
   const editId = searchParams.get("edit");
   const paymentDocumentId = searchParams.get("paymentDocumentId");
   const paymentCustomerId = searchParams.get("paymentCustomerId");
+  const tabParam = searchParams.get("tab");
+  const scanParam = searchParams.get("scan");
+
+  const tabs: { id: TabId; label: string }[] = [
+    { id: "income", label: t("register.tabs.event") },
+    { id: "zreport", label: t("register.tabs.zreport") },
+    { id: "expenses", label: t("register.tabs.expenses") },
+  ];
 
   const [activeTab, setActiveTab] = useState<TabId>("income");
   const [editingDocId, setEditingDocId] = useState<string | null>(null);
@@ -69,11 +79,89 @@ function FinanceRegisterPageInner() {
   const [savingPayment, setSavingPayment] = useState(false);
   const [paymentCustomer, setPaymentCustomer] = useState<{ id: string; name: string } | null>(null);
 
+  // שדות צ'ק (מוצגים רק כש־paymentMethod === "CHECK")
+  const [checkNumber, setCheckNumber] = useState("");
+  const [checkBankName, setCheckBankName] = useState("");
+  const [checkBranch, setCheckBranch] = useState("");
+  const [checkDueDate, setCheckDueDate] = useState("");
+  const resetCheckFields = () => {
+    setCheckNumber("");
+    setCheckBankName("");
+    setCheckBranch("");
+    setCheckDueDate("");
+  };
+  const buildCheckPayload = () => {
+    if (paymentMethod !== "CHECK") return undefined;
+    return {
+      checkNumber: checkNumber.trim(),
+      bankName: checkBankName.trim(),
+      branch: checkBranch.trim() || null,
+      dueDate: checkDueDate,
+      notes: paymentNotes.trim() || null,
+    };
+  };
+  const validateCheckFields = (): string | null => {
+    if (paymentMethod !== "CHECK") return null;
+    if (!checkNumber.trim()) return t("register.validations.checkNumberRequired");
+    if (!checkBankName.trim()) return t("register.validations.checkBankRequired");
+    if (!checkDueDate) return t("register.validations.checkDueDateRequired");
+    return null;
+  };
+
   const [incomeForm, setIncomeForm] = useState<IncomeExpensePayload>(() => freshIncomeExpensePayload("income"));
   const [expenseForm, setExpenseForm] = useState<IncomeExpensePayload>(() => freshIncomeExpensePayload("expense"));
   const [operationModal, setOperationModal] = useState<OperationModalState | null>(null);
   const [docPdfPreview, setDocPdfPreview] = useState<{ url: string; title: string } | null>(null);
   const [openingDocPdf, setOpeningDocPdf] = useState(false);
+  const [scanDialogOpen, setScanDialogOpen] = useState(scanParam === "1");
+
+  useEffect(() => {
+    if (tabParam === "expenses") {
+      setActiveTab("expenses");
+    }
+  }, [tabParam]);
+
+  const applyScannedDocument = useCallback((doc: ScannedDocumentDto) => {
+    const fallbackId = () => newLineId();
+    const lines: FinanceLineItemPayload[] =
+      doc.items.length > 0
+        ? doc.items.map((it) => ({
+            id: fallbackId(),
+            itemName: it.name || it.rawName || "",
+            quantity: String(it.quantity || 1),
+            price: String(it.unitPrice || 0),
+            supplierProductId: it.supplierProductId ?? null,
+            vatMode: "includes_vat",
+            priceFlag:
+              it.priceFlagKey && it.priceFlagKey !== null
+                ? {
+                    regularPrice: it.regularPrice ?? null,
+                    samples: it.regularPriceSamples ?? 0,
+                    flag: it.priceFlagKey,
+                  }
+                : null,
+          }))
+        : [
+            {
+              id: fallbackId(),
+              itemName: "",
+              quantity: "1",
+              price: doc.total ? String(doc.total) : "",
+              vatMode: "includes_vat",
+            },
+          ];
+    setExpenseForm((prev) => ({
+      ...prev,
+      supplierId: doc.supplierId ?? prev.supplierId ?? null,
+      counterpartyName: doc.supplierName || doc.supplierRawName || prev.counterpartyName,
+      docDate: doc.date || prev.docDate,
+      documentType: doc.documentType || prev.documentType,
+      lines,
+      receiptFileUrl: doc.receiptFileUrl ?? prev.receiptFileUrl ?? null,
+      receiptFileName: doc.receiptFileName ?? prev.receiptFileName ?? null,
+    }));
+    setActiveTab("expenses");
+  }, []);
 
   const [zDate, setZDate] = useState("");
   const [zNumber, setZNumber] = useState("");
@@ -87,6 +175,7 @@ function FinanceRegisterPageInner() {
     return {
       ...p,
       kind: p.kind,
+      supplierId: p.supplierId ?? null,
       paymentPaidAmount: p.paymentPaidAmount ?? "",
       paymentInstrument: p.paymentInstrument ?? PAYMENT_INSTRUMENT_OPTIONS[0],
       paymentNotes: p.paymentNotes ?? "",
@@ -103,6 +192,7 @@ function FinanceRegisterPageInner() {
             ],
       lines: p.lines.map((l) => ({
         ...l,
+        supplierProductId: l.supplierProductId ?? null,
         vatMode: l.vatMode === "before_vat" || l.vatMode === "exempt" ? l.vatMode : "includes_vat",
       })),
     };
@@ -186,6 +276,11 @@ function FinanceRegisterPageInner() {
     }
 
     let cancelled = false;
+    queueMicrotask(() => {
+      setPaymentDoc(null);
+      setPaymentAmount("");
+      setPaymentNotes("");
+    });
     void (async () => {
       const row = await fetchFinanceDocumentById(paymentDocumentId);
       if (cancelled) return;
@@ -210,8 +305,13 @@ function FinanceRegisterPageInner() {
     }
 
     let cancelled = false;
+    queueMicrotask(() => {
+      setPaymentCustomer(null);
+      setPaymentAmount("");
+      setPaymentNotes("");
+    });
     void (async () => {
-      const res = await fetch(`/api/customers/${encodeURIComponent(paymentCustomerId)}`, { credentials: "same-origin" });
+      const res = await fetch(`/api/customers/${encodeURIComponent(paymentCustomerId)}`, { credentials: "same-origin", cache: "no-store" });
       try {
         const j = (await res.json()) as { ok?: boolean; data?: { id: string; name: string } };
         if (cancelled || !j.ok || !j.data) return;
@@ -254,10 +354,18 @@ function FinanceRegisterPageInner() {
     const docTotal = incomeExpenseTotalToPay(payload);
     const totalPaid = paymentLinesTotal(payload);
     if (totalPaid < -1e-6) {
-      return "סכום תשלום לא יכול להיות שלילי.";
+      return t("register.validations.paymentNegative");
     }
     if (totalPaid > docTotal + 1e-6) {
-      return "סכום אמצעי התשלום לא יכול לעלות על סה״כ המסמך.";
+      return t("register.validations.paymentExceedsTotal");
+    }
+    for (const line of payload.payments ?? []) {
+      if (line.instrument !== "CHECK") continue;
+      const c = line.check;
+      if (!c) return t("register.check.missingFields");
+      if (!c.checkNumber.trim() || !c.bankName.trim() || !c.dueDate.trim()) {
+        return t("register.check.missingFields");
+      }
     }
     return null;
   };
@@ -267,8 +375,8 @@ function FinanceRegisterPageInner() {
     setOperationModal({
       type: "error",
       tone,
-      title: "המסמך לא נשמר",
-      description: description || "נסה שוב.",
+      title: t("register.modal.docNotSaved"),
+      description: description || t("register.modal.tryAgain"),
     });
   };
 
@@ -337,13 +445,13 @@ function FinanceRegisterPageInner() {
         credentials: "same-origin",
       });
       const j = (await res.json()) as { ok?: boolean; pdfUrl?: string; error?: string };
-      if (!res.ok || !j.ok) return { ok: false, error: j.error ?? "יצירת PDF נכשלה" };
+      if (!res.ok || !j.ok) return { ok: false, error: j.error ?? t("register.errors.pdfFailed") };
       return {
         ok: true,
         pdfUrl: j.pdfUrl && /^https?:\/\//.test(j.pdfUrl) ? j.pdfUrl : undefined,
       };
     } catch {
-      return { ok: false, error: "יצירת PDF נכשלה" };
+      return { ok: false, error: t("register.errors.pdfFailed") };
     }
   };
 
@@ -356,13 +464,13 @@ function FinanceRegisterPageInner() {
         credentials: "same-origin",
       });
       const j = (await res.json()) as { ok?: boolean; pdfUrl?: string; error?: string };
-      if (!res.ok || !j.ok) return { ok: false, error: j.error ?? "יצירת PDF נכשלה" };
+      if (!res.ok || !j.ok) return { ok: false, error: j.error ?? t("register.errors.pdfFailed") };
       return {
         ok: true,
         pdfUrl: j.pdfUrl && /^https?:\/\//.test(j.pdfUrl) ? j.pdfUrl : undefined,
       };
     } catch {
-      return { ok: false, error: "יצירת PDF נכשלה" };
+      return { ok: false, error: t("register.errors.pdfFailed") };
     }
   };
 
@@ -386,7 +494,7 @@ function FinanceRegisterPageInner() {
       const gj = (await gen.json()) as { publicUrl?: string; pdfUrl?: string; ok?: boolean; error?: string };
       const url = gj.publicUrl ?? gj.pdfUrl;
       if (url) setDocPdfPreview({ url, title: `doc-${documentId.slice(0, 8)}.pdf` });
-      else showErrorModal(gj.error ?? "יצירת PDF נכשלה", "neutral");
+      else showErrorModal(gj.error ?? t("register.errors.pdfFailed"), "neutral");
     } finally {
       setOpeningDocPdf(false);
     }
@@ -412,7 +520,7 @@ function FinanceRegisterPageInner() {
 
       if (editingDocId) {
         if (editingKind !== "income") {
-          showErrorModal("עריכה פעילה למסמך אחר — עברו לטאב המתאים או בטלו עריכה.", "income");
+          showErrorModal(t("register.modal.editConflict"), "income");
           return;
         }
         const res = await updateFinanceDocument(editingDocId, {
@@ -422,18 +530,18 @@ function FinanceRegisterPageInner() {
           payload,
         });
         if (!res.ok) {
-          showErrorModal(res.error ?? "שגיאה בעדכון", "income");
+          showErrorModal(res.error ?? t("register.errors.updateFailed"), "income");
           return;
         }
         const pdf = await triggerPdfForDocument(editingDocId);
         if (!pdf.ok) {
-          showErrorModal(pdf.error ?? "המסמך נשמר, אבל יצירת PDF נכשלה.", "income");
+          showErrorModal(pdf.error ?? t("register.errors.docSavedPdfFailed"), "income");
           return;
         }
         showSuccessModal({
           tone: "income",
-          title: "ההכנסה נשמרה בהצלחה",
-          description: "המסמך נשמר במערכת ונכנס לתזרים המזומנים.",
+          title: t("register.modal.incomeSaved"),
+          description: t("register.modal.docSavedToCashflow"),
           documentId: editingDocId,
           amount: incomeExpenseTotalToPay(payload),
           date: payload.docDate || todayInputValue(),
@@ -451,18 +559,18 @@ function FinanceRegisterPageInner() {
         payload,
       });
       if (!res.ok || !res.id) {
-        showErrorModal(res.error ?? "שגיאה בשמירה", "income");
+        showErrorModal(res.error ?? t("register.errors.saveFailed"), "income");
         return;
       }
       const pdf = await triggerPdfForDocument(res.id);
       if (!pdf.ok) {
-        showErrorModal(pdf.error ?? "המסמך נשמר, אבל יצירת PDF נכשלה.", "income");
+        showErrorModal(pdf.error ?? t("register.errors.docSavedPdfFailed"), "income");
         return;
       }
       showSuccessModal({
         tone: "income",
-        title: "ההכנסה נשמרה בהצלחה",
-        description: "המסמך נשמר במערכת ונכנס לתזרים המזומנים.",
+        title: t("register.modal.incomeSaved"),
+        description: t("register.modal.docSavedToCashflow"),
         documentId: res.id,
         amount: incomeExpenseTotalToPay(payload),
         date: payload.docDate || todayInputValue(),
@@ -471,7 +579,7 @@ function FinanceRegisterPageInner() {
       });
       resetFormForNewDocument("income");
     } catch (e) {
-      showErrorModal(e instanceof Error ? e.message : "שגיאה בשמירה", "income");
+      showErrorModal(e instanceof Error ? e.message : t("register.errors.saveFailed"), "income");
     } finally {
       setPublishing(false);
     }
@@ -486,7 +594,7 @@ function FinanceRegisterPageInner() {
 
       if (editingDocId) {
         if (editingKind !== "zreport") {
-          showErrorModal("עריכה פעילה למסמך אחר — עברו לטאב המתאים או בטלו עריכה.", "neutral");
+          showErrorModal(t("register.modal.editConflict"), "neutral");
           return;
         }
         const res = await updateFinanceDocument(editingDocId, {
@@ -496,18 +604,18 @@ function FinanceRegisterPageInner() {
           payload,
         });
         if (!res.ok) {
-          showErrorModal(res.error ?? "שגיאה בעדכון", "neutral");
+          showErrorModal(res.error ?? t("register.errors.updateFailed"), "neutral");
           return;
         }
         const pdf = await triggerPdfForDocument(editingDocId);
         if (!pdf.ok) {
-          showErrorModal(pdf.error ?? "דוח Z נשמר, אבל יצירת PDF נכשלה.", "neutral");
+          showErrorModal(pdf.error ?? t("register.errors.docSavedPdfFailed"), "neutral");
           return;
         }
         showSuccessModal({
           tone: "neutral",
-          title: "דוח Z נשמר בהצלחה",
-          description: "המסמך נשמר במערכת ונכנס לתזרים המזומנים.",
+          title: t("register.modal.zSaved"),
+          description: t("register.modal.docSavedToCashflow"),
           documentId: editingDocId,
           amount: zGrandTotal,
           date: zDate || todayInputValue(),
@@ -526,18 +634,18 @@ function FinanceRegisterPageInner() {
         payload,
       });
       if (!res.ok || !res.id) {
-        showErrorModal(res.error ?? "שגיאה בשמירה", "neutral");
+        showErrorModal(res.error ?? t("register.errors.saveFailed"), "neutral");
         return;
       }
       const pdf = await triggerPdfForDocument(res.id);
       if (!pdf.ok) {
-        showErrorModal(pdf.error ?? "דוח Z נשמר, אבל יצירת PDF נכשלה.", "neutral");
+        showErrorModal(pdf.error ?? t("register.errors.docSavedPdfFailed"), "neutral");
         return;
       }
       showSuccessModal({
         tone: "neutral",
-        title: "דוח Z נשמר בהצלחה",
-        description: "המסמך נשמר במערכת ונכנס לתזרים המזומנים.",
+        title: t("register.modal.zSaved"),
+        description: t("register.modal.docSavedToCashflow"),
         documentId: res.id,
         amount: zGrandTotal,
         date: zDate || todayInputValue(),
@@ -546,7 +654,7 @@ function FinanceRegisterPageInner() {
       });
       resetZ();
     } catch (e) {
-      showErrorModal(e instanceof Error ? e.message : "שגיאה בשמירה", "neutral");
+      showErrorModal(e instanceof Error ? e.message : t("register.errors.saveFailed"), "neutral");
     } finally {
       setPublishing(false);
     }
@@ -574,7 +682,7 @@ function FinanceRegisterPageInner() {
 
       if (editingDocId) {
         if (editingKind !== "expense") {
-          showErrorModal("עריכה פעילה למסמך אחר — עברו לטאב המתאים או בטלו עריכה.", "expense");
+          showErrorModal(t("register.modal.editConflict"), "expense");
           return;
         }
         const res = await updateFinanceDocument(editingDocId, {
@@ -584,18 +692,18 @@ function FinanceRegisterPageInner() {
           payload,
         });
         if (!res.ok) {
-          showErrorModal(res.error ?? "שגיאה בעדכון", "expense");
+          showErrorModal(res.error ?? t("register.errors.updateFailed"), "expense");
           return;
         }
         const pdf = await triggerPdfForDocument(editingDocId);
         if (!pdf.ok) {
-          showErrorModal(pdf.error ?? "המסמך נשמר, אבל יצירת PDF נכשלה.", "expense");
+          showErrorModal(pdf.error ?? t("register.errors.docSavedPdfFailed"), "expense");
           return;
         }
         showSuccessModal({
           tone: "expense",
-          title: "ההוצאה נשמרה בהצלחה",
-          description: "המסמך נשמר במערכת ונכנס לתזרים המזומנים.",
+          title: t("register.modal.expenseSaved"),
+          description: t("register.modal.docSavedToCashflow"),
           documentId: editingDocId,
           amount: incomeExpenseTotalToPay(payload),
           date: payload.docDate || todayInputValue(),
@@ -613,18 +721,18 @@ function FinanceRegisterPageInner() {
         payload,
       });
       if (!res.ok || !res.id) {
-        showErrorModal(res.error ?? "שגיאה בשמירה", "expense");
+        showErrorModal(res.error ?? t("register.errors.saveFailed"), "expense");
         return;
       }
       const pdf = await triggerPdfForDocument(res.id);
       if (!pdf.ok) {
-        showErrorModal(pdf.error ?? "המסמך נשמר, אבל יצירת PDF נכשלה.", "expense");
+        showErrorModal(pdf.error ?? t("register.errors.docSavedPdfFailed"), "expense");
         return;
       }
       showSuccessModal({
         tone: "expense",
-        title: "ההוצאה נשמרה בהצלחה",
-        description: "המסמך נשמר במערכת ונכנס לתזרים המזומנים.",
+        title: t("register.modal.expenseSaved"),
+        description: t("register.modal.docSavedToCashflow"),
         documentId: res.id,
         amount: incomeExpenseTotalToPay(payload),
         date: payload.docDate || todayInputValue(),
@@ -633,7 +741,7 @@ function FinanceRegisterPageInner() {
       });
       resetFormForNewDocument("expenses");
     } catch (e) {
-      showErrorModal(e instanceof Error ? e.message : "שגיאה בשמירה", "expense");
+      showErrorModal(e instanceof Error ? e.message : t("register.errors.saveFailed"), "expense");
     } finally {
       setPublishing(false);
     }
@@ -641,13 +749,18 @@ function FinanceRegisterPageInner() {
 
   const submitCustomerOnlyPayment = async () => {
     if (!paymentCustomer) {
-      showErrorModal("לא ניתן לקלוט תשלום.", "neutral");
+      showErrorModal(t("register.validations.cannotAcceptPayment"), "neutral");
       return;
     }
 
     const amount = parseNum(paymentAmount);
     if (amount <= 0) {
-      showErrorModal("נא להזין סכום תשלום חיובי.", "neutral");
+      showErrorModal(t("register.validations.paymentAmountPositive"), "neutral");
+      return;
+    }
+    const checkErr = validateCheckFields();
+    if (checkErr) {
+      showErrorModal(checkErr, "neutral");
       return;
     }
 
@@ -662,26 +775,28 @@ function FinanceRegisterPageInner() {
           amount,
           paymentMethod,
           notes: paymentNotes.trim() || null,
+          check: buildCheckPayload(),
         }),
         credentials: "same-origin",
       });
       const json = (await res.json()) as { ok?: boolean; error?: string; data?: { id: string } };
       if (!json.ok || !json.data?.id) {
-        showErrorModal(json.error ?? "שגיאה בקליטת תשלום", "neutral");
+        showErrorModal(json.error ?? t("register.errors.paymentFailed"), "neutral");
         return;
       }
       const pdf = await triggerPdfForPayment(json.data.id);
       if (!pdf.ok) {
-        showErrorModal(pdf.error ?? "התשלום נקלט, אבל יצירת PDF נכשלה.", "neutral");
+        showErrorModal(pdf.error ?? t("register.errors.paymentSavedPdfFailed"), "neutral");
         return;
       }
       setPaymentAmount("");
       setPaymentNotes("");
       setPaymentMethod(PAYMENT_INSTRUMENT_OPTIONS[0]);
+      resetCheckFields();
       showSuccessModal({
         tone: "neutral",
-        title: "התשלום נשמר בהצלחה",
-        description: "התשלום נקלט ועודכן בתזרים ובכרטסת.",
+        title: t("register.modal.paymentSaved"),
+        description: t("register.modal.paymentSavedDescription"),
         documentId: json.data.id,
         amount,
         date: todayInputValue(),
@@ -689,7 +804,7 @@ function FinanceRegisterPageInner() {
         nextTab: "income",
       });
     } catch (e) {
-      showErrorModal(e instanceof Error ? e.message : "שגיאה בקליטת תשלום", "neutral");
+      showErrorModal(e instanceof Error ? e.message : t("register.errors.paymentFailed"), "neutral");
     } finally {
       setSavingPayment(false);
     }
@@ -697,18 +812,23 @@ function FinanceRegisterPageInner() {
 
   const submitDocumentPayment = async () => {
     if (!paymentDoc?.customer_id) {
-      showErrorModal("לא ניתן לקלוט תשלום ללא לקוח מקושר למסמך.", "neutral");
+      showErrorModal(t("register.validations.paymentNeedsCustomer"), "neutral");
       return;
     }
 
     const amount = parseNum(paymentAmount);
     if (amount <= 0) {
-      showErrorModal("נא להזין סכום תשלום חיובי.", "neutral");
+      showErrorModal(t("register.validations.paymentAmountPositive"), "neutral");
       return;
     }
 
     if (amount > paymentDoc.remaining_amount + 1e-6) {
-      showErrorModal("סכום התשלום לא יכול לעלות על היתרה הפתוחה.", "neutral");
+      showErrorModal(t("register.validations.paymentExceedsRemaining"), "neutral");
+      return;
+    }
+    const checkErr = validateCheckFields();
+    if (checkErr) {
+      showErrorModal(checkErr, "neutral");
       return;
     }
 
@@ -724,17 +844,18 @@ function FinanceRegisterPageInner() {
           amount,
           paymentMethod,
           notes: paymentNotes.trim() || null,
+          check: buildCheckPayload(),
         }),
         credentials: "same-origin",
       });
       const json = (await res.json()) as { ok?: boolean; error?: string; data?: { id: string } };
       if (!json.ok || !json.data?.id) {
-        showErrorModal(json.error ?? "שגיאה בקליטת תשלום", "neutral");
+        showErrorModal(json.error ?? t("register.errors.paymentFailed"), "neutral");
         return;
       }
       const pdf = await triggerPdfForPayment(json.data.id);
       if (!pdf.ok) {
-        showErrorModal(pdf.error ?? "התשלום נקלט, אבל יצירת PDF נכשלה.", "neutral");
+        showErrorModal(pdf.error ?? t("register.errors.paymentSavedPdfFailed"), "neutral");
         return;
       }
 
@@ -743,10 +864,11 @@ function FinanceRegisterPageInner() {
       setPaymentAmount(updated?.remaining_amount && updated.remaining_amount > 0 ? String(updated.remaining_amount) : "");
       setPaymentNotes("");
       setPaymentMethod(PAYMENT_INSTRUMENT_OPTIONS[0]);
+      resetCheckFields();
       showSuccessModal({
         tone: "neutral",
-        title: "התשלום נשמר בהצלחה",
-        description: "התשלום נקלט ועודכן במסמך, בתזרים ובכרטסת.",
+        title: t("register.modal.paymentSaved"),
+        description: t("register.modal.paymentSavedDocDescription"),
         documentId: json.data.id,
         amount,
         date: todayInputValue(),
@@ -754,7 +876,7 @@ function FinanceRegisterPageInner() {
         nextTab: "income",
       });
     } catch (e) {
-      showErrorModal(e instanceof Error ? e.message : "שגיאה בקליטת תשלום", "neutral");
+      showErrorModal(e instanceof Error ? e.message : t("register.errors.paymentFailed"), "neutral");
     } finally {
       setSavingPayment(false);
     }
@@ -799,22 +921,22 @@ function FinanceRegisterPageInner() {
           <div className="min-w-0">
             <p className="flex items-center gap-2 text-[13px] font-bold tracking-[0.1em] text-cyan-700 opacity-90">
               <FileSpreadsheet className="h-3.5 w-3.5 shrink-0" aria-hidden />
-              רישום כספי
+              {t("register.title")}
             </p>
             <h1 className="mt-2 text-[38px] font-black leading-tight tracking-tight text-slate-950">
-              ניהול מסמכים ורישומים
+              {t("register.heading")}
             </h1>
             <p className="mt-1.5 max-w-2xl text-[15px] leading-snug text-slate-600 opacity-75">
-              רישום מסמכים נשמר כרשומות במערכת; פירוט תשלומים בדוח Z ושורות פריט עם מע״מ.
+              {t("register.intro")}
             </p>
           </div>
         </div>
 
         {editingDocId && (
           <div className="mt-3 rounded-[16px] border border-indigo-200 bg-indigo-50 px-3 py-2.5 text-[13px] font-bold text-indigo-900" role="status">
-            עריכת מסמך שמור — פרסום יעדכן את הרשומה במסד הנתונים.
+            {t("register.editBanner")}
             <button type="button" onClick={clearEditMode} className="me-4 mt-2 block text-xs underline sm:mt-0 sm:inline sm:me-0">
-              ביטול עריכה
+              {t("register.cancelEdit")}
             </button>
           </div>
         )}
@@ -836,12 +958,12 @@ function FinanceRegisterPageInner() {
           <div className="mt-3 rounded-[16px] border border-cyan-200 bg-cyan-50 px-3 py-3 text-[13px] font-bold text-cyan-950">
             <div className="flex flex-col gap-2 lg:flex-row lg:items-end lg:justify-between">
               <div>
-                <p className="text-[13px] font-black text-cyan-800">קליטת תשלום ללקוח</p>
+                <p className="text-[13px] font-black text-cyan-800">{t("register.payment.customerPaymentTitle")}</p>
                 <p className="mt-0.5 text-[15px] text-slate-900">{paymentCustomer.name}</p>
               </div>
               <div className="grid gap-2 sm:grid-cols-3 lg:min-w-[520px]">
                 <label className={labelClass}>
-                  אמצעי תשלום
+                  {t("register.fields.paymentMethod")}
                   <select
                     disabled={savingPayment}
                     value={paymentMethod}
@@ -856,7 +978,7 @@ function FinanceRegisterPageInner() {
                   </select>
                 </label>
                 <label className={labelClass}>
-                  סכום
+                  {t("common.amount")}
                   <input
                     disabled={savingPayment}
                     type="number"
@@ -868,7 +990,7 @@ function FinanceRegisterPageInner() {
                   />
                 </label>
                 <label className={labelClass}>
-                  הערה
+                  {t("register.payment.note")}
                   <input
                     disabled={savingPayment}
                     type="text"
@@ -878,6 +1000,53 @@ function FinanceRegisterPageInner() {
                   />
                 </label>
               </div>
+              {paymentMethod === "CHECK" && (
+                <div className="mt-2 grid w-full gap-2 rounded-[14px] border border-cyan-300 bg-white p-3 sm:grid-cols-2 lg:grid-cols-4">
+                  <label className={labelClass}>
+                    {t("register.fields.checkNumber")}
+                    <input
+                      disabled={savingPayment}
+                      type="text"
+                      value={checkNumber}
+                      onChange={(event) => setCheckNumber(event.target.value)}
+                      className={`${paymentFieldClass} border-cyan-300`}
+                      placeholder="000000"
+                    />
+                  </label>
+                  <label className={labelClass}>
+                    {t("register.payment.bank")}
+                    <input
+                      disabled={savingPayment}
+                      type="text"
+                      value={checkBankName}
+                      onChange={(event) => setCheckBankName(event.target.value)}
+                      className={`${paymentFieldClass} border-cyan-300`}
+                      placeholder={t("register.payment.bankPlaceholder")}
+                    />
+                  </label>
+                  <label className={labelClass}>
+                    {t("register.fields.checkBranch")}
+                    <input
+                      disabled={savingPayment}
+                      type="text"
+                      value={checkBranch}
+                      onChange={(event) => setCheckBranch(event.target.value)}
+                      className={`${paymentFieldClass} border-cyan-300`}
+                      placeholder="000"
+                    />
+                  </label>
+                  <label className={labelClass}>
+                    {t("register.fields.dueDate")}
+                    <input
+                      disabled={savingPayment}
+                      type="date"
+                      value={checkDueDate}
+                      onChange={(event) => setCheckDueDate(event.target.value)}
+                      className={`${paymentFieldClass} border-cyan-300`}
+                    />
+                  </label>
+                </div>
+              )}
               <button
                 type="button"
                 disabled={savingPayment}
@@ -887,10 +1056,10 @@ function FinanceRegisterPageInner() {
                 {savingPayment ? (
                   <span className="inline-flex items-center gap-2">
                     <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-                    שומר…
+                    {t("common.saving")}
                   </span>
                 ) : (
-                  "קליטת תשלום"
+                  t("register.payment.submit")
                 )}
               </button>
             </div>
@@ -901,15 +1070,15 @@ function FinanceRegisterPageInner() {
           <div className="mt-3 rounded-[16px] border border-amber-200 bg-amber-50 px-3 py-3 text-[13px] font-bold text-amber-900">
             <div className="flex flex-col gap-2 lg:flex-row lg:items-end lg:justify-between">
               <div className="min-w-0">
-                <p className="text-[13px] font-black text-amber-800">קליטת תשלום למסמך פתוח</p>
+                <p className="text-[13px] font-black text-amber-800">{t("register.payment.docPaymentTitle")}</p>
                 <p className="mt-0.5 text-[15px] text-slate-900">
-                  {paymentDoc.title} · {paymentDoc.customer_name ?? "לקוח"} · יתרה פתוחה{" "}
+                  {paymentDoc.title} · {paymentDoc.customer_name ?? t("register.fields.customer")} · {t("register.payment.remainingBalance")}{" "}
                   <span className="font-black">{formatShekel(paymentDoc.remaining_amount)}</span>
                 </p>
               </div>
               <div className="grid gap-2 sm:grid-cols-3 lg:min-w-[520px]">
                 <label className={labelClass}>
-                  אמצעי תשלום
+                  {t("register.fields.paymentMethod")}
                   <select
                     disabled={savingPayment}
                     value={paymentMethod}
@@ -924,7 +1093,7 @@ function FinanceRegisterPageInner() {
                   </select>
                 </label>
                 <label className={labelClass}>
-                  סכום
+                  {t("common.amount")}
                   <input
                     disabled={savingPayment}
                     type="number"
@@ -936,7 +1105,7 @@ function FinanceRegisterPageInner() {
                   />
                 </label>
                 <label className={labelClass}>
-                  הערה
+                  {t("register.payment.note")}
                   <input
                     disabled={savingPayment}
                     type="text"
@@ -946,6 +1115,53 @@ function FinanceRegisterPageInner() {
                   />
                 </label>
               </div>
+              {paymentMethod === "CHECK" && (
+                <div className="mt-2 grid w-full gap-2 rounded-[14px] border border-amber-300 bg-white p-3 sm:grid-cols-2 lg:grid-cols-4">
+                  <label className={labelClass}>
+                    {t("register.fields.checkNumber")}
+                    <input
+                      disabled={savingPayment}
+                      type="text"
+                      value={checkNumber}
+                      onChange={(event) => setCheckNumber(event.target.value)}
+                      className={`${paymentFieldClass} border-amber-300`}
+                      placeholder="000000"
+                    />
+                  </label>
+                  <label className={labelClass}>
+                    {t("register.payment.bank")}
+                    <input
+                      disabled={savingPayment}
+                      type="text"
+                      value={checkBankName}
+                      onChange={(event) => setCheckBankName(event.target.value)}
+                      className={`${paymentFieldClass} border-amber-300`}
+                      placeholder={t("register.payment.bankPlaceholder")}
+                    />
+                  </label>
+                  <label className={labelClass}>
+                    {t("register.fields.checkBranch")}
+                    <input
+                      disabled={savingPayment}
+                      type="text"
+                      value={checkBranch}
+                      onChange={(event) => setCheckBranch(event.target.value)}
+                      className={`${paymentFieldClass} border-amber-300`}
+                      placeholder="000"
+                    />
+                  </label>
+                  <label className={labelClass}>
+                    {t("register.fields.dueDate")}
+                    <input
+                      disabled={savingPayment}
+                      type="date"
+                      value={checkDueDate}
+                      onChange={(event) => setCheckDueDate(event.target.value)}
+                      className={`${paymentFieldClass} border-amber-300`}
+                    />
+                  </label>
+                </div>
+              )}
               <button
                 type="button"
                 disabled={savingPayment || paymentDoc.remaining_amount <= 0}
@@ -953,14 +1169,14 @@ function FinanceRegisterPageInner() {
                 className={`${btnPrimary} shrink-0 bg-cyan-600 text-white hover:bg-cyan-700`}
               >
                 {paymentDoc.remaining_amount <= 0 ? (
-                  "שולם מלא"
+                  t("register.payment.fullyPaid")
                 ) : savingPayment ? (
                   <span className="inline-flex items-center gap-2">
                     <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-                    שומר…
+                    {t("common.saving")}
                   </span>
                 ) : (
-                  "קליטת תשלום"
+                  t("register.payment.submit")
                 )}
               </button>
             </div>
@@ -991,8 +1207,8 @@ function FinanceRegisterPageInner() {
       {activeTab === "income" && (
         <>
           <IncomeExpenseFields
-            heading="מסמכי הכנסה ואירועים"
-            intro="רישום חשבוניות ומסמכים מסחריים; בלקוח אירועים יוצגו שדות פיקדון ומגשים."
+            heading={t("register.tabs.event")}
+            intro={t("register.income.intro")}
             value={incomeForm}
             onChange={(next) => setIncomeForm(next.kind === "income" ? next : { ...next, kind: "income" })}
             disabled={publishing}
@@ -1010,7 +1226,7 @@ function FinanceRegisterPageInner() {
                 className={`${btnPrimary} gap-2 border border-indigo-200 bg-indigo-50 text-indigo-950 hover:bg-indigo-100`}
               >
                 {openingDocPdf ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : null}
-                הפק PDF
+                {t("register.actions.generatePdf")}
               </button>
             ) : null}
             <button
@@ -1019,7 +1235,7 @@ function FinanceRegisterPageInner() {
               disabled={publishing}
               className={`${btnPrimary} border border-slate-300 bg-white text-slate-800 hover:bg-slate-50`}
             >
-              איפוס טופס
+              {t("register.actions.resetForm")}
             </button>
             <button
               type="button"
@@ -1030,12 +1246,12 @@ function FinanceRegisterPageInner() {
               {publishing ? (
                 <span className="inline-flex items-center gap-2">
                   <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-                  שומר…
+                  {t("common.saving")}
                 </span>
               ) : editingDocId ? (
-                "עדכון מסמך"
+                t("register.actions.updateDoc")
               ) : (
-                "פרסום מסמך"
+                t("register.actions.publishDoc")
               )}
             </button>
           </div>
@@ -1046,30 +1262,30 @@ function FinanceRegisterPageInner() {
         <section className="app-panel mb-[14px] p-[18px]">
           <div className="flex flex-wrap items-center gap-2">
             <FileText className="h-4 w-4 text-cyan-600" aria-hidden />
-            <h2 className="text-[22px] font-extrabold text-slate-950">דוח Z קופה</h2>
+            <h2 className="text-[22px] font-extrabold text-slate-950">{t("register.zreport.title")}</h2>
           </div>
-          <p className="mt-1 text-[13px] text-slate-600 opacity-70">פירוט סיכומי תשלום יומי; הסכום הכולל מחושב אוטומטית.</p>
+          <p className="mt-1 text-[13px] text-slate-600 opacity-70">{t("register.zreport.intro")}</p>
 
           <div className="mt-3 grid gap-3 md:grid-cols-2">
             <label className={labelClass}>
-              תאריך
+              {t("common.date")}
               <input type="date" value={zDate} onChange={(e) => setZDate(e.target.value)} className={inputClass} />
             </label>
             <label className={labelClass}>
-              מספר דוח Z
+              {t("register.zreport.numberLabel")}
               <input
                 type="text"
                 value={zNumber}
                 onChange={(e) => setZNumber(e.target.value)}
                 className={inputClass}
-                placeholder="לדוגמה: Z‏-‏1042"
+                placeholder={t("register.zreport.numberPlaceholder")}
               />
             </label>
           </div>
 
           <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             <label className={labelClass}>
-              מזומן חייב
+              {t("register.zreport.cashTaxable")}
               <input
                 type="number"
                 min={0}
@@ -1080,7 +1296,7 @@ function FinanceRegisterPageInner() {
               />
             </label>
             <label className={labelClass}>
-              מזומן פטור
+              {t("register.zreport.cashExempt")}
               <input
                 type="number"
                 min={0}
@@ -1091,7 +1307,7 @@ function FinanceRegisterPageInner() {
               />
             </label>
             <label className={labelClass}>
-              אשראי חייב
+              {t("register.zreport.creditTaxable")}
               <input
                 type="number"
                 min={0}
@@ -1102,7 +1318,7 @@ function FinanceRegisterPageInner() {
               />
             </label>
             <label className={labelClass}>
-              אשראי פטור
+              {t("register.zreport.creditExempt")}
               <input
                 type="number"
                 min={0}
@@ -1113,7 +1329,7 @@ function FinanceRegisterPageInner() {
               />
             </label>
             <label className={`sm:col-span-2 lg:col-span-1 ${labelClass}`}>
-              העברות בנק
+              {t("register.zreport.transfers")}
               <input
                 type="number"
                 min={0}
@@ -1127,7 +1343,7 @@ function FinanceRegisterPageInner() {
 
           <div className="mt-3 rounded-[16px] border border-emerald-200 bg-emerald-50/70 px-4 py-3">
             <div className="flex flex-wrap items-center justify-between gap-3">
-              <span className="text-[13px] font-black text-emerald-900">סה״כ דוח Z</span>
+              <span className="text-[13px] font-black text-emerald-900">{t("register.zreport.grandTotal")}</span>
               <span className="text-[28px] font-black tabular-nums text-slate-950">{formatShekel(zGrandTotal)}</span>
             </div>
           </div>
@@ -1143,7 +1359,7 @@ function FinanceRegisterPageInner() {
                 className={`${btnPrimary} gap-2 border border-blue-200 bg-blue-50 text-blue-950 hover:bg-blue-100`}
               >
                 {openingDocPdf ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : null}
-                הפק דוח PDF
+                {t("register.actions.generateReportPdf")}
               </button>
             ) : null}
             <button
@@ -1152,7 +1368,7 @@ function FinanceRegisterPageInner() {
               disabled={publishing}
               className={`${btnPrimary} border border-slate-300 bg-white text-slate-800 hover:bg-slate-50`}
             >
-              איפוס טופס
+              {t("register.actions.resetForm")}
             </button>
             <button
               type="button"
@@ -1163,12 +1379,12 @@ function FinanceRegisterPageInner() {
               {publishing ? (
                 <span className="inline-flex items-center gap-2">
                   <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-                  שומר…
+                  {t("common.saving")}
                 </span>
               ) : editingDocId ? (
-                "עדכון דוח Z"
+                t("register.actions.updateZ")
               ) : (
-                "שמירת דוח Z"
+                t("register.actions.saveZ")
               )}
             </button>
           </div>
@@ -1177,11 +1393,55 @@ function FinanceRegisterPageInner() {
 
       {activeTab === "expenses" && (
         <>
+          <div className="flex flex-wrap items-center justify-end gap-2 px-0">
+            <button
+              type="button"
+              onClick={() => setScanDialogOpen(true)}
+              disabled={publishing}
+              className="inline-flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 py-2 text-sm font-black text-rose-800 shadow-sm transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <ScanLine className="h-4 w-4" aria-hidden />
+              {t("scan.invoiceButton")}
+            </button>
+          </div>
+          {expenseForm.receiptFileUrl ? (
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
+              <span className="inline-flex items-center gap-2">
+                <FileText className="h-4 w-4" aria-hidden />
+                <span className="font-bold">
+                  {expenseForm.receiptFileName || t("scan.attachedReceipt")}
+                </span>
+              </span>
+              <div className="flex flex-wrap items-center gap-2">
+                <a
+                  href={expenseForm.receiptFileUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="rounded-lg bg-white px-2 py-1 text-xs font-bold text-emerald-700 hover:bg-emerald-100"
+                >
+                  {t("scan.viewReceipt")}
+                </a>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setExpenseForm((prev) => ({
+                      ...prev,
+                      receiptFileUrl: null,
+                      receiptFileName: null,
+                    }))
+                  }
+                  className="rounded-lg bg-white px-2 py-1 text-xs font-bold text-rose-700 hover:bg-rose-100"
+                >
+                  {t("scan.removeReceipt")}
+                </button>
+              </div>
+            </div>
+          ) : null}
           <IncomeExpenseFields
-            heading="רישום הוצאות"
+            heading={t("register.tabs.expenses")}
             headingClass="text-slate-950"
             iconClass="text-rose-600"
-            intro="מבנה זהה לטופס ההכנסה — רישום הוצאות עם אותם שדות ומע״מ לפי שורה."
+            intro={t("register.expense.intro")}
             value={expenseForm}
             onChange={(next) => setExpenseForm(next.kind === "expense" ? next : { ...next, kind: "expense" })}
             disabled={publishing}
@@ -1199,7 +1459,7 @@ function FinanceRegisterPageInner() {
                 className={`${btnPrimary} gap-2 border border-indigo-200 bg-indigo-50 text-indigo-950 hover:bg-indigo-100`}
               >
                 {openingDocPdf ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : null}
-                הפק PDF
+                {t("register.actions.generatePdf")}
               </button>
             ) : null}
             <button
@@ -1208,7 +1468,7 @@ function FinanceRegisterPageInner() {
               disabled={publishing}
               className={`${btnPrimary} border border-slate-300 bg-white text-slate-800 hover:bg-slate-50`}
             >
-              איפוס טופס
+              {t("register.actions.resetForm")}
             </button>
             <button
               type="button"
@@ -1219,12 +1479,12 @@ function FinanceRegisterPageInner() {
               {publishing ? (
                 <span className="inline-flex items-center gap-2">
                   <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-                  שומר…
+                  {t("common.saving")}
                 </span>
               ) : editingDocId ? (
-                "עדכון מסמך"
+                t("register.actions.updateDoc")
               ) : (
-                "פרסום מסמך"
+                t("register.actions.publishDoc")
               )}
             </button>
           </div>
@@ -1249,6 +1509,12 @@ function FinanceRegisterPageInner() {
         title={docPdfPreview?.title ?? ""}
         onClose={() => setDocPdfPreview(null)}
       />
+
+      <ExpenseScanDialog
+        open={scanDialogOpen}
+        onClose={() => setScanDialogOpen(false)}
+        onApply={applyScannedDocument}
+      />
     </div>
   );
 }
@@ -1262,6 +1528,7 @@ function OperationResultModal({
   onClose: () => void;
   onNewDocument: () => void;
 }) {
+  const { t } = useI18n();
   const isSuccess = state.type === "success";
   const tone =
     state.tone === "expense"
@@ -1313,19 +1580,19 @@ function OperationResultModal({
           <dl className="mt-5 grid grid-cols-1 gap-2 rounded-2xl border border-slate-100 bg-slate-50 p-4 text-right text-sm">
             {state.documentId ? (
               <div className="flex items-center justify-between gap-3">
-                <dt className="font-bold text-slate-500">מספר מסמך</dt>
+                <dt className="font-bold text-slate-500">{t("register.modal.docNumberLabel")}</dt>
                 <dd className="font-black text-slate-900">{state.documentId.slice(-8)}</dd>
               </div>
             ) : null}
             {state.amount !== undefined ? (
               <div className="flex items-center justify-between gap-3">
-                <dt className="font-bold text-slate-500">סכום</dt>
+                <dt className="font-bold text-slate-500">{t("common.amount")}</dt>
                 <dd className="font-black text-slate-900">{formatShekel(state.amount)}</dd>
               </div>
             ) : null}
             {state.date ? (
               <div className="flex items-center justify-between gap-3">
-                <dt className="font-bold text-slate-500">תאריך</dt>
+                <dt className="font-bold text-slate-500">{t("common.date")}</dt>
                 <dd className="font-black text-slate-900">{state.date}</dd>
               </div>
             ) : null}
@@ -1338,7 +1605,7 @@ function OperationResultModal({
             onClick={isSuccess ? onNewDocument : onClose}
             className={`rounded-xl px-5 py-3 text-sm font-black shadow-sm transition ${tone.primary}`}
           >
-            {isSuccess ? "הזמנה חדשה" : "נסה שוב"}
+            {isSuccess ? t("register.modal.newOrder") : t("register.modal.tryAgainShort")}
           </button>
           {isSuccess ? (
             <a
@@ -1347,7 +1614,7 @@ function OperationResultModal({
               rel={state.viewUrl ? "noopener noreferrer" : undefined}
               className="rounded-xl border border-slate-200 bg-white px-5 py-3 text-sm font-black text-slate-800 shadow-sm transition hover:bg-slate-50"
             >
-              צפייה במסמך
+              {t("register.modal.viewDoc")}
             </a>
           ) : (
             <button
@@ -1355,7 +1622,7 @@ function OperationResultModal({
               onClick={onClose}
               className="rounded-xl border border-slate-200 bg-white px-5 py-3 text-sm font-black text-slate-800 shadow-sm transition hover:bg-slate-50"
             >
-              סגירה
+              {t("common.close")}
             </button>
           )}
         </div>
@@ -1364,9 +1631,18 @@ function OperationResultModal({
   );
 }
 
+function RegisterLoadingFallback() {
+  const { t } = useI18n();
+  return (
+    <div className="mx-auto max-w-7xl p-12 text-center text-sm font-semibold text-slate-500">
+      {t("common.loading")}
+    </div>
+  );
+}
+
 export default function FinanceRegisterPage() {
   return (
-    <Suspense fallback={<div className="mx-auto max-w-7xl p-12 text-center text-sm font-semibold text-slate-500">טוען…</div>}>
+    <Suspense fallback={<RegisterLoadingFallback />}>
       <FinanceRegisterPageInner />
     </Suspense>
   );

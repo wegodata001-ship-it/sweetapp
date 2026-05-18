@@ -4,58 +4,59 @@ import type { ReactNode } from "react";
 import { usePathname } from "next/navigation";
 import { Sidebar } from "@/components/sidebar";
 import { SessionBar } from "@/components/session-bar";
+import { MobileAppHeader } from "@/components/mobile-app-header";
+import { MobileBottomNav } from "@/components/mobile-bottom-nav";
+import { MobileNavDrawer } from "@/components/mobile-nav-drawer";
+import { MobileNavProvider } from "@/components/mobile-nav-context";
 
 type AppShellProps = {
   children: ReactNode;
 };
 
-/** ריפוד תוכן ERP קומפקטי — 18px דסקטופ, 10px מובייל */
 const MAIN_PAD =
-  "flex-1 bg-white px-[18px] py-[18px] max-md:px-2.5 max-md:py-2.5";
+  "flex-1 bg-white px-[18px] py-[18px] max-lg:px-3 max-lg:py-3 max-lg:pb-[calc(5.5rem+env(safe-area-inset-bottom))] lg:pb-[18px]";
 
 export function AppShell({ children }: AppShellProps) {
   const pathname = usePathname();
   const workerPortal = pathname === "/worker" || pathname.startsWith("/worker/");
   const loginPage = pathname === "/login";
+  const changePasswordPage = pathname === "/change-password" || pathname.startsWith("/change-password/");
+  // The employee clock-in gate is the "front door" for employees with no
+  // active session — show it without the rest of the chrome (no sidebar,
+  // no mobile bottom nav) so they can't navigate around it.
+  const employeeClockGate =
+    pathname === "/employee/clock" || pathname.startsWith("/employee/clock/");
 
-  if (loginPage) {
+  if (loginPage || employeeClockGate || changePasswordPage) {
     return <>{children}</>;
   }
 
   if (workerPortal) {
     return (
-      <div className="min-h-screen bg-white">
-        <SessionBar />
-        <main className="px-[18px] py-[18px] max-md:px-2.5 max-md:py-2.5">{children}</main>
-      </div>
+      <MobileNavProvider>
+        <div className="min-h-screen bg-white">
+          <MobileAppHeader />
+          <MobileNavDrawer />
+          <SessionBar className="hidden lg:flex" />
+          <main className={MAIN_PAD}>{children}</main>
+          <MobileBottomNav />
+        </div>
+      </MobileNavProvider>
     );
   }
 
   return (
-    <div className="flex min-h-screen">
-      <Sidebar />
-      <div className="flex min-w-0 flex-1 flex-col bg-white">
-        <SessionBar />
-        <header className="border-b border-white/10 bg-luxury-navy-rich px-5 py-4 shadow-luxury-sm lg:hidden">
-          <div className="flex items-center justify-between gap-3">
-            <div className="min-w-0">
-              <p className="text-sm font-black tracking-[0.14em] text-white">
-                WEGO BUSINESS
-              </p>
-              <p className="font-arabic-brand mt-1 text-lg font-bold leading-snug text-luxury-gold">
-                حلويات القدس
-              </p>
-              <p className="mt-0.5 text-xs font-semibold text-slate-400">
-                מערכת ניהול ארגונית
-              </p>
-            </div>
-            <span className="shrink-0 rounded-full bg-luxury-gold px-3 py-1.5 text-xs font-bold text-luxury-charcoal shadow-sm">
-              פורטל אדמין
-            </span>
-          </div>
-        </header>
-        <main className={MAIN_PAD}>{children}</main>
+    <MobileNavProvider>
+      <MobileAppHeader />
+      <MobileNavDrawer />
+      <div className="flex min-h-screen">
+        <Sidebar />
+        <div className="flex min-w-0 flex-1 flex-col bg-white">
+          <SessionBar className="hidden lg:flex" />
+          <main className={MAIN_PAD}>{children}</main>
+        </div>
       </div>
-    </div>
+      <MobileBottomNav />
+    </MobileNavProvider>
   );
 }
