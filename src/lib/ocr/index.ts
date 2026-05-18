@@ -88,6 +88,11 @@ export async function scanDocument(input: {
     error = "OCR_READ_FAILED";
   }
 
-  const enriched = await enrichScannedDocument(parsed);
-  return { ...enriched, error };
+  try {
+    const enriched = await enrichScannedDocument(parsed);
+    return { ...enriched, error };
+  } catch (e) {
+    console.error("[scanDocument] enrich failed", e);
+    return { ...parsed, error: error ?? "OCR_PARTIAL" };
+  }
 }

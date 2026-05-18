@@ -1,18 +1,15 @@
-import { randomUUID } from "node:crypto";
-import { unlink, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import path from "node:path";
 import sharp from "sharp";
 
 const RASTER_WIDTH = 2200;
 
 /**
- * PDF page 1 → PNG buffer (pdf2pic → pdf-to-img fallbacks).
- * Never returns text — image only for Tesseract.
+ * PDF page 1 → PNG (serverless-safe: pdfjs-dist + @napi-rs/canvas).
+ * No poppler / pdf2pic — works on Vercel.
  */
 export async function rasterizePdfPage1(pdfBuffer: Buffer): Promise<Buffer | null> {
-  const fromPdf2Pic = await tryPdf2Pic(pdfBuffer);
-  if (fromPdf2Pic) return fromPdf2Pic;
+  const fromPdfJs = await rasterizeWithPdfJsCanvas(pdfBuffer);
+  if (fromPdfJs) return fromPdfJs;
 
   const fromPdfToImg = await tryPdfToImg(pdfBuffer);
   if (fromPdfToImg) return fromPdfToImg;
@@ -21,7 +18,7 @@ export async function rasterizePdfPage1(pdfBuffer: Buffer): Promise<Buffer | nul
   return null;
 }
 
-/** Trim margins so OCR focuses on invoice content, not viewer chrome. */
+/** Trim margins so OCR focuses on invoice content. */
 export async function cropInvoiceArea(imageBuffer: Buffer): Promise<Buffer> {
   try {
     return await sharp(imageBuffer)
@@ -34,60 +31,65 @@ export async function cropInvoiceArea(imageBuffer: Buffer): Promise<Buffer> {
   }
 }
 
-async function tryPdf2Pic(pdfBuffer: Buffer): Promise<Buffer | null> {
+function pdfJsAssetBase(): string {
+  return path.join(process.cwd(), "node_modules", "pdfjs-dist");
+}
+
+/** Primary: pdfjs render → @napi-rs/canvas → PNG buffer. */
+async function rasterizeWithPdfJsCanvas(pdfBuffer: Buffer): Promise<Buffer | null> {
   try {
-    const { fromBuffer } = await import("pdf2pic");
-    const convert = fromBuffer(pdfBuffer, {
-      density: 300,
-      format: "png",
-      width: RASTER_WIDTH,
-      height: 3200,
+    const { createCanvas } = await import("@napi-rs/canvas");
+    const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
+    const base = pdfJsAssetBase();
+
+    console.log("[pdf-rasterize] pdfjs+canvas start, pdf bytes:", pdfBuffer.length);
+
+    const loadingTask = pdfjs.getDocument({
+      data: new Uint8Array(pdfBuffer),
+      standardFontDataUrl: path.join(base, `standard_fonts${path.sep}`),
+      cMapUrl: path.join(base, `cmaps${path.sep}`),
+      cMapPacked: true,
+      isEvalSupported: false,
+      useSystemFonts: true,
     });
-    const page = await convert(1, { responseType: "buffer" });
-    const buf =
-      page && typeof page === "object" && "buffer" in page && page.buffer
-        ? Buffer.isBuffer(page.buffer)
-          ? page.buffer
-          : Buffer.from(page.buffer as Uint8Array)
-        : null;
-    if (buf && buf.length > 1000) {
-      console.log("[pdf-rasterize] pdf2pic ok, bytes:", buf.length);
+
+    const pdfDocument = await loadingTask.promise;
+    const page = await pdfDocument.getPage(1);
+    const viewport = page.getViewport({ scale: 3 });
+    const w = Math.ceil(viewport.width);
+    const h = Math.ceil(viewport.height);
+    const canvas = createCanvas(w, h);
+    const context = canvas.getContext("2d");
+    if (!context) {
+      await pdfDocument.destroy();
+      return null;
+    }
+
+    await page.render({
+      canvasContext: context as unknown as CanvasRenderingContext2D,
+      viewport,
+      canvas: canvas as unknown as HTMLCanvasElement,
+    }).promise;
+
+    await pdfDocument.destroy();
+
+    const png = await canvas.encode("png");
+    const buf = Buffer.from(png);
+    if (buf.length > 500) {
+      console.log("[pdf-rasterize] PDF CONVERT SUCCESS (pdfjs+canvas), bytes:", buf.length);
       return buf;
     }
   } catch (e) {
-    console.warn("[pdf-rasterize] pdf2pic:", e instanceof Error ? e.message : e);
+    console.error(
+      "[pdf-rasterize] pdfjs+canvas error:",
+      e instanceof Error ? e.message : e,
+      e instanceof Error ? e.stack : "",
+    );
   }
-
-  const tmpPath = join(tmpdir(), `wego-invoice-${randomUUID()}.pdf`);
-  try {
-    await writeFile(tmpPath, pdfBuffer);
-    const { fromPath } = await import("pdf2pic");
-    const convert = fromPath(tmpPath, {
-      density: 300,
-      format: "png",
-      width: RASTER_WIDTH,
-      height: 3200,
-    });
-    const page = await convert(1, { responseType: "buffer" });
-    const buf =
-      page && typeof page === "object" && "buffer" in page && page.buffer
-        ? Buffer.isBuffer(page.buffer)
-          ? page.buffer
-          : Buffer.from(page.buffer as Uint8Array)
-        : null;
-    if (buf && buf.length > 1000) {
-      console.log("[pdf-rasterize] pdf2pic (file) ok, bytes:", buf.length);
-      return buf;
-    }
-  } catch (e) {
-    console.warn("[pdf-rasterize] pdf2pic file:", e instanceof Error ? e.message : e);
-  } finally {
-    await unlink(tmpPath).catch(() => undefined);
-  }
-
   return null;
 }
 
+/** Fallback: pdf-to-img (also pdfjs-based, no poppler). */
 async function tryPdfToImg(pdfBuffer: Buffer): Promise<Buffer | null> {
   try {
     const { pdf } = await import("pdf-to-img");
@@ -95,7 +97,7 @@ async function tryPdfToImg(pdfBuffer: Buffer): Promise<Buffer | null> {
     try {
       const page = await doc.getPage(1);
       const pageBuf = Buffer.isBuffer(page) ? page : Buffer.from(page);
-      if (pageBuf.length > 1000) {
+      if (pageBuf.length > 500) {
         console.log("[pdf-rasterize] pdf-to-img ok, bytes:", pageBuf.length);
         return pageBuf;
       }

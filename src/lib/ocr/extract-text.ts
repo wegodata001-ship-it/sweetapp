@@ -15,14 +15,20 @@ export async function preprocessForOcr(buffer: Buffer): Promise<Buffer> {
 }
 
 async function runTesseractOnImage(imageBuffer: Buffer): Promise<OcrEngineResult> {
-  console.log("[OCR] OCR started — preprocessing image");
+  console.log("[OCR] Tesseract — preprocessing image");
   const preprocessed = await preprocessForOcr(imageBuffer);
   console.log("[OCR] Preprocessed image bytes:", preprocessed.length);
 
   const { createWorker, PSM } = await import("tesseract.js");
-  const worker = await createWorker("heb+eng+ara", 1, {
-    logger: () => undefined,
-  });
+  let worker;
+  try {
+    worker = await createWorker("heb+eng+ara", 1, {
+      logger: () => undefined,
+    });
+  } catch (e) {
+    console.error("[OCR] Tesseract worker create failed:", e);
+    throw new Error("OCR engine failed to start (tesseract.js)");
+  }
   try {
     await worker.setParameters({
       preserve_interword_spaces: "1",
@@ -43,17 +49,22 @@ async function runTesseractOnImage(imageBuffer: Buffer): Promise<OcrEngineResult
           ? 0.72
           : 0;
     return { text, engine: "tesseract", confidence };
+  } catch (e) {
+    console.error("[OCR] Tesseract recognize failed:", e);
+    throw e instanceof Error ? e : new Error("OCR recognition failed");
   } finally {
     await worker.terminate();
   }
 }
 
 async function ocrFromRasterizedPdf(pdfBuffer: Buffer): Promise<OcrEngineResult> {
-  console.log("[OCR] PDF → image (page 1)…");
+  console.log("[OCR] PDF pipeline → rasterize page 1 (pdfjs+canvas)");
   const raster = await rasterizePdfPage1(pdfBuffer);
   if (!raster) {
+    console.error("[OCR] PDF CONVERT FAILED — no image buffer");
     return { text: "", engine: "tesseract_pdf", confidence: 0 };
   }
+  console.log("[OCR] PDF CONVERT SUCCESS, raster bytes:", raster.length);
   const cropped = await cropInvoiceArea(raster);
   console.log("[OCR] Cropped invoice image bytes:", cropped.length);
   const result = await runTesseractOnImage(cropped);
@@ -73,6 +84,7 @@ export async function extractTextFromDocument(
   }
 
   if (mimeType.startsWith("image/")) {
+    console.log("[OCR] IMAGE pipeline (no PDF conversion)");
     const cropped = await cropInvoiceArea(buffer);
     return runTesseractOnImage(cropped);
   }

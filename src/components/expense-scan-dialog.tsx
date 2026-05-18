@@ -23,6 +23,7 @@ import {
 } from "react";
 import { useI18n } from "@/components/i18n-provider";
 import { ScanSupplierPanel } from "@/components/scan-supplier-panel";
+import { parseApiJson } from "@/lib/api/parse-json-response";
 import { formatShekel } from "@/lib/format-shekel";
 
 export type ScannedItemDto = {
@@ -163,9 +164,15 @@ function ExpenseScanDialogContent({
         body: fd,
         credentials: "same-origin",
       });
-      const json = (await res.json()) as
+      const parsed = await parseApiJson<
         | { ok: true; data: ScannedDocumentDto }
-        | { ok: false; error?: string };
+        | { ok: false; error?: string }
+      >(res);
+      if (!parsed.ok) {
+        setErrorMsg(parsed.error || t("scan.errorGeneric"));
+        return;
+      }
+      const json = parsed.data;
       if (!json.ok) {
         setErrorMsg(json.error ?? t("scan.errorGeneric"));
         return;
