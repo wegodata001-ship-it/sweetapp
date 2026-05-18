@@ -1,5 +1,5 @@
 /**
- * OCR.space REST client — serverless-safe (no local Tesseract).
+ * OCR.space REST client — multipart/form-data only (never JSON body).
  * @see https://ocr.space/ocrapi
  */
 
@@ -48,28 +48,19 @@ const SUPPORTED_MIMES = new Set([
   "application/pdf",
 ]);
 
+/** OCR.space language codes to try (heb may fail on Engine 1 → E201). */
+const LANGUAGE_ATTEMPTS = ["heb", "eng"] as const;
+
 export function ocrSpaceConfigured(): boolean {
   return Boolean(process.env.OCR_SPACE_API_KEY?.trim());
 }
 
 function getApiKey(): string {
   const key = process.env.OCR_SPACE_API_KEY?.trim();
-  if (!key) throw new OcrServiceError("OCR_NOT_CONFIGURED", "OCR_SPACE_API_KEY is not configured");
-  return key;
-}
-
-function mimeToFiletype(mimeType: string): string {
-  switch (mimeType) {
-    case "application/pdf":
-      return "PDF";
-    case "image/png":
-      return "PNG";
-    case "image/jpeg":
-    case "image/jpg":
-      return "JPG";
-    default:
-      return "JPG";
+  if (!key) {
+    throw new OcrServiceError("OCR_NOT_CONFIGURED", "OCR_SPACE_API_KEY is not configured");
   }
+  return key;
 }
 
 function collectErrorMessage(json: OcrSpaceApiResponse): string {
@@ -83,6 +74,16 @@ function collectErrorMessage(json: OcrSpaceApiResponse): string {
     if (pr.ErrorMessage) return String(pr.ErrorMessage);
   }
   return "OCR.space processing failed";
+}
+
+/** E201: language invalid (e.g. heb not supported on OCREngine 1). */
+export function isInvalidLanguageError(message: string): boolean {
+  const m = message.toLowerCase();
+  return (
+    /e201/i.test(message) ||
+    (m.includes("language") && m.includes("invalid")) ||
+    m.includes("parameter 'language'")
+  );
 }
 
 function lineTextFromOverlay(line: OcrSpaceLine): string {
@@ -149,7 +150,82 @@ function normalizeOcrSpaceResponse(json: OcrSpaceApiResponse): OcrSpaceResult {
 }
 
 /**
- * Send image/PDF buffer to OCR.space (language=heb, table mode for invoices).
+ * Build multipart body — fetch must NOT set Content-Type (boundary auto).
+ */
+function buildOcrFormData(
+  apiKey: string,
+  language: string,
+  buffer: Buffer,
+  mimeType: string,
+  fileName: string,
+): FormData {
+  const formData = new FormData();
+  formData.append("apikey", apiKey);
+  formData.append("language", language);
+  formData.append("isTable", "true");
+  formData.append("OCREngine", "1");
+
+  const blob = new Blob([new Uint8Array(buffer)], { type: mimeType });
+  formData.append("file", blob, fileName);
+
+  return formData;
+}
+
+type OcrPostResult = {
+  httpStatus: number;
+  json: OcrSpaceApiResponse;
+  bodyText: string;
+};
+
+async function postToOcrSpace(
+  apiUrl: string,
+  apiKey: string,
+  language: string,
+  buffer: Buffer,
+  mimeType: string,
+  fileName: string,
+): Promise<OcrPostResult> {
+  const formData = buildOcrFormData(apiKey, language, buffer, mimeType, fileName);
+
+  console.log("[OCR] OCR request start", {
+    provider: "ocr.space",
+    language,
+    mimeType,
+    bytes: buffer.length,
+    fileName,
+    contentType: "multipart/form-data (auto boundary)",
+  });
+
+  const requestStart = Date.now();
+  const res = await fetch(apiUrl, {
+    method: "POST",
+    body: formData,
+    // Do NOT set Content-Type — fetch adds multipart boundary.
+  });
+  const bodyText = await res.text();
+
+  console.log("[OCR] OCR response received", {
+    language,
+    httpStatus: res.status,
+    ms: Date.now() - requestStart,
+    bodyLen: bodyText.length,
+  });
+
+  let json: OcrSpaceApiResponse;
+  try {
+    json = JSON.parse(bodyText) as OcrSpaceApiResponse;
+  } catch {
+    throw new OcrServiceError(
+      "OCR_PROVIDER_ERROR",
+      `OCR.space returned non-JSON (HTTP ${res.status}): ${bodyText.slice(0, 200)}`,
+    );
+  }
+
+  return { httpStatus: res.status, json, bodyText };
+}
+
+/**
+ * Send image/PDF to OCR.space — heb first, eng fallback on E201.
  */
 export async function runOcrSpace(
   buffer: Buffer,
@@ -165,69 +241,60 @@ export async function runOcrSpace(
 
   const apiKey = getApiKey();
   const apiUrl = process.env.OCR_SPACE_API_URL?.trim() || DEFAULT_API_URL;
-
-  const form = new FormData();
-  form.append("apikey", apiKey);
-  form.append("language", "heb");
-  form.append("isOverlayRequired", "true");
-  form.append("detectOrientation", "true");
-  form.append("isTable", "true");
-  form.append("scale", "true");
-  form.append("OCREngine", "1");
-  form.append("filetype", mimeToFiletype(mimeType));
-
-  const blob = new Blob([new Uint8Array(buffer)], { type: mimeType });
   const safeName =
     fileName?.trim() ||
     (mimeType === "application/pdf" ? "invoice.pdf" : "invoice.jpg");
-  form.append("file", blob, safeName);
 
-  console.log("[OCR] OCR request start", {
-    provider: "ocr.space",
-    mimeType,
-    bytes: buffer.length,
-    fileName: safeName,
-  });
+  let lastError = "OCR.space request failed";
 
-  const requestStart = Date.now();
-  const res = await fetch(apiUrl, { method: "POST", body: form });
-  const bodyText = await res.text();
-  const requestMs = Date.now() - requestStart;
-
-  console.log("[OCR] OCR response received", {
-    httpStatus: res.status,
-    ms: requestMs,
-    bodyLen: bodyText.length,
-    processingMs: (() => {
-      try {
-        const j = JSON.parse(bodyText) as OcrSpaceApiResponse;
-        return j.ProcessingTimeInMilliseconds ?? null;
-      } catch {
-        return null;
-      }
-    })(),
-  });
-
-  let json: OcrSpaceApiResponse;
-  try {
-    json = JSON.parse(bodyText) as OcrSpaceApiResponse;
-  } catch {
-    throw new OcrServiceError(
-      "OCR_PROVIDER_ERROR",
-      `OCR.space returned non-JSON (HTTP ${res.status}): ${bodyText.slice(0, 200)}`,
+  for (let i = 0; i < LANGUAGE_ATTEMPTS.length; i++) {
+    const language = LANGUAGE_ATTEMPTS[i];
+    const { httpStatus, json } = await postToOcrSpace(
+      apiUrl,
+      apiKey,
+      language,
+      buffer,
+      mimeType,
+      safeName,
     );
+
+    const errMsg = collectErrorMessage(json);
+
+    if (isInvalidLanguageError(errMsg) && language === "heb") {
+      console.warn("[OCR] OCR.space E201 for language=heb → retry with eng");
+      lastError = errMsg;
+      continue;
+    }
+
+    if (!httpStatus || httpStatus >= 400) {
+      throw new OcrServiceError(
+        mapOcrSpaceMessageToCode(errMsg),
+        errMsg || `OCR.space HTTP ${httpStatus}`,
+      );
+    }
+
+    if (json.IsErroredOnProcessing) {
+      if (isInvalidLanguageError(errMsg) && language === "heb") {
+        lastError = errMsg;
+        continue;
+      }
+      throw new OcrServiceError(mapOcrSpaceMessageToCode(errMsg), errMsg);
+    }
+
+    const result = normalizeOcrSpaceResponse(json);
+    console.log(
+      "[OCR] OCR confidence:",
+      result.confidence,
+      "language:",
+      language,
+      "lines:",
+      result.lines.length,
+    );
+    if (result.rawText.length > 0) {
+      console.log("[OCR] OCR text preview:", result.rawText.slice(0, 400));
+    }
+    return result;
   }
 
-  if (!res.ok) {
-    const msg = collectErrorMessage(json) || `OCR.space HTTP ${res.status}`;
-    throw new OcrServiceError(mapOcrSpaceMessageToCode(msg), msg);
-  }
-
-  const result = normalizeOcrSpaceResponse(json);
-  console.log("[OCR] OCR confidence:", result.confidence, "lines:", result.lines.length);
-  if (result.rawText.length > 0) {
-    console.log("[OCR] OCR text preview:", result.rawText.slice(0, 400));
-  }
-
-  return result;
+  throw new OcrServiceError("OCR_PROVIDER_ERROR", lastError);
 }

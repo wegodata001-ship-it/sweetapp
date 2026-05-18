@@ -89,7 +89,11 @@ export async function POST(req: NextRequest) {
             : timedOut
               ? 504
               : 502;
-      return scanJsonError(e.message, status, e.code);
+      const userMessage =
+        e.code === "OCR_PROVIDER_ERROR"
+          ? `OCR.space: ${e.message}`
+          : e.message;
+      return scanJsonError(userMessage, status, e.code);
     }
 
     const message = timedOut
