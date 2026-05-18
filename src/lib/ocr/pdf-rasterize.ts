@@ -3,7 +3,7 @@ import sharp from "sharp";
 
 /** Lower scale on Vercel = faster PDF render */
 const PDF_RENDER_SCALE = process.env.VERCEL ? 2 : 3;
-const RASTER_WIDTH = process.env.VERCEL ? 1400 : 2200;
+const RASTER_WIDTH = 1200;
 
 /**
  * PDF page 1 → PNG (serverless-safe: pdfjs-dist + @napi-rs/canvas).

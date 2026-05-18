@@ -1,11 +1,12 @@
 import sharp from "sharp";
+import { extractOcrRegions } from "./ocr-regions";
 import { rasterizePdfPage1 } from "./pdf-rasterize";
 import { getSharedOcrWorker } from "./tesseract-worker";
 import { timeStep } from "./timing";
 import type { OcrEngineResult } from "./types";
 
-/** Smaller on Vercel — faster OCR, still readable for Hebrew invoices. */
-const OCR_MAX_WIDTH = process.env.VERCEL ? 1400 : 2200;
+/** Fixed width — smaller = faster recognize on Vercel. */
+const OCR_MAX_WIDTH = 1200;
 
 type PreprocessOpts = {
   /** trim() is slow — skip for camera uploads / PNG */
@@ -35,29 +36,60 @@ export async function preprocessForOcr(
     .toBuffer();
 }
 
-async function runTesseractOnImage(
+async function recognizeRegions(
+  preprocessed: Buffer,
+  engine: string,
+): Promise<OcrEngineResult> {
+  const regions = await extractOcrRegions(preprocessed);
+  const worker = await getSharedOcrWorker();
+
+  const parts: string[] = [];
+  let confSum = 0;
+  let confN = 0;
+
+  for (const { id, buffer } of regions) {
+    const recognizeStart = Date.now();
+    const { data } = await worker.recognize(buffer);
+    const recognizeMs = Date.now() - recognizeStart;
+    console.log(`[OCR] ocr recognize time (${id}): ${recognizeMs}ms`);
+
+    const chunk = (data.text ?? "").trim();
+    if (chunk) {
+      parts.push(chunk);
+      console.log(`[OCR] region ${id} preview:`, chunk.slice(0, 180));
+    }
+    if (typeof data.confidence === "number" && data.confidence > 0) {
+      confSum += data.confidence;
+      confN += 1;
+    }
+  }
+
+  const text = parts.join("\n\n");
+  if (text.length > 0) {
+    console.log("[OCR] OCR TEXT preview (merged):", text.slice(0, 400));
+  }
+
+  const confidence =
+    confN > 0
+      ? Math.min(1, confSum / confN / 100)
+      : text
+        ? 0.72
+        : 0;
+
+  return { text, engine, confidence };
+}
+
+async function runRegionalOcr(
   imageBuffer: Buffer,
-  opts: { alreadyPreprocessed?: boolean } = {},
+  opts: { alreadyPreprocessed?: boolean; engine?: string } = {},
 ): Promise<OcrEngineResult> {
   const preprocessed = opts.alreadyPreprocessed
     ? imageBuffer
     : await timeStep("ocr:sharp", () => preprocessForOcr(imageBuffer, { trim: false }));
 
-  return timeStep("ocr:ocr", async () => {
-    const worker = await getSharedOcrWorker();
-    const { data } = await worker.recognize(preprocessed);
-    const text = (data.text ?? "").trim();
-    if (text.length > 0) {
-      console.log("[OCR] OCR TEXT preview:", text.slice(0, 400));
-    }
-    const confidence =
-      typeof data.confidence === "number" && data.confidence > 0
-        ? Math.min(1, data.confidence / 100)
-        : text
-          ? 0.72
-          : 0;
-    return { text, engine: "tesseract", confidence };
-  });
+  return timeStep("ocr:ocr", () =>
+    recognizeRegions(preprocessed, opts.engine ?? "tesseract"),
+  );
 }
 
 async function ocrFromRasterizedPdf(pdfBuffer: Buffer): Promise<OcrEngineResult> {
@@ -69,12 +101,15 @@ async function ocrFromRasterizedPdf(pdfBuffer: Buffer): Promise<OcrEngineResult>
   const preprocessed = await timeStep("ocr:sharp", () =>
     preprocessForOcr(raster, { trim: true }),
   );
-  const result = await runTesseractOnImage(preprocessed, { alreadyPreprocessed: true });
-  return { ...result, engine: "tesseract_pdf" };
+  return runRegionalOcr(preprocessed, {
+    alreadyPreprocessed: true,
+    engine: "tesseract_pdf",
+  });
 }
 
 /**
- * PDF → rasterize → sharp. Image → sharp only (never PDF pipeline).
+ * PDF → rasterize → sharp → regional OCR.
+ * Image → sharp → regional OCR (never PDF pipeline).
  */
 export async function extractTextFromDocument(
   buffer: Buffer,
@@ -85,11 +120,11 @@ export async function extractTextFromDocument(
   }
 
   if (mimeType.startsWith("image/")) {
-    console.log("[OCR] IMAGE pipeline (skip pdf-render)");
+    console.log("[OCR] IMAGE pipeline (sharp → regions, skip pdf-render)");
     const preprocessed = await timeStep("ocr:sharp", () =>
       preprocessForOcr(buffer, { trim: false }),
     );
-    return runTesseractOnImage(preprocessed, { alreadyPreprocessed: true });
+    return runRegionalOcr(preprocessed, { alreadyPreprocessed: true });
   }
 
   return { text: "", engine: "unsupported", confidence: 0 };
