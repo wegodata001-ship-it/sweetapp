@@ -24,7 +24,59 @@ import {
 import { useI18n } from "@/components/i18n-provider";
 import { ScanSupplierPanel } from "@/components/scan-supplier-panel";
 import { parseApiJson } from "@/lib/api/parse-json-response";
+import {
+  confidenceBadgeClass,
+  confidenceItemBorderClass,
+  confidenceTier,
+} from "@/lib/ocr/confidence-ui";
 import { formatShekel } from "@/lib/format-shekel";
+
+type ScanApiPayload =
+  | {
+      success: true;
+      ok: true;
+      data: ScannedDocumentDto;
+      provider?: string;
+    }
+  | {
+      success: false;
+      ok?: false;
+      error?: string;
+      code?: string;
+      provider?: string;
+    };
+
+function resolveScanErrorMessages(
+  code: string | undefined,
+  error: string | undefined,
+  t: (key: string) => string,
+): string {
+  const lines: string[] = [t("scan.errorScanFailed")];
+  switch (code) {
+    case "FILE_TOO_LARGE":
+      lines.push(t("scan.errorFileTooLarge"));
+      break;
+    case "OCR_TIMEOUT":
+    case "OCR_PROVIDER_ERROR":
+      if (error?.toLowerCase().includes("temporary") || code === "OCR_TIMEOUT") {
+        lines.push(t("scan.errorOcrTemporary"));
+      } else {
+        lines.push(t("scan.errorOcrProvider"));
+      }
+      break;
+    case "OCR_NOT_CONFIGURED":
+      return t("scan.errorNotConfigured");
+    case "OCR_READ_FAILED":
+      lines.push(t("scan.errorTryClearerImage"));
+      break;
+    default:
+      lines.push(t("scan.errorTryClearerImage"));
+      if (error && !error.includes("Unexpected token")) {
+        lines.push(error);
+      }
+  }
+  return lines.join("\n");
+}
 
 export type ScannedItemDto = {
   rawName: string;
@@ -55,6 +107,10 @@ export type ScannedDocumentDto = {
   supplierName: string;
   supplierId?: string | null;
   suggestNewSupplier?: boolean;
+  suggestedSupplierId?: string | null;
+  suggestedSupplierName?: string | null;
+  supplierMatchScore?: number | null;
+  ocrFromCache?: boolean;
   invoiceNumber: string;
   date: string;
   documentType?: string;
@@ -164,17 +220,25 @@ function ExpenseScanDialogContent({
         body: fd,
         credentials: "same-origin",
       });
-      const parsed = await parseApiJson<
-        | { ok: true; data: ScannedDocumentDto }
-        | { ok: false; error?: string }
-      >(res);
+      const parsed = await parseApiJson<ScanApiPayload>(res);
       if (!parsed.ok) {
-        setErrorMsg(parsed.error || t("scan.errorGeneric"));
+        setErrorMsg(
+          resolveScanErrorMessages(undefined, parsed.error, t) ||
+            t("scan.errorGeneric"),
+        );
         return;
       }
       const json = parsed.data;
-      if (!json.ok) {
-        setErrorMsg(json.error ?? t("scan.errorGeneric"));
+      if ("success" in json && json.success === false) {
+        setErrorMsg(
+          resolveScanErrorMessages(json.code, json.error, t) ||
+            json.error ||
+            t("scan.errorGeneric"),
+        );
+        return;
+      }
+      if (!("data" in json) || !json.data) {
+        setErrorMsg(t("scan.errorGeneric"));
         return;
       }
       setResult(json.data);
@@ -186,13 +250,19 @@ function ExpenseScanDialogContent({
         json.data.items.length > 0;
       if (json.data.error === "OCR_READ_FAILED") {
         setErrorMsg(
-          hasPartial ? t("scan.errorPartial") : t("scan.errorReadFailed"),
+          hasPartial
+            ? t("scan.errorPartial")
+            : resolveScanErrorMessages("OCR_READ_FAILED", undefined, t),
         );
       } else if (json.data.error === "OCR_NOT_CONFIGURED") {
         setErrorMsg(t("scan.errorNotConfigured"));
       } else if (json.data.error) {
         setErrorMsg(t("scan.errorPartial"));
-      } else if (json.data.items.length === 0 && !json.data.total && !json.data.supplierName) {
+      } else if (
+        json.data.items.length === 0 &&
+        !json.data.total &&
+        !json.data.supplierName
+      ) {
         setErrorMsg(t("scan.errorEmpty"));
       }
     } catch (e) {
@@ -237,6 +307,38 @@ function ExpenseScanDialogContent({
       if (!prev) return prev;
       return { ...prev, items: prev.items.filter((_, i) => i !== idx) };
     });
+  };
+
+  const linkSuggestedSupplier = async () => {
+    if (!result?.suggestedSupplierId || !result.suggestedSupplierName) return;
+    const ocrName = result.supplierRawName || result.supplierName;
+    try {
+      const res = await fetch("/api/ocr/supplier-link", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({
+          supplierId: result.suggestedSupplierId,
+          ocrName,
+        }),
+      });
+      const json = (await res.json()) as { ok: boolean };
+      if (!json.ok) return;
+      setResult((prev) =>
+        prev
+          ? {
+              ...prev,
+              supplierId: prev.suggestedSupplierId,
+              supplierName: prev.suggestedSupplierName!,
+              suggestNewSupplier: false,
+              suggestedSupplierId: null,
+              suggestedSupplierName: null,
+            }
+          : prev,
+      );
+    } catch {
+      /* ignore */
+    }
   };
 
   const addBlankItem = () => {
@@ -462,6 +564,47 @@ function ExpenseScanDialogContent({
 
             {result && (
               <div className="flex flex-col gap-3">
+                {(() => {
+                  const docTier = confidenceTier(result.confidence);
+                  const tierKey =
+                    docTier === "high"
+                      ? "scan.confidenceHigh"
+                      : docTier === "medium"
+                        ? "scan.confidenceMedium"
+                        : "scan.confidenceLow";
+                  return (
+                    <div
+                      className={`flex items-center justify-between gap-2 rounded-xl border px-3 py-2 text-xs font-black ${confidenceBadgeClass(docTier)}`}
+                    >
+                      <span>{t("scan.confidenceLabel")}</span>
+                      <span>{t(tierKey)}</span>
+                    </div>
+                  );
+                })()}
+                {result.ocrFromCache ? (
+                  <p className="text-[11px] font-bold text-slate-500">
+                    {t("scan.ocrFromCache")}
+                  </p>
+                ) : null}
+                {result.suggestedSupplierName &&
+                !result.supplierId &&
+                (result.supplierMatchScore ?? 0) >= 0.52 ? (
+                  <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-sm font-bold text-sky-950">
+                    <span>
+                      {t("scan.supplierDidYouMean", {
+                        name: result.suggestedSupplierName,
+                        percent: Math.round((result.supplierMatchScore ?? 0) * 100),
+                      })}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => void linkSuggestedSupplier()}
+                      className="rounded-lg bg-sky-700 px-3 py-1 text-xs font-black text-white hover:bg-sky-800"
+                    >
+                      {t("scan.linkSuggestedSupplier")}
+                    </button>
+                  </div>
+                ) : null}
                 {result.suggestNewSupplier && !result.supplierId ? (
                   <ScanSupplierPanel
                     ocrName={result.supplierRawName || result.supplierName}
@@ -576,6 +719,9 @@ function ExpenseScanDialogContent({
                     ) : (
                       <ul className="divide-y divide-slate-100">
                         {result.items.map((it, idx) => {
+                          const itemConfTier = confidenceTier(
+                            it.confidenceScore ?? result.confidence,
+                          );
                           const highlight =
                             it.lineStatus === "suspect" || it.ocrSuspect
                               ? "border-red-400 bg-red-50/80"
@@ -587,7 +733,7 @@ function ExpenseScanDialogContent({
                                     ? "border-amber-300 bg-amber-50/50"
                                     : it.lineStatus === "valid"
                                       ? "border-emerald-200 bg-emerald-50/30"
-                                      : "border-transparent";
+                                      : confidenceItemBorderClass(itemConfTier);
                           const statusMsg =
                             it.lineStatus === "suspect" || it.ocrSuspect
                               ? t("scan.suspectAmount")

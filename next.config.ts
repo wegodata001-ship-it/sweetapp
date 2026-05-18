@@ -6,13 +6,7 @@ const nextConfig: NextConfig = {
   turbopack: {
     root: path.resolve(process.cwd()),
   },
-  serverExternalPackages: [
-    "sharp",
-    "tesseract.js",
-    "pdfjs-dist",
-    "@napi-rs/canvas",
-    "pdf-to-img",
-  ],
+  serverExternalPackages: ["sharp", "pdfjs-dist", "@napi-rs/canvas"],
 };
 
 export default nextConfig;

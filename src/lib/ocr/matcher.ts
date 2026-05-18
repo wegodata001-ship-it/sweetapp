@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { stringSimilarity } from "./similarity";
-import { parseSupplierAliases } from "./supplier-aliases";
+import { supplierMatchLabels, supplierNamesMatch } from "./supplier-aliases";
 import type { ScannedDocument, ScannedItem } from "./types";
 
 /**
@@ -71,9 +71,10 @@ export async function matchSupplier(
     let score = Math.max(similarity(s.name, clean), stringSimilarity(s.name, clean));
     if (containsFuzzy(s.name, clean)) score = Math.max(score, 0.78);
     if (normalize(s.name) === normalize(clean)) score = 1;
-    for (const alias of parseSupplierAliases(s.notes)) {
-      score = Math.max(score, stringSimilarity(alias, clean));
-      if (containsFuzzy(alias, clean)) score = Math.max(score, 0.85);
+    for (const label of supplierMatchLabels(s.name, s.notes)) {
+      if (supplierNamesMatch(label, clean)) score = Math.max(score, 0.92);
+      score = Math.max(score, stringSimilarity(label, clean));
+      if (containsFuzzy(label, clean)) score = Math.max(score, 0.85);
     }
     if (score >= 0.72 && (best === null || score > best.score)) {
       best = { id: s.id, name: s.name, score };
@@ -82,7 +83,7 @@ export async function matchSupplier(
   return best ? { id: best.id, name: best.name } : null;
 }
 
-/** Rank suppliers for "exists under different name" UI. */
+/** Rank suppliers for "exists under different name" UI (Levenshtein + token fuzzy). */
 export async function rankSupplierSuggestions(ocrName: string, limit = 8) {
   const clean = ocrName.trim();
   if (!clean) return [];
@@ -93,10 +94,12 @@ export async function rankSupplierSuggestions(ocrName: string, limit = 8) {
   const ranked: { id: string; name: string; phone: string | null; score: number }[] = [];
   for (const s of suppliers) {
     let score = stringSimilarity(clean, s.name);
-    for (const alias of parseSupplierAliases(s.notes)) {
-      score = Math.max(score, stringSimilarity(clean, alias));
+    for (const label of supplierMatchLabels(s.name, s.notes)) {
+      if (supplierNamesMatch(label, clean)) score = Math.max(score, 0.92);
+      score = Math.max(score, stringSimilarity(clean, label));
+      if (containsFuzzy(label, clean)) score = Math.max(score, 0.8);
     }
-    if (score >= 0.4) ranked.push({ id: s.id, name: s.name, phone: s.phone, score });
+    if (score >= 0.38) ranked.push({ id: s.id, name: s.name, phone: s.phone, score });
   }
   ranked.sort((a, b) => b.score - a.score);
   return ranked.slice(0, limit);
@@ -287,10 +290,26 @@ export async function enrichScannedDocument(
     result.supplierId = supplier.id;
     result.supplierName = supplier.name;
     result.suggestNewSupplier = false;
+    result.suggestedSupplierId = null;
+    result.suggestedSupplierName = null;
+    result.supplierMatchScore = null;
   } else {
     result.supplierId = null;
     result.supplierName = doc.supplierRawName;
     result.suggestNewSupplier = Boolean(doc.supplierRawName?.trim());
+    result.suggestedSupplierId = null;
+    result.suggestedSupplierName = null;
+    result.supplierMatchScore = null;
+
+    if (doc.supplierRawName?.trim()) {
+      const suggestions = await rankSupplierSuggestions(doc.supplierRawName, 5);
+      const top = suggestions[0];
+      if (top && top.score >= 0.52) {
+        result.suggestedSupplierId = top.id;
+        result.suggestedSupplierName = top.name;
+        result.supplierMatchScore = Math.round(top.score * 100) / 100;
+      }
+    }
   }
 
   const enriched: ScannedItem[] = [];

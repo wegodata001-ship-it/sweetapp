@@ -62,6 +62,12 @@ export type ScannedDocument = {
   supplierId?: string | null;
   /** When true — supplier not in DB; UI may offer "create supplier" */
   suggestNewSupplier?: boolean;
+  /** Fuzzy match — "did you mean this supplier?" */
+  suggestedSupplierId?: string | null;
+  suggestedSupplierName?: string | null;
+  supplierMatchScore?: number | null;
+  /** True when OCR text came from ocr_cache (no API call) */
+  ocrFromCache?: boolean;
   /** Detected invoice number (free-form) */
   invoiceNumber: string;
   /** ISO date string (YYYY-MM-DD) — best effort */

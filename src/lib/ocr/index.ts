@@ -1,16 +1,17 @@
-import { googleVisionConfigured, runGoogleVisionOcr } from "./google-vision";
+import { ocrSpaceConfigured } from "./ocr-space";
 import { extractTextFromDocument, hasMeaningfulText } from "./extract-text";
+import { OcrServiceError } from "./ocr-errors";
 import { parseReceiptText } from "./parser";
 import { enrichScannedDocument } from "./matcher";
 import { uploadReceiptToStorage } from "./storage";
-import { timeStep } from "./timing";
 import type { ScannedDocument } from "./types";
 
 export * from "./types";
 export { parseReceiptText } from "./parser";
 export { enrichScannedDocument } from "./matcher";
-export { googleVisionConfigured } from "./google-vision";
-export { preprocessForOcr } from "./extract-text";
+export { ocrSpaceConfigured } from "./ocr-space";
+export type { OcrSpaceResult } from "./ocr-space";
+export { confidenceTier } from "./confidence-ui";
 
 export const SUPPORTED_MIME_TYPES = [
   "image/jpeg",
@@ -34,8 +35,22 @@ function hasExtractedFields(doc: ScannedDocument): boolean {
   );
 }
 
+function emptyScannedDocument(fileName: string): ScannedDocument {
+  return {
+    supplierRawName: "",
+    supplierName: "",
+    invoiceNumber: "",
+    date: "",
+    items: [],
+    rawText: "",
+    receiptFileName: fileName,
+    engine: "ocr_space",
+    confidence: 0,
+  };
+}
+
 /**
- * Upload + OCR in parallel where possible; parse + match after.
+ * Upload → OCR.space → parse → supplier/product match.
  */
 export async function scanDocument(input: {
   buffer: Buffer;
@@ -44,52 +59,65 @@ export async function scanDocument(input: {
 }): Promise<ScannedDocument & { error?: string }> {
   const { buffer, fileName, mimeType } = input;
 
+  if (!ocrSpaceConfigured()) {
+    return {
+      ...emptyScannedDocument(fileName),
+      error: "OCR_NOT_CONFIGURED",
+    };
+  }
+
   let upload: { url: string; path: string } | null = null;
   let rawText = "";
-  let engine = "manual";
+  let engine = "ocr_space";
   let confidence = 0;
 
+  const uploadStart = Date.now();
+  const ocrPipelineStart = Date.now();
+
   const [uploadResult, ocrResult] = await Promise.all([
-    timeStep("ocr:upload", () => uploadReceiptToStorage(buffer, fileName, mimeType)),
-    extractTextFromDocument(buffer, mimeType),
+    uploadReceiptToStorage(buffer, fileName, mimeType).then((r) => {
+      console.log("[OCR] upload duration ms:", Date.now() - uploadStart);
+      return r;
+    }),
+    extractTextFromDocument(buffer, mimeType, fileName).then((r) => {
+      console.log("[OCR] ocr pipeline duration ms:", Date.now() - ocrPipelineStart);
+      return r;
+    }),
   ]);
+
   upload = uploadResult;
   rawText = ocrResult.text;
   engine = ocrResult.engine;
   confidence = ocrResult.confidence;
+  const ocrFromCache = engine.includes("_cache");
 
   let error: string | undefined;
 
-  if (!hasMeaningfulText(rawText) && googleVisionConfigured()) {
-    try {
-      const gv = await timeStep("vision-fallback", () =>
-        runGoogleVisionOcr(buffer, mimeType),
-      );
-      if (hasMeaningfulText(gv.text) || gv.text.length > rawText.length) {
-        rawText = gv.text;
-        engine = gv.engine;
-        confidence = Math.max(confidence, gv.confidence);
-      }
-    } catch (e) {
-      console.warn("[scanDocument] Vision fallback failed", e);
-    }
-  }
+  const parseStart = Date.now();
+  const parsed = parseReceiptText(rawText);
+  console.log("[OCR] OCR parse duration ms:", Date.now() - parseStart);
+  console.log("[OCR] OCR confidence (document):", confidence);
 
-  const parsed = await timeStep("parse", async () => parseReceiptText(rawText));
   parsed.engine = engine;
   parsed.confidence = Math.max(parsed.confidence, confidence);
   parsed.receiptFileUrl = upload?.url ?? null;
   parsed.receiptFileName = fileName;
+  parsed.rawText = rawText;
+  parsed.ocrFromCache = ocrFromCache;
 
   if (!hasMeaningfulText(rawText) && !hasExtractedFields(parsed)) {
     error = "OCR_READ_FAILED";
   }
 
+  const matchStart = Date.now();
   try {
-    const enriched = await timeStep("match", () => enrichScannedDocument(parsed));
+    const enriched = await enrichScannedDocument(parsed);
+    console.log("[OCR] match duration ms:", Date.now() - matchStart);
     return { ...enriched, error };
   } catch (e) {
     console.error("[scanDocument] enrich failed", e);
     return { ...parsed, error: error ?? "OCR_PARTIAL" };
   }
 }
+
+export { OcrServiceError };

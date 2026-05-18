@@ -1,133 +1,60 @@
-import sharp from "sharp";
-import { extractOcrRegions } from "./ocr-regions";
-import { rasterizePdfPage1 } from "./pdf-rasterize";
-import { getSharedOcrWorker } from "./tesseract-worker";
-import { timeStep } from "./timing";
+import { compressForOcr } from "./compress-for-ocr";
+import { OcrServiceError } from "./ocr-errors";
+import { getOcrFromCache, hashFileBuffer, setOcrCache } from "./ocr-cache";
+import { ocrSpaceConfigured, runOcrSpace } from "./ocr-space";
 import type { OcrEngineResult } from "./types";
 
-/** Fixed width — smaller = faster recognize on Vercel. */
-const OCR_MAX_WIDTH = 1200;
-
-type PreprocessOpts = {
-  /** trim() is slow — skip for camera uploads / PNG */
-  trim?: boolean;
-};
-
 /**
- * Optimize before Tesseract: resize + grayscale + normalize (+ optional trim).
- */
-export async function preprocessForOcr(
-  buffer: Buffer,
-  opts: PreprocessOpts = {},
-): Promise<Buffer> {
-  let img = sharp(buffer).rotate();
-  if (opts.trim) {
-    try {
-      img = sharp(await img.trim({ threshold: 14 }).toBuffer());
-    } catch {
-      /* keep original */
-    }
-  }
-  return img
-    .grayscale()
-    .normalize()
-    .resize({ width: OCR_MAX_WIDTH, withoutEnlargement: true })
-    .png({ compressionLevel: 6 })
-    .toBuffer();
-}
-
-async function recognizeRegions(
-  preprocessed: Buffer,
-  engine: string,
-): Promise<OcrEngineResult> {
-  const regions = await extractOcrRegions(preprocessed);
-  const worker = await getSharedOcrWorker();
-
-  const parts: string[] = [];
-  let confSum = 0;
-  let confN = 0;
-
-  for (const { id, buffer } of regions) {
-    const recognizeStart = Date.now();
-    const { data } = await worker.recognize(buffer);
-    const recognizeMs = Date.now() - recognizeStart;
-    console.log(`[OCR] ocr recognize time (${id}): ${recognizeMs}ms`);
-
-    const chunk = (data.text ?? "").trim();
-    if (chunk) {
-      parts.push(chunk);
-      console.log(`[OCR] region ${id} preview:`, chunk.slice(0, 180));
-    }
-    if (typeof data.confidence === "number" && data.confidence > 0) {
-      confSum += data.confidence;
-      confN += 1;
-    }
-  }
-
-  const text = parts.join("\n\n");
-  if (text.length > 0) {
-    console.log("[OCR] OCR TEXT preview (merged):", text.slice(0, 400));
-  }
-
-  const confidence =
-    confN > 0
-      ? Math.min(1, confSum / confN / 100)
-      : text
-        ? 0.72
-        : 0;
-
-  return { text, engine, confidence };
-}
-
-async function runRegionalOcr(
-  imageBuffer: Buffer,
-  opts: { alreadyPreprocessed?: boolean; engine?: string } = {},
-): Promise<OcrEngineResult> {
-  const preprocessed = opts.alreadyPreprocessed
-    ? imageBuffer
-    : await timeStep("ocr:sharp", () => preprocessForOcr(imageBuffer, { trim: false }));
-
-  return timeStep("ocr:ocr", () =>
-    recognizeRegions(preprocessed, opts.engine ?? "tesseract"),
-  );
-}
-
-async function ocrFromRasterizedPdf(pdfBuffer: Buffer): Promise<OcrEngineResult> {
-  const raster = await timeStep("ocr:pdf-render", () => rasterizePdfPage1(pdfBuffer));
-  if (!raster) {
-    console.error("[OCR] PDF CONVERT FAILED");
-    return { text: "", engine: "tesseract_pdf", confidence: 0 };
-  }
-  const preprocessed = await timeStep("ocr:sharp", () =>
-    preprocessForOcr(raster, { trim: true }),
-  );
-  return runRegionalOcr(preprocessed, {
-    alreadyPreprocessed: true,
-    engine: "tesseract_pdf",
-  });
-}
-
-/**
- * PDF → rasterize → sharp → regional OCR.
- * Image → sharp → regional OCR (never PDF pipeline).
+ * OCR via OCR.space API (with sha256 cache + PDF→JPEG compression).
  */
 export async function extractTextFromDocument(
   buffer: Buffer,
   mimeType: string,
+  fileName = "upload",
 ): Promise<OcrEngineResult> {
-  if (mimeType === "application/pdf") {
-    return ocrFromRasterizedPdf(buffer);
+  if (!ocrSpaceConfigured()) {
+    console.warn("[OCR] OCR_SPACE_API_KEY missing");
+    return { text: "", engine: "ocr_space", confidence: 0 };
   }
 
-  if (mimeType.startsWith("image/")) {
-    console.log("[OCR] IMAGE pipeline (sharp → regions, skip pdf-render)");
-    const preprocessed = await timeStep("ocr:sharp", () =>
-      preprocessForOcr(buffer, { trim: false }),
+  const fileHash = hashFileBuffer(buffer);
+  const cached = await getOcrFromCache(fileHash);
+  if (cached) {
+    return {
+      text: cached.rawText,
+      engine: `${cached.engine}_cache`,
+      confidence: cached.confidence,
+    };
+  }
+
+  const compressed = await compressForOcr(buffer, mimeType, fileName);
+  const ocrStart = Date.now();
+
+  try {
+    const { rawText, confidence } = await runOcrSpace(
+      compressed.buffer,
+      compressed.mimeType,
+      compressed.fileName,
     );
-    return runRegionalOcr(preprocessed, { alreadyPreprocessed: true });
-  }
+    console.log("[OCR] OCR recognize duration ms:", Date.now() - ocrStart);
 
-  return { text: "", engine: "unsupported", confidence: 0 };
+    await setOcrCache(
+      fileHash,
+      { rawText, confidence, engine: "ocr_space" },
+      { fileName, mimeType },
+    );
+
+    return {
+      text: rawText,
+      engine: "ocr_space",
+      confidence,
+    };
+  } catch (e) {
+    console.error("[OCR] OCR errors:", e instanceof Error ? e.message : e);
+    if (e instanceof OcrServiceError) throw e;
+    const msg = e instanceof Error ? e.message : "OCR.space failed";
+    throw new OcrServiceError("OCR_PROVIDER_ERROR", msg);
+  }
 }
 
 export function hasMeaningfulText(text: string): boolean {
