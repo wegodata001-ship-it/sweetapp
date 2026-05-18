@@ -31,12 +31,24 @@ import {
 } from "@/lib/ocr/confidence-ui";
 import { formatShekel } from "@/lib/format-shekel";
 
+type ScanDebugDto = {
+  provider: string;
+  confidence: number;
+  textLength: number;
+  itemsFound: number;
+  parseDurationMs: number;
+  ocrEngine?: string;
+  fromCache?: boolean;
+  partial?: boolean;
+};
+
 type ScanApiPayload =
   | {
       success: true;
       ok: true;
       data: ScannedDocumentDto;
       provider?: string;
+      debug?: ScanDebugDto;
     }
   | {
       success: false;
@@ -125,6 +137,7 @@ export type ScannedDocumentDto = {
   skippedLinesCount?: number;
   time?: string;
   error?: string;
+  partial?: boolean;
 };
 
 type Props = {
@@ -158,6 +171,7 @@ function ExpenseScanDialogContent({
   const [scanning, setScanning] = useState(false);
   const [result, setResult] = useState<ScannedDocumentDto | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [showRawOcr, setShowRawOcr] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
@@ -256,6 +270,8 @@ function ExpenseScanDialogContent({
         );
       } else if (json.data.error === "OCR_NOT_CONFIGURED") {
         setErrorMsg(t("scan.errorNotConfigured"));
+      } else if (json.data.partial || json.data.error === "OCR_PARTIAL") {
+        setErrorMsg(t("scan.partialHint"));
       } else if (json.data.error) {
         setErrorMsg(t("scan.errorPartial"));
       } else if (
@@ -581,10 +597,24 @@ function ExpenseScanDialogContent({
                     </div>
                   );
                 })()}
-                {result.ocrFromCache ? (
-                  <p className="text-[11px] font-bold text-slate-500">
-                    {t("scan.ocrFromCache")}
-                  </p>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowRawOcr((v) => !v)}
+                    className="rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-[11px] font-bold text-slate-700 hover:bg-slate-50"
+                  >
+                    {showRawOcr ? t("scan.hideRawOcr") : t("scan.showRawOcr")}
+                  </button>
+                  {result.ocrFromCache ? (
+                    <span className="text-[11px] font-bold text-slate-500">
+                      {t("scan.ocrFromCache")}
+                    </span>
+                  ) : null}
+                </div>
+                {showRawOcr ? (
+                  <pre className="max-h-40 overflow-auto rounded-lg border border-slate-200 bg-slate-900 p-3 text-[10px] leading-relaxed text-slate-100 whitespace-pre-wrap">
+                    {result.rawText || t("scan.noRawText")}
+                  </pre>
                 ) : null}
                 {result.suggestedSupplierName &&
                 !result.supplierId &&

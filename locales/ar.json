@@ -484,6 +484,10 @@
     "supplierDidYouMean": "هل تقصد المورد «{{name}}»؟ (تطابق {{percent}}%)",
     "linkSuggestedSupplier": "نعم، ربط المورد",
     "ocrFromCache": "من الذاكرة المؤقتة — تم مسح هذا الملف سابقاً",
+    "showRawOcr": "عرض نص OCR",
+    "hideRawOcr": "إخفاء نص OCR",
+    "noRawText": "(لا يوجد نص)",
+    "partialHint": "تم التعرف على بعض الحقول — يمكنك التعديل والمتابعة يدوياً",
     "previewTable": {
       "field": "حقل",
       "value": "القيمة المستخرجة"

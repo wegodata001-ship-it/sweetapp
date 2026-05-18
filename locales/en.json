@@ -484,6 +484,10 @@
     "supplierDidYouMean": "Did you mean supplier «{{name}}»? ({{percent}}% match)",
     "linkSuggestedSupplier": "Yes, link supplier",
     "ocrFromCache": "Loaded from cache — this file was scanned before",
+    "showRawOcr": "Show OCR text",
+    "hideRawOcr": "Hide OCR text",
+    "noRawText": "(no text)",
+    "partialHint": "Some fields were detected — you can edit and continue manually",
     "previewTable": {
       "field": "Field",
       "value": "Detected value"

@@ -68,14 +68,20 @@ export async function POST(req: NextRequest) {
     const buffer = Buffer.from(arrayBuffer);
     const fileName = file.name || `upload.${mimeType.split("/")[1] ?? "bin"}`;
 
-    const data = await scanDocument({ buffer, fileName, mimeType });
+    const { debug, partial, ...data } = await scanDocument({
+      buffer,
+      fileName,
+      mimeType,
+    });
     console.log("[OCR] scan complete ms:", Date.now() - started, {
       items: data.items.length,
       confidence: data.confidence,
       error: data.error ?? null,
+      partial,
+      debug,
     });
 
-    return scanJsonSuccess(data);
+    return scanJsonSuccess({ ...data, partial }, debug);
   } catch (e) {
     const timedOut = isTimeoutError(e);
 

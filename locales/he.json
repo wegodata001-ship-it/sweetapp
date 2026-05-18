@@ -484,6 +484,10 @@
     "supplierDidYouMean": "האם התכוונת לספק «{{name}}»? (התאמה {{percent}}%)",
     "linkSuggestedSupplier": "כן, זה הספק",
     "ocrFromCache": "תוצאה מהמטמון — אותה חשבונית כבר נסרקה",
+    "showRawOcr": "הצג טקסט OCR",
+    "hideRawOcr": "הסתר טקסט OCR",
+    "noRawText": "(אין טקסט)",
+    "partialHint": "חלק מהשדות זוהו — ניתן לערוך ולהמשיך ידנית",
     "previewTable": {
       "field": "שדה",
       "value": "ערך שזוהה"

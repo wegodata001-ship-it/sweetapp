@@ -1,17 +1,19 @@
 import { ocrSpaceConfigured } from "./ocr-space";
 import { extractTextFromDocument, hasMeaningfulText } from "./extract-text";
 import { OcrServiceError } from "./ocr-errors";
-import { parseReceiptText } from "./parser";
+import { parseReceiptText, summarizeParsed } from "./parser";
 import { enrichScannedDocument } from "./matcher";
 import { uploadReceiptToStorage } from "./storage";
+import type { ScanDebugMeta } from "./api-response";
 import type { ScannedDocument } from "./types";
 
 export * from "./types";
-export { parseReceiptText } from "./parser";
+export { parseReceiptText, summarizeParsed } from "./parser";
 export { enrichScannedDocument } from "./matcher";
 export { ocrSpaceConfigured } from "./ocr-space";
 export type { OcrSpaceResult } from "./ocr-space";
 export { confidenceTier } from "./confidence-ui";
+export type { ScanDebugMeta } from "./api-response";
 
 export const SUPPORTED_MIME_TYPES = [
   "image/jpeg",
@@ -49,6 +51,12 @@ function emptyScannedDocument(fileName: string): ScannedDocument {
   };
 }
 
+export type ScanDocumentResult = ScannedDocument & {
+  error?: string;
+  partial?: boolean;
+  debug?: ScanDebugMeta;
+};
+
 /**
  * Upload → OCR.space → parse → supplier/product match.
  */
@@ -56,7 +64,7 @@ export async function scanDocument(input: {
   buffer: Buffer;
   fileName: string;
   mimeType: string;
-}): Promise<ScannedDocument & { error?: string }> {
+}): Promise<ScanDocumentResult> {
   const { buffer, fileName, mimeType } = input;
 
   if (!ocrSpaceConfigured()) {
@@ -91,12 +99,17 @@ export async function scanDocument(input: {
   confidence = ocrResult.confidence;
   const ocrFromCache = engine.includes("_cache");
 
+  console.log("[OCR] RAW TEXT:", rawText);
+  console.log("[OCR] RAW TEXT length:", rawText.length, "engine:", engine);
+
   let error: string | undefined;
 
   const parseStart = Date.now();
   const parsed = parseReceiptText(rawText);
-  console.log("[OCR] OCR parse duration ms:", Date.now() - parseStart);
-  console.log("[OCR] OCR confidence (document):", confidence);
+  const parseDurationMs = Date.now() - parseStart;
+
+  console.log("[OCR] PARSED RESULT:", JSON.stringify(summarizeParsed(parsed)));
+  console.log("[OCR] OCR parse duration ms:", parseDurationMs);
 
   parsed.engine = engine;
   parsed.confidence = Math.max(parsed.confidence, confidence);
@@ -110,14 +123,38 @@ export async function scanDocument(input: {
   }
 
   const matchStart = Date.now();
+  let enriched: ScannedDocument;
   try {
-    const enriched = await enrichScannedDocument(parsed);
+    enriched = await enrichScannedDocument(parsed);
+    console.log("[OCR] ENRICHED RESULT:", JSON.stringify(summarizeParsed(enriched)));
     console.log("[OCR] match duration ms:", Date.now() - matchStart);
-    return { ...enriched, error };
   } catch (e) {
     console.error("[scanDocument] enrich failed", e);
-    return { ...parsed, error: error ?? "OCR_PARTIAL" };
+    enriched = parsed;
+    error = error ?? "OCR_PARTIAL";
   }
+
+  const partial =
+    !enriched.supplierId &&
+    hasExtractedFields(enriched) &&
+    Boolean(enriched.supplierRawName?.trim() || enriched.items.length > 0);
+
+  if (partial && !error) {
+    error = "OCR_PARTIAL";
+  }
+
+  const debug: ScanDebugMeta = {
+    provider: "ocr.space",
+    confidence: enriched.confidence,
+    textLength: rawText.length,
+    itemsFound: enriched.items.length,
+    parseDurationMs,
+    ocrEngine: engine,
+    fromCache: ocrFromCache,
+    partial,
+  };
+
+  return { ...enriched, error, partial, debug };
 }
 
 export { OcrServiceError };

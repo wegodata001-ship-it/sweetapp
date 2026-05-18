@@ -1,4 +1,9 @@
 import type { ScannedDocument, ScannedItem } from "./types";
+import { normalizeOcrText } from "./normalize-ocr-text";
+import {
+  extractHebrewInvoiceFields,
+  parseFallbackLineItems,
+} from "./parser-fallback";
 
 /**
  * Israeli RTL invoice parser — table-only, RTL qty/price rules, strict filters.
@@ -19,7 +24,6 @@ export const BLOCKED_WORDS = [
   "ברקוד",
   "מספר לקוח",
   "מספרכם",
-  "מספר",
   "סהכ",
   'סה"כ',
   "סה״כ",
@@ -129,11 +133,21 @@ function normalizeForMatch(s: string): string {
     .toLowerCase();
 }
 
-function splitLines(text: string): string[] {
-  return text
-    .split(/\r?\n/)
-    .map((l) => l.replace(/[\t ]+/g, " ").trim())
-    .filter((l) => l.length > 0);
+export function splitLines(text: string): string[] {
+  const out: string[] = [];
+  for (const line of text.split(/\r?\n/)) {
+    const t = line.replace(/[\t ]+/g, " ").trim();
+    if (!t) continue;
+    if (t.length > 70 && /\s{2,}/.test(t)) {
+      for (const part of t.split(/\s{2,}/)) {
+        const p = part.trim();
+        if (p.length > 0) out.push(p);
+      }
+    } else {
+      out.push(t);
+    }
+  }
+  return out;
 }
 
 function letterCount(s: string): number {
@@ -156,6 +170,7 @@ function isBlockedProductName(name: string): boolean {
 }
 
 function containsBlockedWord(line: string): boolean {
+  if (/מספר\s*חשבונית|חשבונית\s*מס|invoice\s*#/i.test(line)) return false;
   const lower = line.toLowerCase();
   return BLOCKED_WORDS.some((w) => lower.includes(w.toLowerCase()));
 }
@@ -220,7 +235,7 @@ function isExcludedLine(line: string): boolean {
 }
 
 /** All numeric tokens on a line (before filtering). */
-function tokenizeNumbers(line: string): number[] {
+export function tokenizeNumbers(line: string): number[] {
   const out: number[] = [];
   const re = new RegExp(NUMBER_TOKEN_RE.source, "g");
   let m: RegExpExecArray | null;
@@ -715,18 +730,50 @@ function estimateConfidence(doc: Omit<ScannedDocument, "confidence">): number {
   return Math.max(0.1, Math.min(1, base * 0.65 + itemAvg * 0.35));
 }
 
+export function summarizeParsed(doc: ScannedDocument): Record<string, unknown> {
+  return {
+    supplierRawName: doc.supplierRawName,
+    invoiceNumber: doc.invoiceNumber,
+    date: doc.date,
+    total: doc.total,
+    vatAmount: doc.vatAmount,
+    itemsCount: doc.items.length,
+    itemsPreview: doc.items.slice(0, 5).map((i) => ({
+      name: i.rawName,
+      qty: i.quantity,
+      price: i.unitPrice,
+    })),
+    skippedLinesCount: doc.skippedLinesCount,
+    rawTextLength: doc.rawText?.length ?? 0,
+  };
+}
+
 export function parseReceiptText(rawText: string): ScannedDocument {
-  const text = (rawText ?? "").replace(/\r\n/g, "\n");
+  const text = normalizeOcrText(rawText ?? "");
   const lines = splitLines(text);
 
-  const supplierRawName = extractSupplier(lines, text);
-  const invoiceNumber = extractInvoiceNumber(text);
-  const date = extractDate(text);
+  console.log("[parser] lines count:", lines.length, "text length:", text.length);
+
+  const { items: rtlItems, skipped } = extractTableItems(lines);
+
+  const fb = extractHebrewInvoiceFields(text, lines);
+  const fbItems = parseFallbackLineItems(lines);
+
+  const supplierRawName =
+    extractSupplier(lines, text) || fb.supplierRawName || "";
+  const invoiceNumber =
+    extractInvoiceNumber(text) || fb.invoiceNumber || "";
+  const date = extractDate(text) || fb.date || "";
   const time = extractTime(text);
-  const total = extractTotal(text, lines);
-  const vat = extractVatAmount(text, lines);
-  const documentType = extractDocumentType(text);
-  const { items, skipped } = extractTableItems(lines);
+  const total = extractTotal(text, lines) ?? fb.total ?? null;
+  const vat = extractVatAmount(text, lines) ?? fb.vatAmount ?? null;
+  const documentType = extractDocumentType(text) ?? fb.documentType;
+  const items =
+    rtlItems.length > 0 ? rtlItems : fbItems.length > 0 ? fbItems : rtlItems;
+
+  if (fbItems.length > 0 && rtlItems.length === 0) {
+    console.log("[parser] fallback line items:", fbItems.length);
+  }
 
   const draft: Omit<ScannedDocument, "confidence"> = {
     supplierRawName,

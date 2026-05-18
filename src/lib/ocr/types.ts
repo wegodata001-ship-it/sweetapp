@@ -94,6 +94,8 @@ export type ScannedDocument = {
   engine: string;
   /** Confidence 0-1 (rough heuristic; UI uses to soften wording) */
   confidence: number;
+  /** Supplier unmatched but other fields extracted — user can continue manually */
+  partial?: boolean;
 };
 
 export type OcrEngineResult = {
