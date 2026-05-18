@@ -8,7 +8,6 @@ import {
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
-/** Vercel / serverless — OCR can take 30–60s on PDF */
 export const maxDuration = 60;
 
 const MAX_BYTES = 12 * 1024 * 1024;
@@ -17,11 +16,23 @@ function jsonError(message: string, status: number, extra?: Record<string, unkno
   return NextResponse.json({ ok: false, error: message, ...extra }, { status });
 }
 
+function isTimeoutError(e: unknown): boolean {
+  if (!(e instanceof Error)) return false;
+  const m = e.message.toLowerCase();
+  return (
+    m.includes("timeout") ||
+    m.includes("timed out") ||
+    m.includes("function_invocation_timeout") ||
+    e.name === "TimeoutError"
+  );
+}
+
 /**
- * POST /api/expenses/scan — always returns JSON `{ ok, data? | error? }`.
+ * POST /api/expenses/scan — always JSON; nodejs runtime; up to 60s on Vercel Pro.
  */
 export async function POST(req: NextRequest) {
-  console.log("[OCR] OCR START");
+  const started = Date.now();
+  console.log("[OCR] OCR START runtime=nodejs maxDuration=60");
 
   try {
     const block = await requireDb();
@@ -33,8 +44,7 @@ export async function POST(req: NextRequest) {
       return jsonError("file field is required", 400);
     }
 
-    console.log("[OCR] FILE TYPE:", file.type, "NAME:", file.name);
-    console.log("[OCR] FILE SIZE:", file.size);
+    console.log("[OCR] FILE TYPE:", file.type, "NAME:", file.name, "SIZE:", file.size);
 
     if (file.size === 0) {
       return jsonError("uploaded file is empty", 400);
@@ -58,14 +68,25 @@ export async function POST(req: NextRequest) {
     const buffer = Buffer.from(arrayBuffer);
     const fileName = file.name || `upload.${mimeType.split("/")[1] ?? "bin"}`;
 
-    console.log("[OCR] Resolved mimeType:", mimeType, "pipeline:", mimeType === "application/pdf" ? "pdf" : "image");
+    console.log(
+      "[OCR] pipeline:",
+      mimeType === "application/pdf" ? "pdf-render→sharp→ocr" : "sharp→ocr (image)",
+    );
 
     const data = await scanDocument({ buffer, fileName, mimeType });
-    console.log("[OCR] SCAN COMPLETE items:", data.items.length, "engine:", data.engine);
+    console.log("[OCR] SCAN COMPLETE ms:", Date.now() - started, "items:", data.items.length);
     return NextResponse.json({ ok: true, data });
   } catch (e) {
-    const message = e instanceof Error ? e.message : "internal error";
+    const timedOut = isTimeoutError(e);
+    const message = timedOut
+      ? "OCR timed out on server — try a smaller image or upgrade Vercel plan for longer runs"
+      : e instanceof Error
+        ? e.message
+        : "internal error";
     console.error("[OCR] OCR ERROR:", e instanceof Error ? e.stack ?? e.message : e);
-    return NextResponse.json({ ok: false, error: message }, { status: 500 });
+    return NextResponse.json(
+      { ok: false, error: message, code: timedOut ? "TIMEOUT" : "OCR_FAILED" },
+      { status: timedOut ? 504 : 500 },
+    );
   }
 }

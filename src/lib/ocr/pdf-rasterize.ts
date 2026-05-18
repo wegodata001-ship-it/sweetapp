@@ -1,7 +1,9 @@
 import path from "node:path";
 import sharp from "sharp";
 
-const RASTER_WIDTH = 2200;
+/** Lower scale on Vercel = faster PDF render */
+const PDF_RENDER_SCALE = process.env.VERCEL ? 2 : 3;
+const RASTER_WIDTH = process.env.VERCEL ? 1400 : 2200;
 
 /**
  * PDF page 1 → PNG (serverless-safe: pdfjs-dist + @napi-rs/canvas).
@@ -55,7 +57,7 @@ async function rasterizeWithPdfJsCanvas(pdfBuffer: Buffer): Promise<Buffer | nul
 
     const pdfDocument = await loadingTask.promise;
     const page = await pdfDocument.getPage(1);
-    const viewport = page.getViewport({ scale: 3 });
+    const viewport = page.getViewport({ scale: PDF_RENDER_SCALE });
     const w = Math.ceil(viewport.width);
     const h = Math.ceil(viewport.height);
     const canvas = createCanvas(w, h);
@@ -93,7 +95,7 @@ async function rasterizeWithPdfJsCanvas(pdfBuffer: Buffer): Promise<Buffer | nul
 async function tryPdfToImg(pdfBuffer: Buffer): Promise<Buffer | null> {
   try {
     const { pdf } = await import("pdf-to-img");
-    const doc = await pdf(pdfBuffer, { scale: 4 });
+    const doc = await pdf(pdfBuffer, { scale: PDF_RENDER_SCALE });
     try {
       const page = await doc.getPage(1);
       const pageBuf = Buffer.isBuffer(page) ? page : Buffer.from(page);

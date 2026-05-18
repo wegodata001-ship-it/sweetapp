@@ -1,46 +1,54 @@
 import sharp from "sharp";
-import { cropInvoiceArea, rasterizePdfPage1 } from "./pdf-rasterize";
+import { rasterizePdfPage1 } from "./pdf-rasterize";
+import { getSharedOcrWorker } from "./tesseract-worker";
+import { timeStep } from "./timing";
 import type { OcrEngineResult } from "./types";
 
-/** Mandatory preprocessing before Tesseract (Hebrew / Arabic invoices). */
-export async function preprocessForOcr(buffer: Buffer): Promise<Buffer> {
-  return sharp(buffer)
-    .rotate()
+/** Smaller on Vercel — faster OCR, still readable for Hebrew invoices. */
+const OCR_MAX_WIDTH = process.env.VERCEL ? 1400 : 2200;
+
+type PreprocessOpts = {
+  /** trim() is slow — skip for camera uploads / PNG */
+  trim?: boolean;
+};
+
+/**
+ * Optimize before Tesseract: resize + grayscale + normalize (+ optional trim).
+ */
+export async function preprocessForOcr(
+  buffer: Buffer,
+  opts: PreprocessOpts = {},
+): Promise<Buffer> {
+  let img = sharp(buffer).rotate();
+  if (opts.trim) {
+    try {
+      img = sharp(await img.trim({ threshold: 14 }).toBuffer());
+    } catch {
+      /* keep original */
+    }
+  }
+  return img
     .grayscale()
     .normalize()
-    .sharpen()
-    .resize({ width: 2200, withoutEnlargement: false })
-    .png()
+    .resize({ width: OCR_MAX_WIDTH, withoutEnlargement: true })
+    .png({ compressionLevel: 6 })
     .toBuffer();
 }
 
-async function runTesseractOnImage(imageBuffer: Buffer): Promise<OcrEngineResult> {
-  console.log("[OCR] Tesseract — preprocessing image");
-  const preprocessed = await preprocessForOcr(imageBuffer);
-  console.log("[OCR] Preprocessed image bytes:", preprocessed.length);
+async function runTesseractOnImage(
+  imageBuffer: Buffer,
+  opts: { alreadyPreprocessed?: boolean } = {},
+): Promise<OcrEngineResult> {
+  const preprocessed = opts.alreadyPreprocessed
+    ? imageBuffer
+    : await timeStep("ocr:sharp", () => preprocessForOcr(imageBuffer, { trim: false }));
 
-  const { createWorker, PSM } = await import("tesseract.js");
-  let worker;
-  try {
-    worker = await createWorker("heb+eng+ara", 1, {
-      logger: () => undefined,
-    });
-  } catch (e) {
-    console.error("[OCR] Tesseract worker create failed:", e);
-    throw new Error("OCR engine failed to start (tesseract.js)");
-  }
-  try {
-    await worker.setParameters({
-      preserve_interword_spaces: "1",
-      tessedit_pageseg_mode: PSM.SINGLE_BLOCK,
-      tessedit_do_invert: "0",
-    });
-    console.log("[OCR] RTL mode: heb+eng+ara, PSM=6, preserve_interword_spaces=1");
+  return timeStep("ocr:ocr", async () => {
+    const worker = await getSharedOcrWorker();
     const { data } = await worker.recognize(preprocessed);
     const text = (data.text ?? "").trim();
-    console.log("[OCR] OCR raw result length:", text.length);
     if (text.length > 0) {
-      console.log("[OCR] OCR raw result preview:", text.slice(0, 500));
+      console.log("[OCR] OCR TEXT preview:", text.slice(0, 400));
     }
     const confidence =
       typeof data.confidence === "number" && data.confidence > 0
@@ -49,31 +57,24 @@ async function runTesseractOnImage(imageBuffer: Buffer): Promise<OcrEngineResult
           ? 0.72
           : 0;
     return { text, engine: "tesseract", confidence };
-  } catch (e) {
-    console.error("[OCR] Tesseract recognize failed:", e);
-    throw e instanceof Error ? e : new Error("OCR recognition failed");
-  } finally {
-    await worker.terminate();
-  }
+  });
 }
 
 async function ocrFromRasterizedPdf(pdfBuffer: Buffer): Promise<OcrEngineResult> {
-  console.log("[OCR] PDF pipeline → rasterize page 1 (pdfjs+canvas)");
-  const raster = await rasterizePdfPage1(pdfBuffer);
+  const raster = await timeStep("ocr:pdf-render", () => rasterizePdfPage1(pdfBuffer));
   if (!raster) {
-    console.error("[OCR] PDF CONVERT FAILED — no image buffer");
+    console.error("[OCR] PDF CONVERT FAILED");
     return { text: "", engine: "tesseract_pdf", confidence: 0 };
   }
-  console.log("[OCR] PDF CONVERT SUCCESS, raster bytes:", raster.length);
-  const cropped = await cropInvoiceArea(raster);
-  console.log("[OCR] Cropped invoice image bytes:", cropped.length);
-  const result = await runTesseractOnImage(cropped);
+  const preprocessed = await timeStep("ocr:sharp", () =>
+    preprocessForOcr(raster, { trim: true }),
+  );
+  const result = await runTesseractOnImage(preprocessed, { alreadyPreprocessed: true });
   return { ...result, engine: "tesseract_pdf" };
 }
 
 /**
- * PDF: ONLY image pipeline (no pdf-parse / viewer text).
- * Image: preprocess → tesseract.
+ * PDF → rasterize → sharp. Image → sharp only (never PDF pipeline).
  */
 export async function extractTextFromDocument(
   buffer: Buffer,
@@ -84,9 +85,11 @@ export async function extractTextFromDocument(
   }
 
   if (mimeType.startsWith("image/")) {
-    console.log("[OCR] IMAGE pipeline (no PDF conversion)");
-    const cropped = await cropInvoiceArea(buffer);
-    return runTesseractOnImage(cropped);
+    console.log("[OCR] IMAGE pipeline (skip pdf-render)");
+    const preprocessed = await timeStep("ocr:sharp", () =>
+      preprocessForOcr(buffer, { trim: false }),
+    );
+    return runTesseractOnImage(preprocessed, { alreadyPreprocessed: true });
   }
 
   return { text: "", engine: "unsupported", confidence: 0 };

@@ -3,6 +3,7 @@ import { extractTextFromDocument, hasMeaningfulText } from "./extract-text";
 import { parseReceiptText } from "./parser";
 import { enrichScannedDocument } from "./matcher";
 import { uploadReceiptToStorage } from "./storage";
+import { timeStep } from "./timing";
 import type { ScannedDocument } from "./types";
 
 export * from "./types";
@@ -34,7 +35,7 @@ function hasExtractedFields(doc: ScannedDocument): boolean {
 }
 
 /**
- * תזרים → הוצאות: העלאה → OCR מקומי (pdf-parse / tesseract) → פרסור → התאמת ספק/מחירים → תצוגה לעריכה (לא שמירה אוטומטית).
+ * Upload + OCR in parallel where possible; parse + match after.
  */
 export async function scanDocument(input: {
   buffer: Buffer;
@@ -43,53 +44,49 @@ export async function scanDocument(input: {
 }): Promise<ScannedDocument & { error?: string }> {
   const { buffer, fileName, mimeType } = input;
 
-  const upload = await uploadReceiptToStorage(buffer, fileName, mimeType);
-
+  let upload: { url: string; path: string } | null = null;
   let rawText = "";
   let engine = "manual";
   let confidence = 0;
+
+  const [uploadResult, ocrResult] = await Promise.all([
+    timeStep("ocr:upload", () => uploadReceiptToStorage(buffer, fileName, mimeType)),
+    extractTextFromDocument(buffer, mimeType),
+  ]);
+  upload = uploadResult;
+  rawText = ocrResult.text;
+  engine = ocrResult.engine;
+  confidence = ocrResult.confidence;
+
   let error: string | undefined;
 
-  try {
-    const local = await extractTextFromDocument(buffer, mimeType);
-    rawText = local.text;
-    engine = local.engine;
-    confidence = local.confidence;
-
-    if (!hasMeaningfulText(rawText) && googleVisionConfigured()) {
-      console.log("[OCR] Local OCR weak — trying Google Vision fallback");
-      try {
-        const gv = await runGoogleVisionOcr(buffer, mimeType);
-        if (hasMeaningfulText(gv.text) || gv.text.length > rawText.length) {
-          rawText = gv.text;
-          engine = gv.engine;
-          confidence = Math.max(confidence, gv.confidence);
-          console.log("[OCR] Vision text length:", rawText.length);
-        }
-      } catch (e) {
-        console.warn("[scanDocument] Vision fallback failed", e);
+  if (!hasMeaningfulText(rawText) && googleVisionConfigured()) {
+    try {
+      const gv = await timeStep("vision-fallback", () =>
+        runGoogleVisionOcr(buffer, mimeType),
+      );
+      if (hasMeaningfulText(gv.text) || gv.text.length > rawText.length) {
+        rawText = gv.text;
+        engine = gv.engine;
+        confidence = Math.max(confidence, gv.confidence);
       }
+    } catch (e) {
+      console.warn("[scanDocument] Vision fallback failed", e);
     }
-  } catch (e) {
-    console.error("[scanDocument] extract failed", e instanceof Error ? e.message : e);
   }
 
-  const parsed = parseReceiptText(rawText);
+  const parsed = await timeStep("parse", async () => parseReceiptText(rawText));
   parsed.engine = engine;
   parsed.confidence = Math.max(parsed.confidence, confidence);
   parsed.receiptFileUrl = upload?.url ?? null;
   parsed.receiptFileName = fileName;
 
-  const textOk = hasMeaningfulText(rawText);
-  const fieldsOk = hasExtractedFields(parsed);
-  console.log("[OCR] textOk:", textOk, "fieldsOk:", fieldsOk, "engine:", engine);
-
-  if (!textOk && !fieldsOk) {
+  if (!hasMeaningfulText(rawText) && !hasExtractedFields(parsed)) {
     error = "OCR_READ_FAILED";
   }
 
   try {
-    const enriched = await enrichScannedDocument(parsed);
+    const enriched = await timeStep("match", () => enrichScannedDocument(parsed));
     return { ...enriched, error };
   } catch (e) {
     console.error("[scanDocument] enrich failed", e);
