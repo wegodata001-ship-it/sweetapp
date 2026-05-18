@@ -40,6 +40,9 @@ type ScanDebugDto = {
   ocrEngine?: string;
   fromCache?: boolean;
   partial?: boolean;
+  totalSuspect?: boolean;
+  itemsSumDetected?: number;
+  pdfPageCount?: number;
 };
 
 type ScanApiPayload =
@@ -70,11 +73,7 @@ function resolveScanErrorMessages(
       break;
     case "OCR_TIMEOUT":
     case "OCR_PROVIDER_ERROR":
-      if (error?.toLowerCase().includes("temporary") || code === "OCR_TIMEOUT") {
-        lines.push(t("scan.errorOcrTemporary"));
-      } else {
-        lines.push(t("scan.errorOcrProvider"));
-      }
+      lines.push(t("scan.errorOcrTemporary"));
       break;
     case "OCR_NOT_CONFIGURED":
       return t("scan.errorNotConfigured");
@@ -128,6 +127,8 @@ export type ScannedDocumentDto = {
   documentType?: string;
   vatAmount?: number | null;
   total?: number | null;
+  totalSuspect?: boolean;
+  itemsSumDetected?: number;
   items: ScannedItemDto[];
   rawText: string;
   receiptFileUrl?: string | null;
@@ -171,7 +172,10 @@ function ExpenseScanDialogContent({
   const [scanning, setScanning] = useState(false);
   const [result, setResult] = useState<ScannedDocumentDto | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [showRawOcr, setShowRawOcr] = useState(false);
+  const [scanDebug, setScanDebug] = useState<ScanDebugDto | null>(null);
+  const [showOcrDebug, setShowOcrDebug] = useState(false);
+  const [scanStep, setScanStep] = useState(0);
+  const [pdfPageCount, setPdfPageCount] = useState<number | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
@@ -189,11 +193,24 @@ function ExpenseScanDialogContent({
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") close();
+      if (e.key === "Escape") {
+        if (showOcrDebug) setShowOcrDebug(false);
+        else close();
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [close]);
+  }, [close, showOcrDebug]);
+
+  useEffect(() => {
+    if (!scanning) {
+      setScanStep(0);
+      return;
+    }
+    const delays = [0, 900, 2200, 3800, 5200, 6800];
+    const timers = delays.map((ms, i) => window.setTimeout(() => setScanStep(i), ms));
+    return () => timers.forEach((id) => window.clearTimeout(id));
+  }, [scanning]);
 
   const acceptFile = useCallback(
     (f: File | null | undefined) => {
@@ -203,6 +220,8 @@ function ExpenseScanDialogContent({
       const url = URL.createObjectURL(f);
       setPreviewUrl(url);
       setResult(null);
+      setScanDebug(null);
+      setPdfPageCount(null);
       setErrorMsg(null);
     },
     [previewUrl],
@@ -226,6 +245,7 @@ function ExpenseScanDialogContent({
     if (!file) return;
     setScanning(true);
     setErrorMsg(null);
+    setScanDebug(null);
     try {
       const fd = new FormData();
       fd.append("file", file);
@@ -244,11 +264,11 @@ function ExpenseScanDialogContent({
       }
       const json = parsed.data;
       if ("success" in json && json.success === false) {
-        setErrorMsg(
+        const base =
           resolveScanErrorMessages(json.code, json.error, t) ||
-            json.error ||
-            t("scan.errorGeneric"),
-        );
+          json.error ||
+          t("scan.errorGeneric");
+        setErrorMsg(result ? `${base}\n${t("scan.errorPartial")}` : base);
         return;
       }
       if (!("data" in json) || !json.data) {
@@ -256,6 +276,10 @@ function ExpenseScanDialogContent({
         return;
       }
       setResult(json.data);
+      setScanDebug(json.debug ?? null);
+      if (json.debug?.pdfPageCount && json.debug.pdfPageCount > 1) {
+        setPdfPageCount(json.debug.pdfPageCount);
+      }
       const hasPartial =
         Boolean(json.data.supplierName || json.data.supplierRawName) ||
         Boolean(json.data.total) ||
@@ -494,6 +518,11 @@ function ExpenseScanDialogContent({
                       })}{" "}
                       KB · {file.type}
                     </p>
+                    {pdfPageCount != null && pdfPageCount > 1 ? (
+                      <p className="mt-1 text-xs font-bold text-amber-800">
+                        {t("scan.pdfMultiPageWarning", { count: pdfPageCount })}
+                      </p>
+                    ) : null}
                   </div>
                   <div className="flex items-center gap-2">
                     <button
@@ -550,17 +579,7 @@ function ExpenseScanDialogContent({
 
           {/* Right: parsed data */}
           <div className="flex min-h-0 flex-col overflow-auto p-4">
-            {scanning && (
-              <div className="flex flex-1 flex-col items-center justify-center gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-8">
-                <Loader2 className="h-10 w-10 animate-spin text-rose-500" aria-hidden />
-                <p className="text-base font-black text-slate-800">
-                  {t("scan.scanning")}
-                </p>
-                <p className="text-sm text-slate-500">
-                  {t("scan.scanningSubtitle")}
-                </p>
-              </div>
-            )}
+            {scanning && !result && <ScanLoadingPanel step={scanStep} t={t} />}
 
             {!scanning && !result && !errorMsg && (
               <div className="flex flex-1 flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center">
@@ -578,8 +597,16 @@ function ExpenseScanDialogContent({
               </div>
             )}
 
+            {scanning && result ? (
+              <div className="mb-3">
+                <ScanLoadingPanel step={scanStep} t={t} />
+              </div>
+            ) : null}
+
             {result && (
-              <div className="flex flex-col gap-3">
+              <div
+                className={`flex flex-col gap-3 ${scanning ? "pointer-events-none opacity-50" : ""}`}
+              >
                 {(() => {
                   const docTier = confidenceTier(result.confidence);
                   const tierKey =
@@ -600,10 +627,10 @@ function ExpenseScanDialogContent({
                 <div className="flex flex-wrap items-center gap-2">
                   <button
                     type="button"
-                    onClick={() => setShowRawOcr((v) => !v)}
+                    onClick={() => setShowOcrDebug(true)}
                     className="rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-[11px] font-bold text-slate-700 hover:bg-slate-50"
                   >
-                    {showRawOcr ? t("scan.hideRawOcr") : t("scan.showRawOcr")}
+                    {t("scan.showRawOcr")}
                   </button>
                   {result.ocrFromCache ? (
                     <span className="text-[11px] font-bold text-slate-500">
@@ -611,10 +638,13 @@ function ExpenseScanDialogContent({
                     </span>
                   ) : null}
                 </div>
-                {showRawOcr ? (
-                  <pre className="max-h-40 overflow-auto rounded-lg border border-slate-200 bg-slate-900 p-3 text-[10px] leading-relaxed text-slate-100 whitespace-pre-wrap">
-                    {result.rawText || t("scan.noRawText")}
-                  </pre>
+                {result.totalSuspect ? (
+                  <div
+                    className={`flex items-start gap-2 rounded-xl border px-3 py-2 text-sm font-bold ${confidenceBadgeClass("low")}`}
+                  >
+                    <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+                    <span>{t("scan.totalSuspectWarning")}</span>
+                  </div>
                 ) : null}
                 {result.suggestedSupplierName &&
                 !result.supplierId &&
@@ -672,7 +702,16 @@ function ExpenseScanDialogContent({
                         label={t("scan.fields.invoiceNumber")}
                         value={result.invoiceNumber || "—"}
                       />
-                      <PreviewRow label={t("scan.total")} value={formatShekel(grandTotal)} highlight />
+                      <PreviewRow
+                        label={t("scan.total")}
+                        value={formatShekel(grandTotal)}
+                        highlight={result.totalSuspect}
+                        highlightClass={
+                          result.totalSuspect
+                            ? "text-base font-black tabular-nums text-amber-800"
+                            : undefined
+                        }
+                      />
                     </tbody>
                   </table>
                 </section>
@@ -715,6 +754,43 @@ function ExpenseScanDialogContent({
                       onChange={(e) =>
                         updateField("documentType", e.target.value)
                       }
+                      className="mt-1 block h-10 w-full rounded-lg border border-slate-300 px-3 text-sm shadow-sm focus:border-rose-400 focus:ring-2 focus:ring-rose-200"
+                    />
+                  </label>
+                  <label className="block text-[13px] font-bold text-slate-700">
+                    {t("scan.totalEditLabel")}
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={result.total ?? ""}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        updateField(
+                          "total",
+                          v === "" ? null : Number(v) || 0,
+                        );
+                        updateField("totalSuspect", false);
+                      }}
+                      className={`mt-1 block h-10 w-full rounded-lg border px-3 text-sm shadow-sm focus:ring-2 ${
+                        result.totalSuspect
+                          ? "border-amber-400 bg-amber-50 focus:border-amber-500 focus:ring-amber-200"
+                          : "border-slate-300 focus:border-rose-400 focus:ring-rose-200"
+                      }`}
+                    />
+                  </label>
+                  <label className="block text-[13px] font-bold text-slate-700">
+                    {t("scan.vatEditLabel")}
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={result.vatAmount ?? ""}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        updateField(
+                          "vatAmount",
+                          v === "" ? null : Number(v) || 0,
+                        );
+                      }}
                       className="mt-1 block h-10 w-full rounded-lg border border-slate-300 px-3 text-sm shadow-sm focus:border-rose-400 focus:ring-2 focus:ring-rose-200"
                     />
                   </label>
@@ -764,11 +840,15 @@ function ExpenseScanDialogContent({
                                     : it.lineStatus === "valid"
                                       ? "border-emerald-200 bg-emerald-50/30"
                                       : confidenceItemBorderClass(itemConfTier);
+                          const lowConf =
+                            (it.confidenceScore ?? 1) < 0.65 ||
+                            it.lineStatus === "review" ||
+                            it.uncertain;
                           const statusMsg =
                             it.lineStatus === "suspect" || it.ocrSuspect
                               ? t("scan.suspectAmount")
-                              : it.lineStatus === "review" || it.uncertain
-                                ? t("scan.reviewLine")
+                              : lowConf
+                                ? t("scan.needsVerification")
                                 : it.lineStatus === "valid"
                                   ? t("scan.validLine")
                                   : null;
@@ -959,6 +1039,157 @@ function ExpenseScanDialogContent({
           </button>
         </div>
       </div>
+
+      {showOcrDebug && result ? (
+        <OcrDebugModal
+          rawText={result.rawText}
+          debug={scanDebug}
+          docConfidence={result.confidence}
+          onClose={() => setShowOcrDebug(false)}
+          t={t}
+          bcp47={bcp47}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+const SCAN_STEP_KEYS = [
+  "scan.scanStepUpload",
+  "scan.scanStepText",
+  "scan.scanStepTable",
+  "scan.scanStepSupplier",
+  "scan.scanStepTotals",
+  "scan.scanStepProducts",
+] as const;
+
+function ScanLoadingPanel({
+  step,
+  t,
+}: {
+  step: number;
+  t: (key: string) => string;
+}) {
+  return (
+    <div className="flex flex-1 flex-col gap-4 rounded-2xl border border-slate-200 bg-slate-50 p-8">
+      <div className="flex items-center gap-3">
+        <Loader2 className="h-8 w-8 animate-spin text-rose-500" aria-hidden />
+        <p className="text-base font-black text-slate-800">{t("scan.scanning")}</p>
+      </div>
+      <ul className="space-y-2">
+        {SCAN_STEP_KEYS.map((key, i) => {
+          const done = i < step;
+          const active = i === step;
+          return (
+            <li
+              key={key}
+              className={`flex items-center gap-2 text-sm font-bold ${
+                done
+                  ? "text-emerald-700"
+                  : active
+                    ? "text-rose-700"
+                    : "text-slate-400"
+              }`}
+            >
+              {done ? (
+                <CheckCircle2 className="h-4 w-4 shrink-0" aria-hidden />
+              ) : active ? (
+                <Loader2 className="h-4 w-4 shrink-0 animate-spin" aria-hidden />
+              ) : (
+                <span className="inline-block h-4 w-4 shrink-0 rounded-full border-2 border-slate-300" />
+              )}
+              {t(key)}
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
+function OcrDebugModal({
+  rawText,
+  debug,
+  docConfidence,
+  onClose,
+  t,
+  bcp47,
+}: {
+  rawText: string;
+  debug: ScanDebugDto | null;
+  docConfidence: number;
+  onClose: () => void;
+  t: (key: string) => string;
+  bcp47: string;
+}) {
+  const conf = debug?.confidence ?? docConfidence;
+  return (
+    <div
+      className="fixed inset-0 z-[110] flex items-center justify-center bg-black/50 p-4"
+      role="dialog"
+      aria-modal="true"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <div className="flex max-h-[85vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl bg-white shadow-2xl">
+        <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
+          <h3 className="text-sm font-black text-slate-900">{t("scan.ocrDebugTitle")}</h3>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-lg p-1 text-slate-600 hover:bg-slate-100"
+            aria-label={t("scan.ocrDebugClose")}
+          >
+            <X className="h-5 w-5" aria-hidden />
+          </button>
+        </div>
+        <div className="grid gap-2 border-b border-slate-100 px-4 py-3 text-xs">
+          <DebugRow label={t("scan.ocrDebugProvider")} value={debug?.provider ?? "ocr.space"} />
+          <DebugRow
+            label={t("scan.ocrDebugConfidence")}
+            value={`${Math.round(conf * 100)}%`}
+          />
+          <DebugRow
+            label={t("scan.ocrDebugParseMs")}
+            value={
+              debug?.parseDurationMs != null
+                ? `${debug.parseDurationMs.toLocaleString(bcp47)} ms`
+                : "—"
+            }
+          />
+          <DebugRow label={t("scan.ocrDebugItems")} value={String(debug?.itemsFound ?? 0)} />
+          <DebugRow
+            label={t("scan.ocrDebugTextLen")}
+            value={String(debug?.textLength ?? rawText.length)}
+          />
+          <DebugRow label={t("scan.ocrDebugEngine")} value={debug?.ocrEngine ?? "—"} />
+          {debug?.fromCache ? (
+            <p className="font-bold text-slate-600">{t("scan.ocrDebugFromCache")}</p>
+          ) : null}
+        </div>
+        <pre className="min-h-[120px] flex-1 overflow-auto bg-slate-900 p-4 text-[11px] leading-relaxed text-slate-100 whitespace-pre-wrap">
+          {rawText || t("scan.noRawText")}
+        </pre>
+        <div className="border-t border-slate-200 px-4 py-3">
+          <button
+            type="button"
+            onClick={onClose}
+            className="w-full rounded-xl bg-slate-800 py-2 text-sm font-bold text-white hover:bg-slate-900"
+          >
+            {t("scan.ocrDebugClose")}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DebugRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex justify-between gap-2">
+      <span className="font-bold text-slate-500">{label}</span>
+      <span className="font-semibold text-slate-900">{value}</span>
     </div>
   );
 }
@@ -967,16 +1198,21 @@ function PreviewRow({
   label,
   value,
   highlight,
+  highlightClass,
 }: {
   label: string;
   value: string;
   highlight?: boolean;
+  highlightClass?: string;
 }) {
   return (
     <tr>
       <td className="px-3 py-2 font-bold text-slate-600">{label}</td>
       <td
-        className={`px-3 py-2 font-semibold text-slate-900 ${highlight ? "text-base font-black tabular-nums text-rose-700" : ""}`}
+        className={`px-3 py-2 font-semibold text-slate-900 ${
+          highlightClass ??
+          (highlight ? "text-base font-black tabular-nums text-rose-700" : "")
+        }`}
       >
         {value}
       </td>

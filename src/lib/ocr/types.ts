@@ -80,6 +80,10 @@ export type ScannedDocument = {
   vatAmount?: number | null;
   /** Detected grand total */
   total?: number | null;
+  /** Σ line totals — for mismatch UI */
+  itemsSumDetected?: number;
+  /** Total does not match line items or looks absurd */
+  totalSuspect?: boolean;
   /** Parsed line items */
   items: ScannedItem[];
   /** Lines skipped by parser (header/meta/low confidence) */
@@ -102,4 +106,5 @@ export type OcrEngineResult = {
   text: string;
   engine: string;
   confidence: number;
+  pdfPageCount?: number;
 };

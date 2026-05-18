@@ -12,6 +12,9 @@ export type ScanDebugMeta = {
   ocrEngine?: string;
   fromCache?: boolean;
   partial?: boolean;
+  totalSuspect?: boolean;
+  itemsSumDetected?: number;
+  pdfPageCount?: number;
 };
 
 export type ScanApiSuccess = {

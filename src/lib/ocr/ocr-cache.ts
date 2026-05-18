@@ -1,11 +1,20 @@
 import { createHash } from "node:crypto";
 import { prisma } from "@/lib/prisma";
 
+const MAX_RAW_RESPONSE_CHARS = 32_000;
+
 export type OcrCachePayload = {
   rawText: string;
   confidence: number;
   engine: string;
+  rawResponse?: string | null;
 };
+
+export function truncateRawOcrResponse(body: string | null | undefined): string | null {
+  if (!body?.trim()) return null;
+  if (body.length <= MAX_RAW_RESPONSE_CHARS) return body;
+  return `${body.slice(0, MAX_RAW_RESPONSE_CHARS)}\n…[truncated]`;
+}
 
 type CacheGlobals = typeof globalThis & {
   __wegoOcrCacheMem?: Map<string, OcrCachePayload>;
@@ -55,6 +64,7 @@ export async function getOcrFromCache(fileHash: string): Promise<OcrCachePayload
       rawText: row.rawText,
       confidence: row.confidence,
       engine: row.engine,
+      rawResponse: row.rawResponse,
     };
     memorySet(fileHash, payload);
     console.log("[OCR] ocr_cache hit (db)", fileHash.slice(0, 12));
@@ -78,6 +88,7 @@ export async function setOcrCache(
       create: {
         fileHash,
         rawText: payload.rawText,
+        rawResponse: payload.rawResponse ?? null,
         confidence: payload.confidence,
         engine: payload.engine,
         fileName: meta?.fileName ?? null,
@@ -85,6 +96,7 @@ export async function setOcrCache(
       },
       update: {
         rawText: payload.rawText,
+        rawResponse: payload.rawResponse ?? null,
         confidence: payload.confidence,
         engine: payload.engine,
         fileName: meta?.fileName ?? null,

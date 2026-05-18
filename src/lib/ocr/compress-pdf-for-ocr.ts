@@ -4,16 +4,9 @@ import { compressImageBuffer, TARGET_BYTES } from "./compress-image";
 
 const PDF_RENDER_SCALE = process.env.VERCEL ? 2 : 2.5;
 
-/**
- * PDF → render page 1 → JPEG (for OCR.space free tier, ~1MB limit).
- */
-export async function renderPdfFirstPageToJpeg(pdfBuffer: Buffer): Promise<Buffer> {
-  const { createCanvas } = await import("@napi-rs/canvas");
+async function loadPdfDocument(pdfBuffer: Buffer) {
   const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
   const base = path.join(process.cwd(), "node_modules", "pdfjs-dist");
-
-  console.log("[OCR] pdf-render start bytes:", pdfBuffer.length);
-
   const loadingTask = pdfjs.getDocument({
     data: new Uint8Array(pdfBuffer),
     standardFontDataUrl: path.join(base, `standard_fonts${path.sep}`),
@@ -22,8 +15,28 @@ export async function renderPdfFirstPageToJpeg(pdfBuffer: Buffer): Promise<Buffe
     isEvalSupported: false,
     useSystemFonts: true,
   });
+  return loadingTask.promise;
+}
 
-  const pdfDocument = await loadingTask.promise;
+/** Page count for UI warnings (multi-page PDF → only page 1 is OCR'd). */
+export async function getPdfPageCount(pdfBuffer: Buffer): Promise<number> {
+  const pdfDocument = await loadPdfDocument(pdfBuffer);
+  try {
+    return pdfDocument.numPages;
+  } finally {
+    await pdfDocument.destroy();
+  }
+}
+
+/**
+ * PDF → render page 1 → JPEG (for OCR.space free tier, ~1MB limit).
+ */
+export async function renderPdfFirstPageToJpeg(pdfBuffer: Buffer): Promise<Buffer> {
+  const { createCanvas } = await import("@napi-rs/canvas");
+
+  console.log("[OCR] pdf-render start bytes:", pdfBuffer.length);
+
+  const pdfDocument = await loadPdfDocument(pdfBuffer);
   try {
     const page = await pdfDocument.getPage(1);
     const viewport = page.getViewport({ scale: PDF_RENDER_SCALE });

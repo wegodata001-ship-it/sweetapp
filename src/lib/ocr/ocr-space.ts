@@ -9,6 +9,8 @@ export type OcrSpaceResult = {
   rawText: string;
   lines: string[];
   confidence: number;
+  /** Truncated OCR.space JSON body for debug/cache */
+  rawApiResponse?: string | null;
 };
 
 type OcrSpaceWord = {
@@ -249,7 +251,7 @@ export async function runOcrSpace(
 
   for (let i = 0; i < LANGUAGE_ATTEMPTS.length; i++) {
     const language = LANGUAGE_ATTEMPTS[i];
-    const { httpStatus, json } = await postToOcrSpace(
+    const { httpStatus, json, bodyText } = await postToOcrSpace(
       apiUrl,
       apiKey,
       language,
@@ -282,8 +284,9 @@ export async function runOcrSpace(
     }
 
     const result = normalizeOcrSpaceResponse(json);
+    result.rawApiResponse = bodyText;
     console.log(
-      "[OCR] OCR confidence:",
+      "[OCR] RESPONSE confidence:",
       result.confidence,
       "language:",
       language,

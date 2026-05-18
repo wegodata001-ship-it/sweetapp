@@ -3,12 +3,14 @@ import { extractTextFromDocument, hasMeaningfulText } from "./extract-text";
 import { OcrServiceError } from "./ocr-errors";
 import { parseReceiptText, summarizeParsed } from "./parser";
 import { enrichScannedDocument } from "./matcher";
+import { applyTotalValidation } from "./validate-document-totals";
 import { uploadReceiptToStorage } from "./storage";
 import type { ScanDebugMeta } from "./api-response";
 import type { ScannedDocument } from "./types";
 
 export * from "./types";
 export { parseReceiptText, summarizeParsed } from "./parser";
+export { parseHebrewInvoiceTable } from "./hebrew-invoice-table-parser";
 export { enrichScannedDocument } from "./matcher";
 export { ocrSpaceConfigured } from "./ocr-space";
 export type { OcrSpaceResult } from "./ocr-space";
@@ -79,6 +81,8 @@ export async function scanDocument(input: {
   let engine = "ocr_space";
   let confidence = 0;
 
+  console.log("[OCR] START", { fileName, mimeType, bytes: buffer.length });
+
   const uploadStart = Date.now();
   const ocrPipelineStart = Date.now();
 
@@ -98,6 +102,7 @@ export async function scanDocument(input: {
   engine = ocrResult.engine;
   confidence = ocrResult.confidence;
   const ocrFromCache = engine.includes("_cache");
+  const pdfPageCount = ocrResult.pdfPageCount;
 
   console.log("[OCR] RAW TEXT:", rawText);
   console.log("[OCR] RAW TEXT length:", rawText.length, "engine:", engine);
@@ -105,11 +110,12 @@ export async function scanDocument(input: {
   let error: string | undefined;
 
   const parseStart = Date.now();
-  const parsed = parseReceiptText(rawText);
+  console.log("[PARSER] START");
+  const parsed = applyTotalValidation(parseReceiptText(rawText));
   const parseDurationMs = Date.now() - parseStart;
+  console.log("[PARSER] DONE ms:", parseDurationMs, summarizeParsed(parsed));
 
   console.log("[OCR] PARSED RESULT:", JSON.stringify(summarizeParsed(parsed)));
-  console.log("[OCR] OCR parse duration ms:", parseDurationMs);
 
   parsed.engine = engine;
   parsed.confidence = Math.max(parsed.confidence, confidence);
@@ -123,11 +129,12 @@ export async function scanDocument(input: {
   }
 
   const matchStart = Date.now();
+  console.log("[MATCHER] START");
   let enriched: ScannedDocument;
   try {
-    enriched = await enrichScannedDocument(parsed);
+    enriched = applyTotalValidation(await enrichScannedDocument(parsed));
+    console.log("[MATCHER] DONE ms:", Date.now() - matchStart);
     console.log("[OCR] ENRICHED RESULT:", JSON.stringify(summarizeParsed(enriched)));
-    console.log("[OCR] match duration ms:", Date.now() - matchStart);
   } catch (e) {
     console.error("[scanDocument] enrich failed", e);
     enriched = parsed;
@@ -152,7 +159,12 @@ export async function scanDocument(input: {
     ocrEngine: engine,
     fromCache: ocrFromCache,
     partial,
+    totalSuspect: enriched.totalSuspect,
+    itemsSumDetected: enriched.itemsSumDetected,
+    pdfPageCount,
   };
+
+  console.log("[OCR] RESPONSE", { partial, error: error ?? null, debug });
 
   return { ...enriched, error, partial, debug };
 }

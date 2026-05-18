@@ -1,6 +1,12 @@
 import { compressForOcr } from "./compress-for-ocr";
 import { OcrServiceError } from "./ocr-errors";
-import { getOcrFromCache, hashFileBuffer, setOcrCache } from "./ocr-cache";
+import {
+  getOcrFromCache,
+  hashFileBuffer,
+  setOcrCache,
+  truncateRawOcrResponse,
+} from "./ocr-cache";
+import { getPdfPageCount } from "./compress-pdf-for-ocr";
 import { ocrSpaceConfigured, runOcrSpace } from "./ocr-space";
 import type { OcrEngineResult } from "./types";
 
@@ -18,12 +24,23 @@ export async function extractTextFromDocument(
   }
 
   const fileHash = hashFileBuffer(buffer);
+  let pdfPageCount: number | undefined;
+  if (mimeType === "application/pdf") {
+    try {
+      pdfPageCount = await getPdfPageCount(buffer);
+      console.log("[OCR] pdf page count:", pdfPageCount);
+    } catch (e) {
+      console.warn("[OCR] pdf page count failed:", e);
+    }
+  }
+
   const cached = await getOcrFromCache(fileHash);
   if (cached) {
     return {
       text: cached.rawText,
       engine: `${cached.engine}_cache`,
       confidence: cached.confidence,
+      pdfPageCount,
     };
   }
 
@@ -31,7 +48,7 @@ export async function extractTextFromDocument(
   const ocrStart = Date.now();
 
   try {
-    const { rawText, confidence } = await runOcrSpace(
+    const { rawText, confidence, rawApiResponse } = await runOcrSpace(
       compressed.buffer,
       compressed.mimeType,
       compressed.fileName,
@@ -40,7 +57,12 @@ export async function extractTextFromDocument(
 
     await setOcrCache(
       fileHash,
-      { rawText, confidence, engine: "ocr_space" },
+      {
+        rawText,
+        confidence,
+        engine: "ocr_space",
+        rawResponse: truncateRawOcrResponse(rawApiResponse),
+      },
       { fileName, mimeType },
     );
 
@@ -48,6 +70,7 @@ export async function extractTextFromDocument(
       text: rawText,
       engine: "ocr_space",
       confidence,
+      pdfPageCount,
     };
   } catch (e) {
     console.error("[OCR] OCR errors:", e instanceof Error ? e.message : e);

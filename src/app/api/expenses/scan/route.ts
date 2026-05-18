@@ -96,18 +96,17 @@ export async function POST(req: NextRequest) {
               ? 504
               : 502;
       const userMessage =
-        e.code === "OCR_PROVIDER_ERROR"
-          ? `OCR.space: ${e.message}`
+        e.code === "OCR_PROVIDER_ERROR" || e.code === "OCR_TIMEOUT"
+          ? "שירות OCR זמנית לא זמין"
           : e.message;
       return scanJsonError(userMessage, status, e.code);
     }
 
-    const message = timedOut
-      ? "OCR timed out — try a smaller or clearer image"
-      : e instanceof Error
-        ? e.message
-        : "internal error";
     console.error("[OCR] OCR errors:", e instanceof Error ? e.stack ?? e.message : e);
-    return scanJsonError(message, timedOut ? 504 : 500, timedOut ? "OCR_TIMEOUT" : "OCR_PROVIDER_ERROR");
+    return scanJsonError(
+      "שירות OCR זמנית לא זמין",
+      timedOut ? 504 : 500,
+      timedOut ? "OCR_TIMEOUT" : "OCR_PROVIDER_ERROR",
+    );
   }
 }

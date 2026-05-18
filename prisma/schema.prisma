@@ -24,14 +24,15 @@ model Customer {
 
 /// Cached OCR.space results — keyed by SHA-256 of uploaded file bytes
 model OcrCache {
-  fileHash   String   @id @db.VarChar(64)
-  rawText    String   @db.Text
-  confidence Float    @default(0)
-  engine     String   @default("ocr_space")
-  fileName   String?
-  mimeType   String?
-  createdAt  DateTime @default(now())
-  lastUsedAt DateTime @updatedAt
+  fileHash    String   @id @db.VarChar(64)
+  rawText     String   @db.Text
+  rawResponse String?  @db.Text
+  confidence  Float    @default(0)
+  engine      String   @default("ocr_space")
+  fileName    String?
+  mimeType    String?
+  createdAt   DateTime @default(now())
+  lastUsedAt  DateTime @updatedAt
 
   @@map("ocr_cache")
 }

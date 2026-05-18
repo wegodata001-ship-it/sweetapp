@@ -1,5 +1,6 @@
 import type { ScannedDocument, ScannedItem } from "./types";
-import { normalizeOcrText } from "./normalize-ocr-text";
+import { normalizeOcrText, splitOcrLines } from "./normalize-ocr-text";
+import { parseHebrewInvoiceTable } from "./hebrew-invoice-table-parser";
 import {
   extractHebrewInvoiceFields,
   parseFallbackLineItems,
@@ -134,20 +135,7 @@ function normalizeForMatch(s: string): string {
 }
 
 export function splitLines(text: string): string[] {
-  const out: string[] = [];
-  for (const line of text.split(/\r?\n/)) {
-    const t = line.replace(/[\t ]+/g, " ").trim();
-    if (!t) continue;
-    if (t.length > 70 && /\s{2,}/.test(t)) {
-      for (const part of t.split(/\s{2,}/)) {
-        const p = part.trim();
-        if (p.length > 0) out.push(p);
-      }
-    } else {
-      out.push(t);
-    }
-  }
-  return out;
+  return splitOcrLines(text);
 }
 
 function letterCount(s: string): number {
@@ -752,12 +740,25 @@ export function parseReceiptText(rawText: string): ScannedDocument {
   const text = normalizeOcrText(rawText ?? "");
   const lines = splitLines(text);
 
-  console.log("[parser] lines count:", lines.length, "text length:", text.length);
+  console.log("[PARSER] lines count:", lines.length, "text length:", text.length);
 
-  const { items: rtlItems, skipped } = extractTableItems(lines);
+  const tableResult = parseHebrewInvoiceTable(text);
+  let items = tableResult.items;
+  let skipped = tableResult.skipped;
+
+  if (items.length === 0) {
+    const legacy = extractTableItems(lines);
+    items = legacy.items;
+    skipped = legacy.skipped;
+    console.log("[PARSER] legacy RTL table items:", items.length);
+  }
 
   const fb = extractHebrewInvoiceFields(text, lines);
   const fbItems = parseFallbackLineItems(lines);
+  if (items.length === 0 && fbItems.length > 0) {
+    items = fbItems;
+    console.log("[PARSER] vertical fallback items:", fbItems.length);
+  }
 
   const supplierRawName =
     extractSupplier(lines, text) || fb.supplierRawName || "";
@@ -768,12 +769,8 @@ export function parseReceiptText(rawText: string): ScannedDocument {
   const total = extractTotal(text, lines) ?? fb.total ?? null;
   const vat = extractVatAmount(text, lines) ?? fb.vatAmount ?? null;
   const documentType = extractDocumentType(text) ?? fb.documentType;
-  const items =
-    rtlItems.length > 0 ? rtlItems : fbItems.length > 0 ? fbItems : rtlItems;
 
-  if (fbItems.length > 0 && rtlItems.length === 0) {
-    console.log("[parser] fallback line items:", fbItems.length);
-  }
+  console.log("[PARSER] table header found:", tableResult.headerFound);
 
   const draft: Omit<ScannedDocument, "confidence"> = {
     supplierRawName,
