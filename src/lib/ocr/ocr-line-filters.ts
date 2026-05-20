@@ -1,3 +1,5 @@
+import { isOcrGarbageText } from "./normalize-hebrew-ocr";
+
 /**
  * Strict filters — not every OCR line is a product row.
  */
@@ -9,7 +11,7 @@ const FOOTER_RE =
   /סה[\"']?כ\s*לפני|סה[\"']?כ\s*לתשלום|סהכ\s*לתשלום|סך\s*הכל|כולל\s*מע[\"']?מ|^מע[\"']?מ\s|^הנחה\s|לאחר\s*הנחה|לפני\s*מע/i;
 
 const TABLE_HEADER_RE =
-  /מק[\"']?ט|מקט|שם\s*פריט|תיאור|תאור|כמות|מחיר|מחיר\s*יח|פריט/i;
+  /מפתח\s*פריט|מק[\"']?ט|מקט|שם\s*פריט|תיאור|תאור|כמות|מחיר|מחיר\s*יח|פריט|%?\s*הנחה/i;
 
 const MIN_LINE_LETTERS = 2;
 const MIN_NAME_LETTERS = 2;
@@ -72,6 +74,7 @@ export function shouldSkipItemLine(line: string): boolean {
 
 export function isReadableProductName(name: string): boolean {
   const n = name.trim();
+  if (isOcrGarbageText(n)) return false;
   if (letterCount(n) < MIN_NAME_LETTERS) return false;
   if (/^[\d\s.,\-₪%]+$/.test(n)) return false;
   if (symbolRatio(n) > MAX_SYMBOL_RATIO) return false;

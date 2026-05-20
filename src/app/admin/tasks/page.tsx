@@ -4,6 +4,7 @@ import { ClipboardList, Loader2, Plus, RefreshCw, Send } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useI18n } from "@/components/i18n-provider";
 import { useToast } from "@/components/toast-provider";
+import { dispatchNotificationsRefresh } from "@/lib/notifications/refresh-event";
 import { TaskGroupsSection } from "@/components/tasks/task-groups-section";
 import type { SerializedWorkEmployeeTask } from "@/lib/work-tasks/serialize-work-task";
 
@@ -129,7 +130,11 @@ export default function AdminWorkTasksPage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ workTemplateId: assignTpl, employeeId: assignEmp }),
     });
-    const j = (await res.json()) as { ok?: boolean; error?: string; data?: { count: number } };
+    const j = (await res.json()) as {
+      ok?: boolean;
+      error?: string;
+      data?: { count: number; notificationsSent?: number; employeeLinkedToUser?: boolean };
+    };
     if (!res.ok || !j.ok) {
       showToast({ tone: "error", title: j.error ?? t("common.error") });
       return;
@@ -138,6 +143,12 @@ export default function AdminWorkTasksPage() {
       tone: "success",
       title: t("admin.tasks.work.assignedCount", { count: String(j.data?.count ?? 0) }),
     });
+    if ((j.data?.notificationsSent ?? 0) > 0) {
+      showToast({ tone: "info", title: t("alerts.notificationSent") });
+    } else if (j.data?.employeeLinkedToUser === false) {
+      showToast({ tone: "warning", title: t("admin.tasks.work.noUserLinkForNotify") });
+    }
+    dispatchNotificationsRefresh();
     void refresh();
   };
 

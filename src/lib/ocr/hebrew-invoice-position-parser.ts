@@ -17,7 +17,7 @@ import {
   SANITY_MAX_QTY,
   SANITY_MAX_UNIT_PRICE,
 } from "./invoice-line-sanity";
-import { fixRtlLineText } from "./normalize-ocr-text";
+import { normalizeHebrewOCR, isOcrGarbageText } from "./normalize-hebrew-ocr";
 import type { OcrPositionedLine, OcrPositionedWord } from "./ocr-overlay";
 
 const NUMBER_RE =
@@ -36,6 +36,8 @@ export type PositionParseResult = {
   items: ScannedItem[];
   skipped: number;
   headerFound: boolean;
+  columnBands?: { kind: string; minX: number; maxX: number; centerX: number }[];
+  parseSource: "position";
 };
 
 function classifyHeaderWord(text: string): ColumnKind {
@@ -63,7 +65,26 @@ function detectColumnBands(headerLine: OcrPositionedLine): ColumnBand[] {
   }
   if (bands.length < 2) return [];
   bands.sort((a, b) => a.centerX - b.centerX);
-  return bands;
+  return expandColumnBands(bands);
+}
+
+/** Partition full row width between detected header columns. */
+function expandColumnBands(bands: ColumnBand[]): ColumnBand[] {
+  const sorted = [...bands].sort((a, b) => a.centerX - b.centerX);
+  for (let i = 0; i < sorted.length; i++) {
+    const prev = sorted[i - 1];
+    const next = sorted[i + 1];
+    const leftMid = prev ? (prev.centerX + sorted[i].centerX) / 2 : 0;
+    const rightMid = next
+      ? (sorted[i].centerX + next.centerX) / 2
+      : sorted[i].maxX + 400;
+    sorted[i] = {
+      ...sorted[i],
+      minX: Math.max(0, leftMid - 8),
+      maxX: rightMid + 8,
+    };
+  }
+  return sorted;
 }
 
 function assignWordToColumn(
@@ -84,8 +105,8 @@ function assignWordToColumn(
 function wordsToCells(
   words: OcrPositionedWord[],
   bands: ColumnBand[],
-): Record<ColumnKind, string[]> {
-  const cells: Record<ColumnKind, string[]> = {
+): Record<ColumnKind, OcrPositionedWord[]> {
+  const cells: Record<ColumnKind, OcrPositionedWord[]> = {
     sku: [],
     description: [],
     quantity: [],
@@ -95,13 +116,18 @@ function wordsToCells(
   };
   for (const w of words) {
     const col = assignWordToColumn(w, bands);
-    cells[col].push(w.text);
+    cells[col].push(w);
   }
   return cells;
 }
 
-function parseNumericCell(parts: string[]): number {
-  const joined = parts.join(" ");
+function joinDescriptionWords(descWords: OcrPositionedWord[]): string {
+  const sorted = [...descWords].sort((a, b) => b.centerX - a.centerX);
+  return normalizeHebrewOCR(sorted.map((w) => w.text).join(" "));
+}
+
+function parseNumericCell(words: OcrPositionedWord[]): number {
+  const joined = words.map((w) => w.text).join(" ");
   const re = new RegExp(NUMBER_RE.source, "g");
   const nums: number[] = [];
   let m: RegExpExecArray | null;
@@ -118,7 +144,7 @@ function buildItemFromRow(
   unitPrice: number,
   lineTotal: number,
 ): ScannedItem | null {
-  if (!isReadableProductName(rawName)) return null;
+  if (!isReadableProductName(rawName) || isOcrGarbageText(rawName)) return null;
   if (isUnreasonableTriple(quantity, unitPrice, lineTotal)) {
     return buildItemWithStatus(rawName, quantity, unitPrice, lineTotal, 0.25, "suspect", true);
   }
@@ -185,11 +211,19 @@ function parsePositionRow(
   line: OcrPositionedLine,
   bands: ColumnBand[],
 ): ScannedItem | null {
-  const text = fixRtlLineText(line.text);
+  const text = normalizeHebrewOCR(line.text);
   if (shouldSkipItemLine(text)) return null;
 
   const cells = wordsToCells(line.words, bands);
-  const rawName = fixRtlLineText(cells.description.join(" ").trim()) || text.replace(NUMBER_RE, "").trim();
+  let rawName = joinDescriptionWords(cells.description);
+  if (!rawName) {
+    const unknownText = cells.unknown
+      .filter((w) => !/^\d+([.,]\d+)?$/.test(w.text))
+      .sort((a, b) => b.centerX - a.centerX)
+      .map((w) => w.text)
+      .join(" ");
+    rawName = normalizeHebrewOCR(unknownText) || text.replace(NUMBER_RE, "").trim();
+  }
 
   let quantity = parseNumericCell(cells.quantity);
   let unitPrice = parseNumericCell(cells.unitPrice);
@@ -213,7 +247,7 @@ function findTableBounds(overlay: OcrPositionedLine[]): {
   let bands: ColumnBand[] = [];
 
   for (let i = 0; i < Math.min(overlay.length, 45); i++) {
-    const text = fixRtlLineText(overlay[i].text);
+    const text = normalizeHebrewOCR(overlay[i].text);
     if (isTableHeaderLine(text) && overlay[i].words.length >= 2) {
       headerIdx = i;
       bands = detectColumnBands(overlay[i]);
@@ -226,7 +260,7 @@ function findTableBounds(overlay: OcrPositionedLine[]): {
   const bodyStart = headerIdx >= 0 ? headerIdx + 1 : 0;
   let bodyEnd = overlay.length;
   for (let i = bodyStart; i < overlay.length; i++) {
-    if (isFooterLine(fixRtlLineText(overlay[i].text))) {
+    if (isFooterLine(normalizeHebrewOCR(overlay[i].text))) {
       bodyEnd = i;
       break;
     }
@@ -239,20 +273,27 @@ export function parseHebrewInvoiceByPosition(
   overlay: OcrPositionedLine[],
 ): PositionParseResult {
   if (overlay.length === 0) {
-    return { items: [], skipped: 0, headerFound: false };
+    return { items: [], skipped: 0, headerFound: false, parseSource: "position" };
   }
 
   const { headerIdx, bands, bodyStart, bodyEnd } = findTableBounds(overlay);
   if (bands.length < 2) {
-    return { items: [], skipped: 0, headerFound: false };
+    return { items: [], skipped: 0, headerFound: false, parseSource: "position" };
   }
+
+  const columnBands = bands.map((b) => ({
+    kind: b.kind,
+    minX: Math.round(b.minX),
+    maxX: Math.round(b.maxX),
+    centerX: Math.round(b.centerX),
+  }));
 
   const items: ScannedItem[] = [];
   let skipped = 0;
 
   for (let i = bodyStart; i < bodyEnd; i++) {
     const line = overlay[i];
-    const text = fixRtlLineText(line.text);
+    const text = normalizeHebrewOCR(line.text);
     if (shouldSkipItemLine(text) || isTableHeaderLine(text)) {
       skipped++;
       continue;
@@ -280,5 +321,7 @@ export function parseHebrewInvoiceByPosition(
     items,
     skipped,
     headerFound: headerIdx >= 0,
+    columnBands,
+    parseSource: "position",
   };
 }

@@ -10,11 +10,24 @@ export type ScanDebugMeta = {
   itemsFound: number;
   parseDurationMs: number;
   ocrEngine?: string;
+  ocrLanguage?: string;
+  ocrEngineNumber?: string;
   fromCache?: boolean;
   partial?: boolean;
   totalSuspect?: boolean;
   itemsSumDetected?: number;
   pdfPageCount?: number;
+  overlayLineCount?: number;
+  parseSource?: string;
+  invoiceKind?: "expense" | "credit";
+  needsReviewFields?: string[];
+  headerFound?: boolean;
+  columnBands?: { kind: string; minX: number; maxX: number; centerX: number }[];
+  overlayLinesPreview?: { text: string; top: number; wordCount: number }[];
+  /** SHA-256 של הקובץ המקורי — להשוואת LOCAL מול PROD */
+  fileHash?: string;
+  fileSizeBytes?: number;
+  ocrInputMode?: "signed_url" | "direct_buffer";
 };
 
 export type ScanApiSuccess = {

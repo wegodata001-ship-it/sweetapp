@@ -29,7 +29,9 @@ export function extractHebrewInvoiceFields(
   let vatAmount: number | null = null;
   let documentType: string | undefined;
 
-  if (/חשבונית\s*מס|tax\s*invoice/i.test(text)) {
+  if (/חשבונית\s*מס\s*זיכוי|זיכוי/i.test(text)) {
+    documentType = "חשבונית מס זיכוי";
+  } else if (/חשבונית\s*מס|tax\s*invoice/i.test(text)) {
     documentType = "חשבונית מס";
   }
 

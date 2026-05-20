@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { prismaAny } from "@/lib/prisma";
 import { requireDb } from "@/lib/api-route";
 import { getSessionFromCookie } from "@/lib/auth/get-session";
-import { canManageAllTasks, viewerMayAccessTaskAssignee } from "@/lib/tasks/task-access";
+import { assertStrictAssignee } from "@/lib/auth/strict-user-isolation";
+import { canManageAllTasks } from "@/lib/tasks/task-access";
 import { serializeWorkflowRunDetail } from "@/lib/workflows/serialize";
 
 export const runtime = "nodejs";
@@ -27,7 +28,7 @@ async function assertAccess(
     include: RUN_INCLUDE,
   });
   if (!run) return { ok: false, status: 404, error: "ריצה לא נמצאה" };
-  if (!canManageAllTasks(session) && !(await viewerMayAccessTaskAssignee(session, run.assigneeId as string))) {
+  if (!assertStrictAssignee(session, run.assigneeId as string)) {
     return {
       ok: false,
       status: 403,

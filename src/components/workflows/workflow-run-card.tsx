@@ -46,10 +46,13 @@ export function WorkflowRunCard({
   run,
   canControl,
   onChanged,
+  employeeView = false,
 }: {
   run: WorkflowRunDetailDto;
   canControl: boolean;
   onChanged?: () => void;
+  /** פורטל עובד — לא להציג שם עובד אחר */
+  employeeView?: boolean;
 }) {
   const { t, dir } = useI18n();
   const { showToast } = useToast();
@@ -163,7 +166,8 @@ export function WorkflowRunCard({
             </p>
             <h2 className="mt-1 text-lg font-black text-slate-950 md:text-xl">{run.title}</h2>
             <p className="mt-0.5 text-xs font-bold text-slate-600">
-              {run.assignee_name} · {totals.done}/{totals.total} {t("workflows.runner.tasksSuffix")}
+              {!employeeView && run.assignee_name ? `${run.assignee_name} · ` : null}
+              {totals.done}/{totals.total} {t("workflows.runner.tasksSuffix")}
               {totals.late > 0 ? (
                 <span className="ms-2 rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-black text-rose-800">
                   {t("workflows.runner.lateCount", { n: totals.late })}

@@ -11,7 +11,7 @@ export function Sidebar() {
     <aside className="sticky top-0 hidden h-screen min-h-0 w-[78px] shrink-0 flex-col border-l border-white/10 bg-[#081224] shadow-luxury lg:flex lg:w-72">
       <div className="shrink-0 px-3 pt-5 lg:px-5 lg:pt-6">
         <Link href="/" className="flex items-center justify-center gap-3 lg:justify-start">
-          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-[#d4af37] text-base font-black text-[#081224] shadow-[0_0_20px_rgba(212,175,55,0.15)]">
+          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-[#c9a227] text-base font-black text-[#081224] shadow-sm">
             W
           </div>
           <div className="hidden min-w-0 lg:block">

@@ -21,6 +21,7 @@
 /build
 
 # misc
+tmp/ocr-debug/
 .DS_Store
 *.pem
 

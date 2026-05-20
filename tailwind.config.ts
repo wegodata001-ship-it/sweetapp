@@ -10,8 +10,8 @@ const config = {
     extend: {
       colors: {
         luxury: {
-          gold: "#D4AF37",
-          "gold-hover": "#c9a227",
+          gold: "#c9a227",
+          "gold-hover": "#b8941f",
           charcoal: "#1a1f2e",
           navy: "#121a26",
           "navy-rich": "#1a2332",
@@ -20,9 +20,9 @@ const config = {
       },
       boxShadow: {
         luxury:
-          "0 4px 28px -6px rgba(15, 23, 42, 0.14), 0 2px 12px -4px rgba(15, 23, 42, 0.08)",
+          "0 4px 20px -6px rgba(15, 23, 42, 0.1), 0 1px 6px -2px rgba(15, 23, 42, 0.06)",
         "luxury-sm":
-          "0 2px 14px -4px rgba(15, 23, 42, 0.1), 0 1px 4px -2px rgba(15, 23, 42, 0.06)",
+          "0 1px 8px -2px rgba(15, 23, 42, 0.08), 0 1px 2px rgba(15, 23, 42, 0.04)",
       },
       fontSize: {
         xs: ["0.8125rem", { lineHeight: "1.35rem" }],

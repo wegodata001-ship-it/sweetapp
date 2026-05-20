@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { verifySessionToken, COOKIE_NAME } from "@/lib/auth/jwt";
+import {
+  employeeWorkflowApiAllowed,
+  isPureEmployeeRole,
+} from "@/lib/auth/employee-api-access";
 import { API_ACCESS_RULES, PAGE_ACCESS_RULES, matchRule } from "@/lib/auth/permissions";
 import { WEGO_LOCALE_COOKIE, normalizeLocale } from "@/lib/i18n/constants";
 import { createTranslator } from "@/lib/i18n/translator";
@@ -42,6 +46,16 @@ export async function middleware(request: NextRequest) {
   // Cron endpoints validate their own secret token; let them through middleware.
   if (pathname.startsWith("/api/cron/")) {
     return NextResponse.next();
+  }
+  if (pathname === "/api/debug/test-email" && request.method === "POST") {
+    const key =
+      request.headers.get("x-email-test-key")?.trim() ||
+      request.nextUrl.searchParams.get("key")?.trim() ||
+      "";
+    const secret = process.env.EMAIL_TEST_SECRET?.trim() || process.env.JWT_SECRET?.trim();
+    if (key && secret && key === secret) {
+      return NextResponse.next();
+    }
   }
 
   const token = request.cookies.get(COOKIE_NAME)?.value;
@@ -108,6 +122,12 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(new URL("/employee", request.url));
   }
 
+  if (isPureEmployeeRole(role)) {
+    if (pathname.startsWith("/admin") || pathname.startsWith("/manager")) {
+      return NextResponse.redirect(new URL("/employee", request.url));
+    }
+  }
+
   if (pathname.startsWith("/api/")) {
     const apiUrl = request.nextUrl;
     /** נתיב API בלי סלאש סופי — כדי שה־regex יתאים לפני matchRule */
@@ -127,7 +147,7 @@ export async function middleware(request: NextRequest) {
     if (apiPath === "/api/work/my-tasks" && request.method === "GET" && canAccessMyTasksPage) {
       return NextResponse.next();
     }
-    /** התחלה/סיום משימות יומיות — ללא מטריצת הרשאות; בעלות לפי employeeId בשרת */
+    /** התחלה/סיום משימות — בעלות לפי assignedToUserId בשרת */
     if (
       request.method === "POST" &&
       canAccessMyTasksPage &&
@@ -135,6 +155,24 @@ export async function middleware(request: NextRequest) {
       (apiPath.endsWith("/start") || apiPath.endsWith("/complete"))
     ) {
       return NextResponse.next();
+    }
+
+    if (isPureEmployeeRole(role)) {
+      if (apiPath.startsWith("/api/admin/")) {
+        return NextResponse.json({ ok: false, error: t("toasts.noPermission") }, { status: 403 });
+      }
+      if (apiPath.startsWith("/api/workflows/")) {
+        if (employeeWorkflowApiAllowed(apiPath, request.method)) {
+          return NextResponse.next();
+        }
+        return NextResponse.json({ ok: false, error: t("toasts.noPermission") }, { status: 403 });
+      }
+      if (apiPath === "/api/notifications" || apiPath.startsWith("/api/notifications/")) {
+        return NextResponse.json({ ok: false, error: t("toasts.noPermission") }, { status: 403 });
+      }
+      if (apiPath.startsWith("/api/task-groups")) {
+        return NextResponse.json({ ok: false, error: t("toasts.noPermission") }, { status: 403 });
+      }
     }
     if (
       apiPath === "/api/employees" &&
@@ -173,6 +211,12 @@ export async function middleware(request: NextRequest) {
       return NextResponse.next();
     }
     if (apiPath === "/api/me/notifications" || apiPath.startsWith("/api/me/notifications/")) {
+      return NextResponse.next();
+    }
+    if (apiPath === "/api/me/notification-preferences") {
+      return NextResponse.next();
+    }
+    if (apiPath === "/api/notifications" || apiPath.startsWith("/api/notifications/")) {
       return NextResponse.next();
     }
     if (apiPath === "/api/me/language" && request.method === "PATCH") {

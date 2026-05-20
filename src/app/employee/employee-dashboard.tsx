@@ -79,7 +79,10 @@ export function EmployeeDashboard() {
 
   const load = useCallback(async () => {
     try {
-      const res = await fetch("/api/me/dashboard", { credentials: "same-origin" });
+      const res = await fetch(`/api/me/dashboard?_=${Date.now()}`, {
+        credentials: "same-origin",
+        cache: "no-store",
+      });
       const json = (await res.json().catch(() => null)) as
         | { ok: true; data: DashboardData }
         | { ok: false; error?: string }
@@ -114,6 +117,11 @@ export function EmployeeDashboard() {
   }, [router, user?.role]);
 
   useEffect(() => {
+    try {
+      sessionStorage.removeItem("wego:employee-tasks-cache");
+    } catch {
+      /* */
+    }
     queueMicrotask(() => {
       void load();
     });
@@ -287,6 +295,7 @@ export function EmployeeDashboard() {
           <WorkflowRunCard
             run={data.active_run}
             canControl
+            employeeView
             onChanged={() => void load()}
           />
         ) : (

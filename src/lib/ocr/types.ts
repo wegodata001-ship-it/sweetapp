@@ -80,6 +80,18 @@ export type ScannedDocument = {
   time?: string;
   /** Document type hint ("invoice", "receipt", "delivery_note", "credit") */
   documentType?: string;
+  /** expense | credit — מזוהה מ"חשבונית מס זיכוי" */
+  invoiceKind?: "expense" | "credit";
+  /** confidence 0–1 לשדות עיקריים — UI: "דורש אימות" */
+  fieldConfidence?: {
+    supplier?: number;
+    invoiceNumber?: number;
+    date?: number;
+    total?: number;
+    invoiceKind?: number;
+  };
+  /** שמות שדות שדורשים אישור ידני */
+  needsReviewFields?: string[];
   /** Detected VAT amount when present */
   vatAmount?: number | null;
   /** Detected grand total */
@@ -112,4 +124,7 @@ export type OcrEngineResult = {
   confidence: number;
   pdfPageCount?: number;
   overlay?: OcrPositionedLine[];
+  lines?: string[];
+  ocrLanguage?: string;
+  ocrEngine?: string;
 };

@@ -16,6 +16,7 @@ import { formatShekel } from "@/lib/format-shekel";
 import { WEGO_LOCALE_COOKIE, normalizeLocale, localeToBcp47, type AppLocale } from "@/lib/i18n/constants";
 import { createTranslator, type TranslateFn } from "@/lib/i18n/translator";
 import { prisma, prismaAny } from "@/lib/prisma";
+import { getAdminNotificationWidgets } from "@/lib/notifications/admin-widgets";
 import { cookies } from "next/headers";
 
 export const dynamic = "force-dynamic";
@@ -87,7 +88,7 @@ async function getDashboardData(t: TranslateFn, locale: AppLocale) {
   const prevEnd = monthEnd(-1);
   const chartStart = monthStart(-3);
 
-  const [docs, payments, supplierRows, employeeRows, ledgerRows, openTaskCount, urgentTaskCount, inventoryProducts] =
+  const [docs, payments, supplierRows, employeeRows, ledgerRows, openTaskCount, urgentTaskCount, inventoryProducts, notifyWidgets] =
     await Promise.all([
       prisma.financialDocument.findMany({
         where: {
@@ -133,6 +134,12 @@ async function getDashboardData(t: TranslateFn, locale: AppLocale) {
           },
         },
       }),
+      getAdminNotificationWidgets().catch(() => ({
+        lateEmployees: 0,
+        overdueTasks: 0,
+        pendingChecks: 0,
+        upcomingOrders: 0,
+      })),
     ]);
 
   // Checks stats — best-effort; failure must not break the whole dashboard.
@@ -366,6 +373,7 @@ async function getDashboardData(t: TranslateFn, locale: AppLocale) {
     futureOrdersOpenCount,
     futureOrderAlerts: futureOrderAlerts.slice(0, 12),
     checks: checkStats,
+    notifyWidgets,
   };
 }
 
@@ -390,7 +398,7 @@ function KpiCard({
       style={{ boxShadow: "0 1px 2px rgba(15, 23, 42, 0.06)" }}
     >
       <div className="flex items-start justify-between gap-2">
-        <p className="text-[13px] font-bold leading-tight text-slate-600 opacity-70">{title}</p>
+        <p className="erp-kpi-label text-[14px] leading-tight text-slate-600 opacity-80">{title}</p>
         <span className={`shrink-0 rounded-xl p-2 ${tone}`}>{icon}</span>
       </div>
       {currency ? (
@@ -626,6 +634,62 @@ export default async function Home() {
         <div className="rounded-[18px] border border-slate-200/90 bg-white p-4 shadow-sm">
           <h2 className="erp-section-title">{t("dashboard.alertsTitle")}</h2>
           <div className="mt-3 flex flex-col gap-2">
+            {data.notifyWidgets.lateEmployees > 0 ? (
+              <Link
+                href="/admin/staff"
+                className="flex min-h-0 flex-col justify-center rounded-[16px] border border-rose-200 bg-rose-50/90 px-3 py-2.5 transition hover:border-rose-300"
+              >
+                <p className="flex items-center gap-2 text-[13px] font-extrabold text-rose-900">
+                  <AlertTriangle className="h-4 w-4 shrink-0" aria-hidden />
+                  {t("dashboard.widgetLateEmployees")}
+                </p>
+                <p className="mt-1 text-[13px] font-semibold leading-snug text-slate-800 opacity-90">
+                  {t("dashboard.widgetLateEmployeesDetail", { count: data.notifyWidgets.lateEmployees })}
+                </p>
+              </Link>
+            ) : null}
+            {data.notifyWidgets.overdueTasks > 0 ? (
+              <Link
+                href="/admin/tasks"
+                className="flex min-h-0 flex-col justify-center rounded-[16px] border border-violet-200 bg-violet-50/90 px-3 py-2.5 transition hover:border-violet-300"
+              >
+                <p className="flex items-center gap-2 text-[13px] font-extrabold text-violet-900">
+                  <ClipboardCheck className="h-4 w-4 shrink-0" aria-hidden />
+                  {t("dashboard.widgetOverdueTasks")}
+                </p>
+                <p className="mt-1 text-[13px] font-semibold leading-snug text-slate-800 opacity-90">
+                  {t("dashboard.widgetOverdueTasksDetail", { count: data.notifyWidgets.overdueTasks })}
+                </p>
+              </Link>
+            ) : null}
+            {data.notifyWidgets.pendingChecks > 0 ? (
+              <Link
+                href="/finance/checks"
+                className="flex min-h-0 flex-col justify-center rounded-[16px] border border-indigo-200 bg-indigo-50/90 px-3 py-2.5 transition hover:border-indigo-300"
+              >
+                <p className="flex items-center gap-2 text-[13px] font-extrabold text-indigo-900">
+                  <Banknote className="h-4 w-4 shrink-0" aria-hidden />
+                  {t("dashboard.widgetPendingChecks")}
+                </p>
+                <p className="mt-1 text-[13px] font-semibold leading-snug text-slate-800 opacity-90">
+                  {t("dashboard.widgetPendingChecksDetail", { count: data.notifyWidgets.pendingChecks })}
+                </p>
+              </Link>
+            ) : null}
+            {data.notifyWidgets.upcomingOrders > 0 ? (
+              <Link
+                href="/admin/future-orders"
+                className="flex min-h-0 flex-col justify-center rounded-[16px] border border-cyan-200 bg-cyan-50/90 px-3 py-2.5 transition hover:border-cyan-300"
+              >
+                <p className="flex items-center gap-2 text-[13px] font-extrabold text-cyan-900">
+                  <CalendarClock className="h-4 w-4 shrink-0" aria-hidden />
+                  {t("dashboard.widgetUpcomingOrders")}
+                </p>
+                <p className="mt-1 text-[13px] font-semibold leading-snug text-slate-800 opacity-90">
+                  {t("dashboard.widgetUpcomingOrdersDetail", { count: data.notifyWidgets.upcomingOrders })}
+                </p>
+              </Link>
+            ) : null}
             <Link
               href="/ops/inventory"
               className="flex min-h-0 flex-col justify-center rounded-[16px] border border-rose-100 bg-rose-50/90 px-3 py-2.5 transition hover:border-rose-200"

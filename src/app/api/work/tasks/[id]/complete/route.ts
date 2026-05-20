@@ -3,8 +3,11 @@ import { prisma } from "@/lib/prisma";
 import { requireDb } from "@/lib/api-route";
 import { getSessionFromCookie } from "@/lib/auth/get-session";
 import { computeActualMinutes, isTaskLate } from "@/lib/tasks/helpers";
+import { strictUserId } from "@/lib/auth/strict-user-isolation";
 import { assertEmployeeOwnsWorkTask } from "@/lib/work-tasks/access";
+import { logTaskCompleteDenied } from "@/lib/work-tasks/task-security-log";
 import { serializeWorkEmployeeTask } from "@/lib/work-tasks/serialize-work-task";
+import { notifyTaskCompleted } from "@/lib/notifications/task-flow";
 
 export const dynamic = "force-dynamic";
 
@@ -26,8 +29,14 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
       return NextResponse.json({ ok: false, error: "משימה לא נמצאה" }, { status: 404 });
     }
 
-    const gate = await assertEmployeeOwnsWorkTask(session, task.employeeId);
+    const gate = await assertEmployeeOwnsWorkTask(session, { ...task, id }, "complete");
     if (!gate.ok) {
+      logTaskCompleteDenied({
+        taskId: id,
+        userId: strictUserId(session),
+        assignedToUserId: task.assignedToUserId,
+        code: gate.code,
+      });
       return NextResponse.json(
         { ok: false, error: gate.error, code: gate.code },
         { status: gate.status },
@@ -35,7 +44,11 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     }
 
     if (task.status === "COMPLETED") {
-      return NextResponse.json({ ok: true, data: serializeWorkEmployeeTask(task) });
+      return NextResponse.json({
+        ok: true,
+        data: serializeWorkEmployeeTask(task),
+        notificationSent: false,
+      });
     }
 
     if (task.status !== "IN_PROGRESS" || !task.startedAt) {
@@ -59,6 +72,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
       );
     }
 
+    const previousStatus = task.status;
     const updated = await prisma.employeeTask.update({
       where: { id },
       data: {
@@ -68,7 +82,25 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
       },
     });
 
-    return NextResponse.json({ ok: true, data: serializeWorkEmployeeTask(updated) });
+    console.log("[TASK STATUS UPDATED]", {
+      taskId: id,
+      from: previousStatus,
+      to: "COMPLETED",
+      employeeId: task.employeeId,
+    });
+
+    const notificationSent = await notifyTaskCompleted({
+      taskId: id,
+      employeeId: task.employeeId,
+      taskTitle: task.title,
+      previousStatus,
+    });
+
+    return NextResponse.json({
+      ok: true,
+      data: serializeWorkEmployeeTask(updated),
+      notificationSent,
+    });
   } catch (e) {
     console.error("[POST /api/work/tasks/:id/complete]", e);
     return NextResponse.json({ ok: false, error: "לא ניתן לסיים משימה" }, { status: 500 });

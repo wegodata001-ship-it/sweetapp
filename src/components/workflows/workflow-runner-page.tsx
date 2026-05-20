@@ -179,8 +179,8 @@ export function WorkflowRunnerPage({
       const [tplsRes, tasksRes, runsRes, doneRes, dashRes] = await Promise.all([
         fetch("/api/workflows/templates", { credentials: "same-origin" }),
         fetch("/api/workflows/tasks", { credentials: "same-origin" }),
-        fetch("/api/workflows/runs?status=IN_PROGRESS", { credentials: "same-origin" }),
-        fetch("/api/workflows/runs?status=COMPLETED&includeCompleted=1", {
+        fetch("/api/workflows/runs?status=IN_PROGRESS&managerView=1", { credentials: "same-origin" }),
+        fetch("/api/workflows/runs?status=COMPLETED&includeCompleted=1&managerView=1", {
           credentials: "same-origin",
         }),
         canManage

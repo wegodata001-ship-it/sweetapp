@@ -1,6 +1,7 @@
 /**
  * OCR.space TextOverlay — word positions for column-aware table parsing.
  */
+import { normalizeHebrewOCR } from "./normalize-hebrew-ocr";
 
 export type OcrPositionedWord = {
   text: string;
@@ -35,14 +36,17 @@ type OcrSpaceLineRaw = {
   Words?: OcrSpaceWordRaw[];
   MinTop?: number;
   MaxTop?: number;
+  MaxHeight?: number;
 };
 
 type OcrSpaceParsedResult = {
   TextOverlay?: { Lines?: OcrSpaceLineRaw[] } | null;
+  ParsedText?: string | null;
 };
 
-type OcrSpaceApiResponse = {
+export type OcrSpaceApiResponse = {
   ParsedResults?: OcrSpaceParsedResult[];
+  OCRExitCode?: number;
 };
 
 function num(v: unknown, fallback = 0): number {
@@ -53,7 +57,8 @@ function num(v: unknown, fallback = 0): number {
 function wordsFromLine(line: OcrSpaceLineRaw): OcrPositionedWord[] {
   const words: OcrPositionedWord[] = [];
   for (const w of line.Words ?? []) {
-    const text = (w.WordText ?? "").trim();
+    const raw = (w.WordText ?? "").trim();
+    const text = normalizeHebrewOCR(raw);
     if (!text) continue;
     const left = num(w.Left);
     const top = num(w.Top);
@@ -77,6 +82,12 @@ function wordsFromLine(line: OcrSpaceLineRaw): OcrPositionedWord[] {
   return words;
 }
 
+/** Build readable line text from positioned words (LTR join; columns use X bands). */
+function lineTextFromWords(words: OcrPositionedWord[]): string {
+  if (words.length === 0) return "";
+  return words.map((w) => w.text).join(" ");
+}
+
 export function extractOverlayFromOcrSpaceJson(
   json: OcrSpaceApiResponse,
 ): OcrPositionedLine[] {
@@ -84,32 +95,45 @@ export function extractOverlayFromOcrSpaceJson(
   for (const pr of json.ParsedResults ?? []) {
     for (const line of pr.TextOverlay?.Lines ?? []) {
       const words = wordsFromLine(line);
+      const lineTop = num(line.MinTop, words[0]?.top ?? 0);
+
       if (words.length === 0) {
-        const t = (line.LineText ?? "").trim();
+        const t = normalizeHebrewOCR(line.LineText ?? "");
         if (t) {
           out.push({
             text: t,
             words: [],
-            top: num(line.MinTop),
+            top: lineTop,
             minLeft: 0,
             maxRight: 0,
           });
         }
         continue;
       }
+
       const tops = words.map((w) => w.top);
       const lefts = words.map((w) => w.left);
       const rights = words.map((w) => w.left + w.width);
       out.push({
-        text: words.map((w) => w.text).join(" "),
+        text: normalizeHebrewOCR(lineTextFromWords(words)),
         words,
-        top: Math.min(...tops),
+        top: lineTop || Math.min(...tops),
         minLeft: Math.min(...lefts),
         maxRight: Math.max(...rights),
       });
     }
   }
+
+  out.sort((a, b) => a.top - b.top || a.minLeft - b.minLeft);
   return out;
+}
+
+/** Primary text for header fields — prefer overlay lines over ParsedText. */
+export function buildRawTextFromOverlay(overlay: OcrPositionedLine[]): string {
+  return overlay
+    .map((l) => l.text)
+    .filter(Boolean)
+    .join("\n");
 }
 
 export function parseOverlayFromRawResponse(

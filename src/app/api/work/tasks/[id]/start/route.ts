@@ -3,7 +3,9 @@ import { prisma } from "@/lib/prisma";
 import { requireDb } from "@/lib/api-route";
 import { getSessionFromCookie } from "@/lib/auth/get-session";
 import { canManageAllTasks } from "@/lib/tasks/task-access";
+import { strictUserId } from "@/lib/auth/strict-user-isolation";
 import { assertEmployeeOwnsWorkTask } from "@/lib/work-tasks/access";
+import { logTaskStartDenied } from "@/lib/work-tasks/task-security-log";
 import { serializeWorkEmployeeTask } from "@/lib/work-tasks/serialize-work-task";
 
 export const dynamic = "force-dynamic";
@@ -25,8 +27,14 @@ export async function POST(_req: NextRequest, ctx: { params: Promise<{ id: strin
       return NextResponse.json({ ok: false, error: "משימה לא נמצאה" }, { status: 404 });
     }
 
-    const gate = await assertEmployeeOwnsWorkTask(session, task.employeeId);
+    const gate = await assertEmployeeOwnsWorkTask(session, { ...task, id }, "start");
     if (!gate.ok) {
+      logTaskStartDenied({
+        taskId: id,
+        userId: strictUserId(session),
+        assignedToUserId: task.assignedToUserId,
+        code: gate.code,
+      });
       return NextResponse.json(
         { ok: false, error: gate.error, code: gate.code },
         { status: gate.status },
@@ -44,7 +52,7 @@ export async function POST(_req: NextRequest, ctx: { params: Promise<{ id: strin
     if (!canManageAllTasks(session)) {
       const other = await prisma.employeeTask.findFirst({
         where: {
-          employeeId: task.employeeId,
+          assignedToUserId: strictUserId(session),
           status: "IN_PROGRESS",
           id: { not: task.id },
         },

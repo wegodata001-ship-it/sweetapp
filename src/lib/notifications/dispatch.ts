@@ -1,5 +1,17 @@
 import { prismaAny } from "@/lib/prisma";
 import { listStaffAlertRecipientIds } from "@/lib/staff/notify-managers";
+import {
+  priorityToColor,
+  type NotificationPriorityLevel,
+} from "@/lib/notifications/priority";
+import { notificationPriorityColumnExists } from "@/lib/notifications/db-compat";
+import { hasRecentNotification } from "@/lib/notifications/dedupe";
+import {
+  logNotificationCreated,
+  logNotificationDeduped,
+} from "@/lib/notifications/audit";
+import { scheduleNotificationEmail } from "@/lib/email/notification-email-pipeline";
+import { resolveEmailImportance } from "@/lib/email/importance";
 
 /** ערכי UI — ממופים לצבע בפועל */
 export type NotificationTone = "SUCCESS" | "WARNING" | "DANGER" | "INFO";
@@ -22,10 +34,39 @@ export type NotificationInsert = {
   type: string;
   title: string;
   message: string;
+  priority?: NotificationPriorityLevel;
   color?: string | null;
   actionUrl?: string | null;
   metadata?: unknown;
+  /** מניעת כפילויות — אותו נמען + סוג + מפתח ב-metadata */
+  dedupe?: {
+    metadataKey: string;
+    sinceHours?: number;
+  };
 };
+
+const ENTITY_METADATA_KEYS = [
+  "taskId",
+  "checkId",
+  "futureOrderId",
+  "workDate",
+  "shiftId",
+  "broadcastId",
+] as const;
+
+function inferDedupeKey(metadata: unknown): string | null {
+  if (!metadata || typeof metadata !== "object") return null;
+  const m = metadata as Record<string, unknown>;
+  for (const k of ENTITY_METADATA_KEYS) {
+    if (m[k] != null && String(m[k]).trim()) return k;
+  }
+  return null;
+}
+
+function rowColor(r: NotificationInsert): string {
+  if (r.color?.trim()) return r.color.trim();
+  return priorityToColor(r.priority ?? "MEDIUM");
+}
 
 /**
  * יצירת התראות — שורה לכל נמען (סימון נקרא/לא נקרא פר משתמש).
@@ -33,23 +74,91 @@ export type NotificationInsert = {
  */
 export async function insertNotifications(rows: NotificationInsert[]): Promise<void> {
   if (rows.length === 0) return;
-  try {
-    await prismaAny.notification.createMany({
-      data: rows.map((r) => ({
-        recipientUserId: r.recipientUserId,
-        subjectUserId: r.subjectUserId ?? null,
-        roleTarget: r.roleTarget,
+  const hasPriority = await notificationPriorityColumnExists();
+  for (const r of rows) {
+    const dedupeKey = r.dedupe?.metadataKey ?? inferDedupeKey(r.metadata);
+    const metaObj = (r.metadata ?? {}) as Record<string, unknown>;
+    if (dedupeKey && metaObj[dedupeKey] != null) {
+      const dup = await hasRecentNotification({
         type: r.type,
+        recipientUserId: r.recipientUserId,
+        roleTarget: r.roleTarget === "BOTH" ? undefined : r.roleTarget,
+        subjectUserId: r.subjectUserId,
+        metadataKey: dedupeKey,
+        metadataValue: String(metaObj[dedupeKey]),
+        sinceHours: r.dedupe?.sinceHours ?? 24,
+      });
+      if (dup) {
+        logNotificationDeduped({
+          type: r.type,
+          recipientUserId: r.recipientUserId,
+          metadataKey: dedupeKey,
+          metadataValue: metaObj[dedupeKey],
+        });
+        continue;
+      }
+    }
+
+    const priority = r.priority ?? "MEDIUM";
+    const meta =
+      r.metadata === undefined ? { priority } : { ...(r.metadata as object), priority };
+    const base = {
+      recipientUserId: r.recipientUserId,
+      subjectUserId: r.subjectUserId ?? null,
+      roleTarget: r.roleTarget,
+      type: r.type,
+      title: r.title,
+      message: r.message,
+      color: rowColor(r),
+      isRead: false,
+      actionUrl: r.actionUrl ?? null,
+      metadata: meta as object,
+    };
+    try {
+      const emailImportance = resolveEmailImportance({
+        type: r.type,
+        priority,
+        roleTarget: r.roleTarget,
+        metadata: metaObj,
+      });
+      let created: { id: string };
+      try {
+        created = (await prismaAny.notification.create({
+          data: hasPriority
+            ? { ...base, priority, emailImportance }
+            : { ...base, emailImportance },
+          select: { id: true },
+        })) as { id: string };
+      } catch {
+        created = (await prismaAny.notification.create({
+          data: hasPriority ? { ...base, priority } : base,
+          select: { id: true },
+        })) as { id: string };
+      }
+      logNotificationCreated({
+        id: created.id,
+        type: r.type,
+        recipientUserId: r.recipientUserId,
+        roleTarget: r.roleTarget,
         title: r.title,
-        message: r.message,
-        color: r.color ?? null,
-        isRead: false,
-        actionUrl: r.actionUrl ?? null,
-        metadata: r.metadata === undefined ? undefined : (r.metadata as object),
-      })),
-    });
-  } catch {
-    /* התראות לא חוסמות */
+        emailImportance,
+      });
+      scheduleNotificationEmail(
+        {
+          notificationId: created.id,
+          recipientUserId: r.recipientUserId,
+          type: r.type,
+          title: r.title,
+          message: r.message,
+          actionUrl: r.actionUrl ?? null,
+          metadata: meta,
+          roleTarget: r.roleTarget,
+        },
+        priority,
+      );
+    } catch (e) {
+      console.error("[insertNotifications] failed", { type: r.type, recipient: r.recipientUserId }, e);
+    }
   }
 }
 

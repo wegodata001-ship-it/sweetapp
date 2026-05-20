@@ -1,8 +1,20 @@
 import type { ScannedDocument, ScannedItem } from "./types";
 import { normalizeOcrText, splitOcrLines } from "./normalize-ocr-text";
-import { parseHebrewInvoiceTable } from "./hebrew-invoice-table-parser";
-import { parseHebrewInvoiceByPosition } from "./hebrew-invoice-position-parser";
 import type { OcrPositionedLine } from "./ocr-overlay";
+import { parseStructuredInvoice } from "./structured-invoice-parser";
+
+export type ParseReceiptOptions = {
+  overlay?: OcrPositionedLine[];
+};
+
+export type ParseReceiptMeta = {
+  parseSource: "position" | "structured-rows" | "text-table" | "legacy" | "fallback" | "none";
+  headerFound: boolean;
+  columnBands?: { kind: string; minX: number; maxX: number; centerX: number }[];
+  overlayLineCount: number;
+  invoiceKind?: "expense" | "credit";
+  needsReviewFields?: string[];
+};
 import {
   extractHebrewInvoiceFields,
   parseFallbackLineItems,
@@ -740,64 +752,72 @@ export function summarizeParsed(doc: ScannedDocument): Record<string, unknown> {
 
 export function parseReceiptText(
   rawText: string,
-  options?: { overlay?: OcrPositionedLine[] },
-): ScannedDocument {
+  options?: ParseReceiptOptions,
+): ScannedDocument & { parseMeta?: ParseReceiptMeta } {
   const text = normalizeOcrText(rawText ?? "");
   const lines = splitLines(text);
-
-  console.log("[PARSER] lines count:", lines.length, "text length:", text.length);
-
-  let items: ScannedItem[] = [];
-  let skipped = 0;
-  let headerFound = false;
-
   const overlay = options?.overlay ?? [];
-  if (overlay.length > 0) {
-    const posResult = parseHebrewInvoiceByPosition(overlay);
-    if (posResult.items.length > 0) {
-      items = posResult.items;
-      skipped = posResult.skipped;
-      headerFound = posResult.headerFound;
-      console.log("[PARSER] position-based items:", items.length);
-    }
-  }
 
-  const tableResult = parseHebrewInvoiceTable(text);
-  if (items.length === 0) {
-    items = tableResult.items;
-    skipped = tableResult.skipped;
-    headerFound = tableResult.headerFound;
-  } else if (tableResult.items.length > items.length) {
-    items = tableResult.items;
-    skipped = tableResult.skipped;
-    headerFound = tableResult.headerFound;
-  }
+  console.log("[PARSER] lines count:", lines.length, "overlay:", overlay.length);
 
-  if (items.length === 0) {
+  const structured = parseStructuredInvoice(text, overlay);
+  const hdr = structured.header;
+
+  let items = structured.items;
+  let skipped = structured.skipped;
+  let headerFound = structured.headerFound;
+  let parseSource: ParseReceiptMeta["parseSource"] = structured.parseSource;
+  let columnBands = structured.columnBands;
+
+  const overlayUsable = overlay.length >= 3;
+
+  if (items.length === 0 && !overlayUsable) {
     const legacy = extractTableItems(lines);
-    items = legacy.items;
-    skipped = legacy.skipped;
-    console.log("[PARSER] legacy RTL table items:", items.length);
+    if (legacy.items.length > 0) {
+      items = legacy.items;
+      skipped = legacy.skipped;
+      parseSource = "legacy";
+      console.log("[PARSER] legacy RTL table items:", items.length);
+    }
   }
 
   const fb = extractHebrewInvoiceFields(text, lines);
   const fbItems = parseFallbackLineItems(lines);
-  if (items.length === 0 && fbItems.length > 0) {
+  if (items.length === 0 && fbItems.length > 0 && !overlayUsable) {
     items = fbItems;
+    parseSource = "fallback";
     console.log("[PARSER] vertical fallback items:", fbItems.length);
   }
 
   const supplierRawName =
-    extractSupplier(lines, text) || fb.supplierRawName || "";
+    hdr.supplierRawName ||
+    extractSupplier(lines, text) ||
+    fb.supplierRawName ||
+    "";
   const invoiceNumber =
-    extractInvoiceNumber(text) || fb.invoiceNumber || "";
-  const date = extractDate(text) || fb.date || "";
+    hdr.invoiceNumber || extractInvoiceNumber(text) || fb.invoiceNumber || "";
+  const date = hdr.date || extractDate(text) || fb.date || "";
   const time = extractTime(text);
-  const total = extractTotal(text, lines) ?? fb.total ?? null;
-  const vat = extractVatAmount(text, lines) ?? fb.vatAmount ?? null;
-  const documentType = extractDocumentType(text) ?? fb.documentType;
+  const total = hdr.total ?? extractTotal(text, lines) ?? fb.total ?? null;
+  const vat = hdr.vatAmount ?? extractVatAmount(text, lines) ?? fb.vatAmount ?? null;
+  const documentType = hdr.documentType || extractDocumentType(text) || fb.documentType;
+  const invoiceKind = hdr.invoiceKind;
+  const needsReviewFields = hdr.needsReview;
 
-  console.log("[PARSER] table header found:", headerFound);
+  console.log("[PARSER] table header found:", headerFound, "source:", parseSource);
+  console.log("[OCR PARSED RESULT]", {
+    itemsCount: items.length,
+    parseSource,
+    headerFound,
+    columnBands,
+    itemsPreview: items.slice(0, 5).map((i) => ({
+      name: i.rawName,
+      qty: i.quantity,
+      price: i.unitPrice,
+      total: i.lineTotal,
+      conf: i.parseConfidence ?? i.confidenceScore,
+    })),
+  });
 
   const draft: Omit<ScannedDocument, "confidence"> = {
     supplierRawName,
@@ -807,17 +827,37 @@ export function parseReceiptText(
     date,
     time: time || undefined,
     documentType,
+    invoiceKind,
+    fieldConfidence: {
+      supplier: hdr.supplierConfidence,
+      invoiceNumber: hdr.invoiceNumberConfidence,
+      date: hdr.dateConfidence,
+      total: hdr.totalConfidence,
+      invoiceKind: hdr.invoiceKindConfidence,
+    },
+    needsReviewFields: needsReviewFields.length > 0 ? needsReviewFields : undefined,
     vatAmount: vat,
     total,
     items,
     skippedLinesCount: skipped,
     rawText: text,
-    engine: "parser-rtl",
+    engine: "parser-structured",
     receiptFileUrl: null,
     receiptFileName: null,
   };
 
-  return { ...draft, confidence: estimateConfidence(draft) };
+  return {
+    ...draft,
+    confidence: estimateConfidence(draft),
+    parseMeta: {
+      parseSource,
+      headerFound,
+      columnBands,
+      overlayLineCount: overlay.length,
+      invoiceKind,
+      needsReviewFields,
+    },
+  };
 }
 
 /** @deprecated use tokenizeNumbers — kept for tests */

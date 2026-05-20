@@ -6,6 +6,7 @@ import {
   sectionForNotificationType,
   isManagerRole,
 } from "@/lib/notifications/me-inbox";
+import { resolveNotificationColor } from "@/lib/notifications/priority";
 
 export async function GET(req: NextRequest) {
   const session = await getSessionFromCookie();
@@ -14,12 +15,25 @@ export async function GET(req: NextRequest) {
   }
 
   const onlyUnread = req.nextUrl.searchParams.get("unread") === "1";
-  const { rows, unreadCount, inbox } = await listMeNotifications({
-    userId: session.sub,
-    role: session.role,
-    onlyUnread,
-    take: isManagerRole(session.role) ? 80 : 40,
-  });
+  let rows: Awaited<ReturnType<typeof listMeNotifications>>["rows"] = [];
+  let unreadCount = 0;
+  let inbox: "employee" | "admin" = "employee";
+  try {
+    const listed = await listMeNotifications({
+      userId: session.sub,
+      role: session.role,
+      onlyUnread,
+      take: isManagerRole(session.role) ? 80 : 40,
+    });
+    rows = listed.rows;
+    unreadCount = listed.unreadCount;
+    inbox = listed.inbox;
+  } catch {
+    return NextResponse.json({
+      ok: true,
+      data: { inbox: "employee", unreadCount: 0, items: [] },
+    });
+  }
 
   const items = rows.map((a) => ({
     id: a.id,
@@ -28,7 +42,8 @@ export async function GET(req: NextRequest) {
     title: a.title,
     message: a.message,
     body: a.message,
-    color: a.color,
+    priority: a.priority,
+    color: resolveNotificationColor(a.priority, a.color),
     isRead: a.isRead,
     readAt: a.isRead ? a.createdAt.toISOString() : null,
     actionUrl: a.actionUrl,

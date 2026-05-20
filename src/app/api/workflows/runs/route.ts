@@ -4,10 +4,13 @@ import { prismaAny } from "@/lib/prisma";
 import { requireDb } from "@/lib/api-route";
 import { getSessionFromCookie } from "@/lib/auth/get-session";
 import {
-  canManageAllTasks,
-  resolveEmployeeTaskAssigneeIdsForUser,
-  viewerMayAccessTaskAssignee,
-} from "@/lib/tasks/task-access";
+  canViewAllWorkflowRuns,
+  filterWorkflowRunsForUser,
+  logStrictScope,
+  strictUserId,
+} from "@/lib/auth/strict-user-isolation";
+import { canManageAllTasks, viewerMayAccessTaskAssignee } from "@/lib/tasks/task-access";
+import { logTaskAccessBlocked } from "@/lib/work-tasks/task-security-log";
 import {
   serializeWorkflowRunDetail,
   serializeWorkflowRunSummary,
@@ -44,15 +47,8 @@ const RUN_SUMMARY_INCLUDE = {
 /**
  * GET /api/workflows/runs
  *
- * Lists runs visible to the active user.
- *
- *  - Managers see all runs (filterable by `assigneeId`, `status`).
- *  - Employees only see their own runs.
- *
- * Optional filters:
- *  - status=IN_PROGRESS|COMPLETED|ABORTED
- *  - assigneeId=<uid>
- *  - includeCompleted=1 (managers)
+ * - Employee portal (default): assigneeId = session.sub ONLY
+ * - Manager: ?managerView=1 + הרשאת tasks — כל הריצות
  */
 export async function GET(req: NextRequest) {
   const block = await requireDb();
@@ -62,15 +58,28 @@ export async function GET(req: NextRequest) {
     if (!session) {
       return NextResponse.json({ ok: false, error: "נדרשת התחברות" }, { status: 401 });
     }
+
     const { searchParams } = req.nextUrl;
-    const isManager = canManageAllTasks(session);
+    const uid = strictUserId(session);
+    if (session.role === UserRole.EMPLOYEE && searchParams.get("managerView") === "1") {
+      logTaskAccessBlocked({
+        route: "GET /api/workflows/runs",
+        userId: uid,
+        reason: "employee_manager_view_denied",
+      });
+    }
+    const managerView =
+      searchParams.get("managerView") === "1" && canViewAllWorkflowRuns(session);
+
     const where: Record<string, unknown> = {};
-    if (!isManager) {
-      where.assigneeId = { in: await resolveEmployeeTaskAssigneeIdsForUser(session.sub) };
+
+    if (!managerView) {
+      where.assigneeId = uid;
     } else {
       const assigneeId = searchParams.get("assigneeId");
       if (assigneeId) where.assigneeId = assigneeId;
     }
+
     const status = searchParams.get("status");
     if (status && ["IN_PROGRESS", "COMPLETED", "ABORTED"].includes(status)) {
       where.status = status;
@@ -78,14 +87,27 @@ export async function GET(req: NextRequest) {
       where.status = "IN_PROGRESS";
     }
 
-    const rows = await prismaAny.workflowRun.findMany({
+    let rows = await prismaAny.workflowRun.findMany({
       where,
       include: RUN_SUMMARY_INCLUDE,
       orderBy: [{ status: "asc" }, { startedAt: "desc" }],
       take: 200,
     });
 
+    if (!managerView) {
+      rows = filterWorkflowRunsForUser(rows as { assigneeId: string }[], uid);
+    }
+
     type Row = Parameters<typeof serializeWorkflowRunSummary>[0];
+
+    logStrictScope("[GET /api/workflows/runs]", session, {
+      managerView,
+      returnedRuns: rows.length,
+      returnedAssignees: (rows as { assigneeId: string; assignee?: { fullName: string } }[]).map(
+        (r) => ({ id: r.assigneeId, name: r.assignee?.fullName }),
+      ),
+    });
+
     return NextResponse.json({
       ok: true,
       data: rows.map((r: Row) => serializeWorkflowRunSummary(r)),
@@ -99,18 +121,6 @@ export async function GET(req: NextRequest) {
   }
 }
 
-/**
- * POST /api/workflows/runs
- *
- * Start a new run from a template. Manager-only (or the employee can start a
- * run for themselves via `assigneeId === session.sub`).
- *
- * Body: `{ templateId, assigneeId, notes? }`
- *
- * The run snapshots every item from the template — title, description, color,
- * estimated minutes (after override), requireLateReason — so the run remains
- * stable even if the library/template change later.
- */
 export async function POST(req: NextRequest) {
   const block = await requireDb();
   if (block) return block;
@@ -119,21 +129,32 @@ export async function POST(req: NextRequest) {
     if (!session) {
       return NextResponse.json({ ok: false, error: "נדרשת התחברות" }, { status: 401 });
     }
+    if (!canManageAllTasks(session)) {
+      logTaskAccessBlocked({
+        route: "POST /api/workflows/runs",
+        userId: strictUserId(session),
+        reason: "employee_cannot_create_run",
+      });
+      return NextResponse.json(
+        { ok: false, error: "רק מנהל יכול ליצור workflow", code: "MANAGER_ONLY" },
+        { status: 403 },
+      );
+    }
     const body = (await req.json()) as {
       templateId?: string;
       assigneeId?: string;
       notes?: string | null;
     };
     const templateId = (body.templateId ?? "").trim();
-    const assigneeId = (body.assigneeId ?? "").trim();
+    let assigneeId = (body.assigneeId ?? "").trim();
     if (!templateId || !assigneeId) {
       return NextResponse.json(
         { ok: false, error: "חובה לציין תבנית ועובד" },
         { status: 400 },
       );
     }
-    const isManager = canManageAllTasks(session);
-    if (!isManager && !(await viewerMayAccessTaskAssignee(session, assigneeId))) {
+
+    if (!(await viewerMayAccessTaskAssignee(session, assigneeId))) {
       return NextResponse.json(
         { ok: false, error: "הריצה אינה משויכת לחשבון שלך", code: "EMPLOYEE_OWNERSHIP_MISMATCH" },
         { status: 403 },
@@ -219,19 +240,19 @@ export async function POST(req: NextRequest) {
           create: (template.items as TmplItem[]).map((it, idx) => ({
             sourceTaskId: it.taskId,
             title: it.titleOverride?.trim() || it.task.title,
-            description: it.task.description ?? null,
-            color: it.task.color ?? null,
+            description: it.task.description,
+            color: it.task.color,
             estimatedMinutes: it.minutesOverride ?? it.task.estimatedMinutes,
             requireLateReason: it.task.requireLateReason,
             orderIndex: idx,
-            status: "PENDING",
           })),
         },
       },
       include: RUN_SUMMARY_INCLUDE,
     });
 
-    return NextResponse.json({ ok: true, data: serializeWorkflowRunDetail(created) });
+    type Row = Parameters<typeof serializeWorkflowRunDetail>[0];
+    return NextResponse.json({ ok: true, data: serializeWorkflowRunDetail(created as unknown as Row) });
   } catch (e) {
     console.error("[POST /api/workflows/runs]", e);
     return NextResponse.json(

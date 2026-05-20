@@ -4,12 +4,13 @@
 :root {
   --background: #ffffff;
   --foreground: #0f172a;
-  --primary: #d4af37;
+  --primary: #c9a227;
   --primary-foreground: #1a1508;
   --nav-surface: #1a2332;
   --nav-surface-elevated: #243044;
   --nav-border: rgba(255, 255, 255, 0.09);
   --content-surface: #ffffff;
+  --font-main: var(--font-cairo), var(--font-tajawal), system-ui, sans-serif;
   /* Compact ERP density */
   --erp-radius: 18px;
   --erp-gap: 10px;
@@ -17,7 +18,7 @@
   --erp-container-pad: 18px;
   --erp-input-h: 44px;
   --erp-btn-h: 42px;
-  --erp-table-row: 64px;
+  --erp-table-row: 68px;
 }
 
 @theme inline {
@@ -25,7 +26,7 @@
   --color-foreground: var(--foreground);
   --color-primary: var(--primary);
   --color-primary-foreground: var(--primary-foreground);
-  --font-sans: var(--font-geist-sans), var(--font-noto-arabic), system-ui,
+  --font-sans: var(--font-geist-sans), var(--font-cairo), var(--font-tajawal), system-ui,
     sans-serif;
   --font-mono: var(--font-geist-mono), ui-monospace, monospace;
 }
@@ -35,18 +36,42 @@ html {
   font-size: 100%;
 }
 
+html,
+body {
+  font-family: var(--font-main);
+}
+
 body {
   background: var(--content-surface);
   color: var(--foreground);
-  font-family: var(--font-geist-sans), var(--font-noto-arabic), system-ui,
-    sans-serif;
-  font-size: 0.875rem;
-  line-height: 1.45;
+  font-size: 0.9375rem;
+  line-height: 1.55;
+}
+
+body.locale-en {
+  font-family: var(--font-geist-sans), system-ui, sans-serif;
+}
+
+body.locale-ar,
+body.locale-he {
+  font-family: var(--font-main);
+}
+
+body.locale-ar {
+  direction: rtl;
+  text-align: right;
 }
 
 .font-arabic-brand {
-  font-family: var(--font-noto-arabic), "Noto Sans Arabic", system-ui,
-    sans-serif;
+  font-family: var(--font-main);
+}
+
+/* مبالغ وأرقام مالية */
+.erp-amount,
+.tabular-nums,
+[data-financial="true"],
+td[data-numeric="true"] {
+  font-variant-numeric: tabular-nums;
 }
 
 button,
@@ -66,6 +91,12 @@ textarea {
     @apply rounded-[18px] border border-slate-200/80 bg-slate-50/90 shadow-luxury-sm;
   }
 
+  .erp-card-title,
+  .erp-kpi-label {
+    font-weight: 700;
+    letter-spacing: -0.3px;
+  }
+
   /** Section titles across the app */
   .erp-page-title {
     @apply text-[clamp(2rem,2.6vw,2.625rem)] font-black leading-[1.1] tracking-tight text-slate-950;
@@ -73,6 +104,8 @@ textarea {
 
   .erp-section-title {
     @apply text-[22px] font-extrabold text-slate-950;
+    font-weight: 700;
+    letter-spacing: -0.3px;
   }
 
   /** Icon / compact action buttons in tables */
@@ -105,14 +138,26 @@ textarea {
 
   /** Tables: default data tables under main (exclude .erp-table-loose, .inventory-count-table) */
   main table:not(.erp-table-loose):not(.inventory-count-table) tbody tr {
-    min-height: 64px;
+    min-height: var(--erp-table-row);
   }
 
   main table:not(.erp-table-loose):not(.inventory-count-table) :is(thead th, tbody td) {
-    padding-block: 10px;
-    padding-inline: 12px;
-    font-size: 14px;
-    line-height: 1.35;
+    padding-block: 12px;
+    padding-inline: 14px;
+    font-size: 0.9375rem;
+    line-height: 1.5;
+  }
+
+  body.locale-ar main table:not(.erp-table-loose):not(.inventory-count-table) {
+    direction: rtl;
+    text-align: right;
+  }
+
+  body.locale-ar input,
+  body.locale-ar select,
+  body.locale-ar textarea,
+  body.locale-ar [role="dialog"] {
+    text-align: right;
   }
 
   main table.inventory-count-table tbody tr {
@@ -160,10 +205,10 @@ textarea {
   }
   @keyframes wf-pulse {
     0%, 100% {
-      box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.35);
+      box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.12);
     }
     50% {
-      box-shadow: 0 0 0 12px rgba(37, 99, 235, 0);
+      box-shadow: 0 0 0 8px rgba(37, 99, 235, 0);
     }
   }
 

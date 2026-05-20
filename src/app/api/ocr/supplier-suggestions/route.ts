@@ -3,6 +3,8 @@ import { requireDb } from "@/lib/api-route";
 import { rankSupplierSuggestions } from "@/lib/ocr/matcher";
 
 export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
+export const maxDuration = 60;
 
 export async function GET(req: NextRequest) {
   const block = await requireDb();

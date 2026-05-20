@@ -2,7 +2,7 @@
 
 import { IdCard, KeyRound, LogOut, Mail, Phone, ShieldCheck, User2 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useAuth } from "@/components/auth-provider";
 import { useI18n } from "@/components/i18n-provider";
 import { useToast } from "@/components/toast-provider";
@@ -21,6 +21,58 @@ export function EmployeeProfileClient() {
   const { showToast } = useToast();
   const router = useRouter();
   const [busy, setBusy] = useState(false);
+  const [emailPrefs, setEmailPrefs] = useState({
+    emailMode: "important" as "important" | "critical_only" | "daily_digest" | "muted",
+    emailQuietHours: true,
+    emailNotifyAll: true,
+    emailNotifyTasks: true,
+    emailNotifyLate: true,
+    emailNotifyUpdates: true,
+  });
+  const [prefsLoading, setPrefsLoading] = useState(true);
+
+  const loadEmailPrefs = useCallback(async () => {
+    setPrefsLoading(true);
+    try {
+      const res = await fetch("/api/me/notification-preferences", {
+        credentials: "same-origin",
+        cache: "no-store",
+      });
+      const j = (await res.json()) as { ok?: boolean; data?: typeof emailPrefs };
+      if (j.ok && j.data) setEmailPrefs(j.data);
+    } finally {
+      setPrefsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadEmailPrefs();
+  }, [loadEmailPrefs]);
+
+  async function saveEmailPrefs(next: typeof emailPrefs) {
+    setEmailPrefs(next);
+    const res = await fetch("/api/me/notification-preferences", {
+      method: "PATCH",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(next),
+    });
+    const j = (await res.json()) as { ok?: boolean };
+    if (res.ok && j.ok) {
+      showToast({ tone: "success", title: t("common.saved") });
+    } else {
+      showToast({ tone: "error", title: t("common.error") });
+      void loadEmailPrefs();
+    }
+  }
+
+  function setEmailMode(mode: typeof emailPrefs.emailMode) {
+    void saveEmailPrefs({
+      ...emailPrefs,
+      emailMode: mode,
+      emailNotifyAll: mode !== "muted",
+    });
+  }
 
   async function signOut() {
     if (busy) return;
@@ -65,6 +117,54 @@ export function EmployeeProfileClient() {
           <Row icon={<Phone className="h-4 w-4" aria-hidden />} label={t("employee.profile.phone")} value={user?.phone ?? "—"} />
           <Row icon={<ShieldCheck className="h-4 w-4" aria-hidden />} label={t("employee.profile.role")} value={t(`employee.profile.role_${user?.role ?? "EMPLOYEE"}`)} />
         </ul>
+      </section>
+
+      <section className="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-200 md:p-5">
+        <h2 className="text-sm font-black text-slate-900">התראות במייל</h2>
+        <p className="mt-1 text-xs text-slate-500">רק התראות חשובות — לא כל מה שמופיע בפעמון</p>
+        {prefsLoading ? (
+          <p className="mt-3 text-sm text-slate-400">טוען…</p>
+        ) : (
+          <ul className="mt-3 space-y-2">
+            {(
+              [
+                ["important", "קבל מיילים חשובים"],
+                ["critical_only", "קבל רק קריטיים"],
+                ["daily_digest", "קבל סיכום יומי (batch)"],
+                ["muted", "השתק מיילים"],
+              ] as const
+            ).map(([mode, label]) => (
+              <li key={mode}>
+                <label className="flex cursor-pointer items-center gap-3 rounded-xl border border-slate-100 px-3 py-2.5 hover:bg-slate-50">
+                  <input
+                    type="radio"
+                    name="emailMode"
+                    checked={emailPrefs.emailMode === mode}
+                    onChange={() => setEmailMode(mode)}
+                    className="h-4 w-4 border-slate-300"
+                  />
+                  <span className="text-sm font-semibold text-slate-800">{label}</span>
+                </label>
+              </li>
+            ))}
+            <li>
+              <label className="flex cursor-pointer items-center gap-3 rounded-xl border border-slate-100 px-3 py-2.5 hover:bg-slate-50">
+                <input
+                  type="checkbox"
+                  checked={emailPrefs.emailQuietHours}
+                  disabled={emailPrefs.emailMode === "muted"}
+                  onChange={(e) =>
+                    void saveEmailPrefs({ ...emailPrefs, emailQuietHours: e.target.checked })
+                  }
+                  className="h-4 w-4 rounded border-slate-300"
+                />
+                <span className="text-sm font-semibold text-slate-800">
+                  שעות שקט (23:00–07:00, מלבד קריטי)
+                </span>
+              </label>
+            </li>
+          </ul>
+        )}
       </section>
 
       <section className="grid grid-cols-1 gap-3 sm:grid-cols-2">

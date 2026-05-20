@@ -162,15 +162,15 @@ function NavLink({
         compact ? "min-h-[52px] w-full justify-start px-4 py-3" : ""
       } ${
         active
-          ? "border-r-[3px] border-[#d4af37] bg-[linear-gradient(90deg,rgba(212,175,55,.18),transparent)] text-white shadow-[0_0_20px_rgba(212,175,55,0.15)]"
+          ? "border-r-[3px] border-[#c9a227] bg-[linear-gradient(90deg,rgba(201,162,39,.12),transparent)] text-white shadow-sm"
           : "text-slate-300 hover:translate-x-[-3px] hover:bg-white/[0.06] hover:text-white"
       }`}
     >
       <span
         className={`flex h-[42px] w-[42px] shrink-0 items-center justify-center rounded-[14px] border transition duration-300 ease-out group-hover/sidebar-item:scale-[1.08] ${
           active
-            ? "border-[#d4af37]/40 bg-[linear-gradient(135deg,#d4af37,#f3d36a)] text-[#081224] shadow-[0_0_20px_rgba(212,175,55,0.22)]"
-            : "border-white/10 bg-white/[0.04] text-slate-400 group-hover/sidebar-item:border-[#d4af37]/45 group-hover/sidebar-item:text-[#d4af37] group-hover/sidebar-item:shadow-[0_0_20px_rgba(212,175,55,0.15)]"
+            ? "border-[#c9a227]/35 bg-[linear-gradient(135deg,#c9a227,#d4bc5c)] text-[#081224] shadow-sm"
+            : "border-white/10 bg-white/[0.04] text-slate-400 group-hover/sidebar-item:border-[#c9a227]/40 group-hover/sidebar-item:text-[#c9a227]"
         }`}
       >
         <Icon className="h-5 w-5" aria-hidden />
@@ -216,7 +216,7 @@ function SubMenu({
             }}
             className="group/sidebar-sub-item flex items-center gap-2 rounded-lg px-2 py-1.5 text-[12.5px] font-bold text-slate-400 transition hover:bg-white/[0.04] hover:text-white"
           >
-            <span className="block h-1.5 w-1.5 rounded-full bg-[#d4af37]/40 transition group-hover/sidebar-sub-item:bg-[#d4af37]" />
+            <span className="block h-1.5 w-1.5 rounded-full bg-[#c9a227]/40 transition group-hover/sidebar-sub-item:bg-[#c9a227]" />
             <span className="truncate">{t(sub.labelKey)}</span>
           </Link>
         </li>
@@ -356,15 +356,15 @@ export function AppNavContent({ onNavigate, variant = "sidebar" }: AppNavContent
                 compact ? "w-full justify-start px-4 py-3" : "lg:justify-start lg:px-3"
               } ${
                 pathname === "/employee/tasks" || pathname.startsWith("/employee/tasks/")
-                  ? "border-r-[3px] border-[#d4af37] bg-[linear-gradient(90deg,rgba(212,175,55,.18),transparent)] text-white shadow-[0_0_20px_rgba(212,175,55,0.15)]"
+                  ? "border-r-[3px] border-[#c9a227] bg-[linear-gradient(90deg,rgba(201,162,39,.12),transparent)] text-white shadow-sm"
                   : "text-slate-300 hover:translate-x-[-3px] hover:bg-white/[0.06] hover:text-white"
               }`}
             >
               <span
                 className={`flex h-[42px] w-[42px] shrink-0 items-center justify-center rounded-[14px] border transition duration-300 ease-out group-hover/sidebar-item:scale-[1.08] ${
                   pathname === "/employee/tasks" || pathname.startsWith("/employee/tasks/")
-                    ? "border-[#d4af37]/40 bg-[linear-gradient(135deg,#d4af37,#f3d36a)] text-[#081224] shadow-[0_0_20px_rgba(212,175,55,0.22)]"
-                    : "border-white/10 bg-white/[0.04] text-slate-400 group-hover/sidebar-item:border-[#d4af37]/45 group-hover/sidebar-item:text-[#d4af37] group-hover/sidebar-item:shadow-[0_0_20px_rgba(212,175,55,0.15)]"
+                    ? "border-[#c9a227]/35 bg-[linear-gradient(135deg,#c9a227,#d4bc5c)] text-[#081224] shadow-sm"
+                    : "border-white/10 bg-white/[0.04] text-slate-400 group-hover/sidebar-item:border-[#c9a227]/40 group-hover/sidebar-item:text-[#c9a227]"
                 }`}
               >
                 <CheckSquare className="h-5 w-5" aria-hidden />
@@ -379,15 +379,15 @@ export function AppNavContent({ onNavigate, variant = "sidebar" }: AppNavContent
                 compact ? "w-full justify-start px-4 py-3" : "lg:justify-start lg:px-3"
               } ${
                 pathname === "/employee/workflows" || pathname.startsWith("/employee/workflows/")
-                  ? "border-r-[3px] border-[#d4af37] bg-[linear-gradient(90deg,rgba(212,175,55,.18),transparent)] text-white shadow-[0_0_20px_rgba(212,175,55,0.15)]"
+                  ? "border-r-[3px] border-[#c9a227] bg-[linear-gradient(90deg,rgba(201,162,39,.12),transparent)] text-white shadow-sm"
                   : "text-slate-300 hover:translate-x-[-3px] hover:bg-white/[0.06] hover:text-white"
               }`}
             >
               <span
                 className={`flex h-[42px] w-[42px] shrink-0 items-center justify-center rounded-[14px] border transition duration-300 ease-out group-hover/sidebar-item:scale-[1.08] ${
                   pathname === "/employee/workflows" || pathname.startsWith("/employee/workflows/")
-                    ? "border-[#d4af37]/40 bg-[linear-gradient(135deg,#d4af37,#f3d36a)] text-[#081224] shadow-[0_0_20px_rgba(212,175,55,0.22)]"
-                    : "border-white/10 bg-white/[0.04] text-slate-400 group-hover/sidebar-item:border-[#d4af37]/45 group-hover/sidebar-item:text-[#d4af37] group-hover/sidebar-item:shadow-[0_0_20px_rgba(212,175,55,0.15)]"
+                    ? "border-[#c9a227]/35 bg-[linear-gradient(135deg,#c9a227,#d4bc5c)] text-[#081224] shadow-sm"
+                    : "border-white/10 bg-white/[0.04] text-slate-400 group-hover/sidebar-item:border-[#c9a227]/40 group-hover/sidebar-item:text-[#c9a227]"
                 }`}
               >
                 <Workflow className="h-5 w-5" aria-hidden />
@@ -402,15 +402,15 @@ export function AppNavContent({ onNavigate, variant = "sidebar" }: AppNavContent
                 compact ? "w-full justify-start px-4 py-3" : "lg:justify-start lg:px-3"
               } ${
                 pathname === "/employee/attendance" || pathname.startsWith("/employee/attendance/")
-                  ? "border-r-[3px] border-[#d4af37] bg-[linear-gradient(90deg,rgba(212,175,55,.18),transparent)] text-white shadow-[0_0_20px_rgba(212,175,55,0.15)]"
+                  ? "border-r-[3px] border-[#c9a227] bg-[linear-gradient(90deg,rgba(201,162,39,.12),transparent)] text-white shadow-sm"
                   : "text-slate-300 hover:translate-x-[-3px] hover:bg-white/[0.06] hover:text-white"
               }`}
             >
               <span
                 className={`flex h-[42px] w-[42px] shrink-0 items-center justify-center rounded-[14px] border transition duration-300 ease-out group-hover/sidebar-item:scale-[1.08] ${
                   pathname === "/employee/attendance" || pathname.startsWith("/employee/attendance/")
-                    ? "border-[#d4af37]/40 bg-[linear-gradient(135deg,#d4af37,#f3d36a)] text-[#081224] shadow-[0_0_20px_rgba(212,175,55,0.22)]"
-                    : "border-white/10 bg-white/[0.04] text-slate-400 group-hover/sidebar-item:border-[#d4af37]/45 group-hover/sidebar-item:text-[#d4af37] group-hover/sidebar-item:shadow-[0_0_20px_rgba(212,175,55,0.15)]"
+                    ? "border-[#c9a227]/35 bg-[linear-gradient(135deg,#c9a227,#d4bc5c)] text-[#081224] shadow-sm"
+                    : "border-white/10 bg-white/[0.04] text-slate-400 group-hover/sidebar-item:border-[#c9a227]/40 group-hover/sidebar-item:text-[#c9a227]"
                 }`}
               >
                 <Clock3 className="h-5 w-5" aria-hidden />

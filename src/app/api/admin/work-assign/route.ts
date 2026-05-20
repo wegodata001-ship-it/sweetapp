@@ -4,12 +4,14 @@ import { requireDb } from "@/lib/api-route";
 import { getSessionFromCookie } from "@/lib/auth/get-session";
 import { canManageAllTasks } from "@/lib/tasks/task-access";
 import { getOrCreateActiveEmployeeWorkSession } from "@/lib/work-tasks/session";
+import { resolveSingleUserForEmployee } from "@/lib/work-tasks/duplicate-employee-check";
+import { notifyTaskAssigned } from "@/lib/notifications/task-flow";
 
 export const dynamic = "force-dynamic";
 
 /**
  * POST /api/admin/work-assign
- * יוצר EmployeeTask אמיתיות לעובד מתוך WorkTemplate.
+ * מנהל בלבד — יוצר EmployeeTask עם assignedToUserId חובה.
  */
 export async function POST(req: NextRequest) {
   const dbErr = await requireDb();
@@ -32,6 +34,14 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: "עובד לא נמצא" }, { status: 404 });
     }
 
+    const assignee = await resolveSingleUserForEmployee(employeeId);
+    if (!assignee.ok) {
+      return NextResponse.json(
+        { ok: false, error: assignee.error, code: assignee.code },
+        { status: assignee.code === "DUPLICATE_USER" ? 409 : 400 },
+      );
+    }
+
     const lines = await prisma.workTemplateTask.findMany({
       where: { templateId: workTemplateId },
       orderBy: { orderIndex: "asc" },
@@ -48,6 +58,7 @@ export async function POST(req: NextRequest) {
         prisma.employeeTask.create({
           data: {
             employeeId,
+            assignedToUserId: assignee.userId,
             sessionId: sessionRow.id,
             taskTemplateId: line.taskTemplateId,
             title: line.taskTemplate.title,
@@ -60,7 +71,33 @@ export async function POST(req: NextRequest) {
       ),
     );
 
-    return NextResponse.json({ ok: true, data: { count: created.length, sessionId: sessionRow.id } });
+    console.log("[TASK CREATED]", {
+      count: created.length,
+      employeeId,
+      assignedToUserId: assignee.userId,
+      sessionId: sessionRow.id,
+      by: session.sub,
+    });
+
+    let notificationsSent = 0;
+    for (const task of created) {
+      const sent = await notifyTaskAssigned({
+        taskId: task.id,
+        employeeId,
+        title: task.title,
+      });
+      if (sent) notificationsSent += 1;
+    }
+
+    return NextResponse.json({
+      ok: true,
+      data: {
+        count: created.length,
+        sessionId: sessionRow.id,
+        notificationsSent,
+        assignedToUserId: assignee.userId,
+      },
+    });
   } catch (e) {
     console.error("[POST /api/admin/work-assign]", e);
     return NextResponse.json({ ok: false, error: "הקצאה נכשלה" }, { status: 500 });

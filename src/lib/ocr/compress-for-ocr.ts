@@ -11,6 +11,7 @@ export type CompressedForOcr = {
 };
 
 /**
+ * @deprecated לא בשימוש — OCR עובד על הקובץ המקורי בלבד (ראו extract-text.ts).
  * Prepare file for OCR.space:
  * - PDF → page 1 JPEG
  * - large images → resize/compress JPEG

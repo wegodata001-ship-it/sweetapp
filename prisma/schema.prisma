@@ -514,11 +514,14 @@ model EmployeeWorkSession {
   @@index([startedAt])
 }
 
-/// משימה בפועל — בעלות לפי employeeId בלבד
+/// משימה בפועל — בעלות לפי assignedToUserId (מקור אמת) + employeeId (כרטיס)
 model EmployeeTask {
   id               String              @id @default(cuid())
   employeeId       String
   employee         Employee            @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  /// משתמש שקיבל את המשימה — חובה לסינון עובד (לא לשתף בין משתמשים על אותו כרטיס)
+  assignedToUserId String?
+  assignedToUser   User?               @relation("EmployeeTaskAssignee", fields: [assignedToUserId], references: [id], onDelete: SetNull)
   sessionId        String
   session          EmployeeWorkSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   taskTemplateId   String?
@@ -535,6 +538,8 @@ model EmployeeTask {
   createdAt        DateTime            @default(now())
 
   @@index([employeeId, status])
+  @@index([assignedToUserId, status])
+  @@index([assignedToUserId])
   @@index([sessionId, orderIndex])
   @@index([startedAt])
 }
@@ -864,6 +869,17 @@ model User {
   /// שפת ממשק: he | ar | en (תרגום ב-UI בלבד, לא ב-DB עסקי)
   language String @default("he")
 
+  /// העדפות מייל — important | critical_only | daily_digest | muted
+  emailMode          String  @default("important")
+  emailQuietHours    Boolean @default(true)
+  /// תאימות לאחור — ממופה ל-emailMode ב-rules
+  emailNotifyAll     Boolean @default(true)
+  emailNotifyTasks   Boolean @default(true)
+  emailNotifyLate    Boolean @default(true)
+  emailNotifyUpdates Boolean @default(true)
+
+  emailLogs EmailLog[]
+
   workShiftsScheduled WorkShift[]         @relation("WorkShiftUser")
   workShiftsCreated   WorkShift[]         @relation("WorkShiftCreatedBy")
   attendances         Attendance[]
@@ -889,6 +905,7 @@ model User {
   workflowTemplatesCreated WorkflowTemplate[] @relation("WorkflowTemplateCreator")
   workflowRunsAssigned    WorkflowRun[]      @relation("WorkflowRunAssignee")
   workflowRunsCreated     WorkflowRun[]      @relation("WorkflowRunCreator")
+  employeeTasksAssigned   EmployeeTask[]     @relation("EmployeeTaskAssignee")
 
   /// Multi-cycle clock-in/out sessions (יום עבודה אמיתי - יכול לכלול מספר כניסות)
   workSessions WorkSession[] @relation("WorkSessionUser")
@@ -1028,24 +1045,45 @@ enum NotificationRoleTarget {
   BOTH
 }
 
+enum NotificationPriority {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum NotificationEmailImportance {
+  NONE
+  LOW
+  NORMAL
+  HIGH
+  CRITICAL
+}
+
 enum NotificationType {
   TASK_ASSIGNED
   TASK_LATE
+  TASK_OVERDUE
   TASK_COMPLETED
   TASK_STARTED
   TASK_GROUP_COMPLETED
   CLOCK_IN_LATE
+  SHIFT_LATE
   CLOCK_OUT
   MISSED_CLOCK_IN
   MISSED_CLOCK_OUT
   OVERTIME
   CHECK_DUE
+  CHECK_DEPOSIT
   CHECK_DEPOSITED
   CHECK_BOUNCED
   INVENTORY_LOW
   INVENTORY_COUNT_INCOMPLETE
   NEW_ORDER
   ORDER_DELAYED
+  FUTURE_ORDER
+  NEW_UPDATE
+  SYSTEM_ALERT
 }
 
 /// תיבת דואר נפרדת לעובדים / מנהלים — לא לערבב סוגי התראות בין תפקידים
@@ -1056,17 +1094,49 @@ model Notification {
   subjectUserId   String?
   roleTarget      NotificationRoleTarget
   type            NotificationType
+  priority        NotificationPriority     @default(MEDIUM)
   title           String
   message         String
   color           String?
   isRead          Boolean                  @default(false)
   actionUrl       String?
-  metadata        Json?
-  createdAt       DateTime                 @default(now())
+  metadata            Json?
+  emailImportance     NotificationEmailImportance @default(NONE)
+  emailSentAt         DateTime?
+  /// pending | sent | skipped | batched | queued
+  emailStatus         String?
+  emailSkippedReason  String?
+  createdAt           DateTime                    @default(now())
 
+  @@index([recipientUserId, isRead])
   @@index([recipientUserId, isRead, createdAt(sort: Desc)])
   @@index([recipientUserId, createdAt(sort: Desc)])
+  @@index([type])
+  @@index([createdAt(sort: Desc)])
   @@index([type, subjectUserId])
+}
+
+/// יומן שליחת מיילים ממערכת ההתראות (Resend)
+model EmailLog {
+  id             String    @id @default(cuid())
+  recipient      String
+  subject        String
+  type           String
+  status         String    @default("pending")
+  error          String?
+  sentAt         DateTime?
+  notificationId String?
+  userId         String?
+  user           User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+  metadata       Json?
+  createdAt      DateTime  @default(now())
+
+  @@index([userId])
+  @@index([type])
+  @@index([status])
+  @@index([createdAt(sort: Desc)])
+  @@index([notificationId])
+  @@index([recipient, type, createdAt(sort: Desc)])
 }
 
 model UserPermission {

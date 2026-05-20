@@ -1,7 +1,19 @@
 import { NextRequest } from "next/server";
 import { requireDb } from "@/lib/api-route";
 import { scanJsonError, scanJsonSuccess } from "@/lib/ocr/api-response";
-import { isSupportedMimeType, scanDocument, OcrServiceError } from "@/lib/ocr";
+import {
+  isSupportedMimeType,
+  scanDocument,
+  OcrServiceError,
+  OCR_PROVIDER,
+  logOcrFlow,
+} from "@/lib/ocr";
+import { hashFileBuffer } from "@/lib/ocr/ocr-cache";
+import {
+  bufferFromUploadFile,
+  logOcrFileIntegrity,
+  resolveUploadMimeType,
+} from "@/lib/ocr/original-file-integrity";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -22,27 +34,22 @@ function isTimeoutError(e: unknown): boolean {
 }
 
 /**
- * POST /api/expenses/scan — always JSON via OCR.space.
+ * POST /api/expenses/scan — OCR על הקובץ המקורי בלבד (ללא resize/compress).
  */
 export async function POST(req: NextRequest) {
   const started = Date.now();
-  console.log("[OCR] OCR request start route=expenses/scan provider=ocr.space");
+  console.log("[OCR PROVIDER]", OCR_PROVIDER);
+  logOcrFlow({ route: "expenses/scan" });
 
   try {
     const block = await requireDb();
     if (block) return block;
 
-    const form = await req.formData();
-    const file = form.get("file");
+    const formData = await req.formData();
+    const file = formData.get("file");
     if (!(file instanceof File)) {
-      return scanJsonError("file field is required", 400, "VALIDATION");
+      return scanJsonError("Invalid file — expected multipart field 'file'", 400, "VALIDATION");
     }
-
-    console.log("[OCR] file", {
-      type: file.type,
-      name: file.name,
-      size: file.size,
-    });
 
     if (file.size === 0) {
       return scanJsonError("uploaded file is empty", 400, "VALIDATION");
@@ -55,31 +62,38 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    let mimeType = file.type || "application/octet-stream";
-    if (mimeType === "application/octet-stream" && /\.pdf$/i.test(file.name || "")) {
-      mimeType = "application/pdf";
-    }
+    const mimeType = resolveUploadMimeType(file);
+    console.log("[OCR] upload mime from client:", file.type, "→ resolved:", mimeType);
 
     if (!isSupportedMimeType(mimeType)) {
-      return scanJsonError(`unsupported file type "${mimeType}"`, 415, "VALIDATION");
+      return scanJsonError(
+        `unsupported file type "${mimeType}" — use PNG, JPEG, or PDF`,
+        415,
+        "VALIDATION",
+      );
     }
 
-    const arrayBuffer = await file.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
+    const originalBuffer = await bufferFromUploadFile(file);
+    const hash = hashFileBuffer(originalBuffer);
     const fileName = file.name || `upload.${mimeType.split("/")[1] ?? "bin"}`;
 
+    logOcrFileIntegrity({
+      size: originalBuffer.length,
+      mime: mimeType,
+      hash,
+      fileName,
+      route: "expenses/scan",
+    });
+
     const { debug, partial, ...data } = await scanDocument({
-      buffer,
+      buffer: originalBuffer,
       fileName,
       mimeType,
+      fileHash: hash,
     });
-    console.log("[OCR] scan complete ms:", Date.now() - started, {
-      items: data.items.length,
-      confidence: data.confidence,
-      error: data.error ?? null,
-      partial,
-      debug,
-    });
+
+    console.log("[OCR] scan complete ms:", Date.now() - started);
+    console.log("[OCR PARSED RESULT] items:", data.items.length, "partial:", partial);
 
     return scanJsonSuccess({ ...data, partial }, debug);
   } catch (e) {

@@ -2,7 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { prismaAny } from "@/lib/prisma";
 import { requireDb } from "@/lib/api-route";
 import { getSessionFromCookie } from "@/lib/auth/get-session";
-import { canManageAllTasks, viewerMayAccessTaskAssignee } from "@/lib/tasks/task-access";
+import { assertStrictAssignee, strictUserId } from "@/lib/auth/strict-user-isolation";
+import { canManageAllTasks } from "@/lib/tasks/task-access";
+import { logTaskAccessBlocked, logTaskStartDenied } from "@/lib/work-tasks/task-security-log";
 import {
   canStartItem,
   computeRunStatus,
@@ -94,7 +96,17 @@ export async function POST(
 
     const run = await loadRun(id);
     if (!run) return NextResponse.json({ ok: false, error: "ריצה לא נמצאה" }, { status: 404 });
-    if (!canManageAllTasks(session) && !(await viewerMayAccessTaskAssignee(session, run.assigneeId))) {
+    if (!assertStrictAssignee(session, run.assigneeId)) {
+      const denied = {
+        route: "POST /api/workflows/runs/:id/items/:itemId",
+        userId: strictUserId(session),
+        runId: id,
+        itemId,
+        assigneeId: run.assigneeId,
+        action,
+      };
+      if (action === "start") logTaskStartDenied(denied);
+      else logTaskAccessBlocked(denied);
       return NextResponse.json(
         {
           ok: false,

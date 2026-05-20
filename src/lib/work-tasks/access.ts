@@ -1,30 +1,38 @@
 import type { SessionJwtPayload } from "@/lib/auth/jwt";
-import { prisma } from "@/lib/prisma";
+import { strictUserId } from "@/lib/auth/strict-user-isolation";
 import { canManageAllTasks } from "@/lib/tasks/task-access";
-
-export async function resolveEmployeeIdForUser(userId: string): Promise<string | null> {
-  const u = await prisma.user.findUnique({
-    where: { id: userId },
-    select: { employeeId: true },
-  });
-  return u?.employeeId ?? null;
-}
+import {
+  logTaskAccessAllowed,
+  logTaskAccessBlocked,
+} from "@/lib/work-tasks/task-security-log";
 
 export async function assertEmployeeOwnsWorkTask(
   session: SessionJwtPayload,
-  taskEmployeeId: string,
+  task: { id?: string; employeeId: string; assignedToUserId?: string | null },
+  action: "start" | "complete" | "view" = "view",
 ): Promise<{ ok: true } | { ok: false; status: number; error: string; code?: string }> {
-  if (canManageAllTasks(session)) return { ok: true };
-  const eid = await resolveEmployeeIdForUser(session.sub);
-  if (!eid) {
-    return {
-      ok: false,
-      status: 403,
-      error: "אין כרטיס עובד משויך לחשבון — פנה למנהל",
-      code: "NO_EMPLOYEE_CARD",
-    };
+  const userId = strictUserId(session);
+  const taskId = task.id ?? "unknown";
+
+  if (canManageAllTasks(session)) {
+    logTaskAccessAllowed({
+      action,
+      taskId,
+      userId,
+      manager: true,
+      assignedToUserId: task.assignedToUserId,
+    });
+    return { ok: true };
   }
-  if (eid !== taskEmployeeId) {
+
+  if (!task.assignedToUserId || task.assignedToUserId !== userId) {
+    logTaskAccessBlocked({
+      action,
+      taskId,
+      userId,
+      assignedToUserId: task.assignedToUserId ?? null,
+      reason: !task.assignedToUserId ? "missing_assignee" : "assignee_mismatch",
+    });
     return {
       ok: false,
       status: 403,
@@ -32,5 +40,12 @@ export async function assertEmployeeOwnsWorkTask(
       code: "NOT_YOUR_TASK",
     };
   }
+
+  logTaskAccessAllowed({
+    action,
+    taskId,
+    userId,
+    assignedToUserId: task.assignedToUserId,
+  });
   return { ok: true };
 }

@@ -38,11 +38,20 @@ type ScanDebugDto = {
   itemsFound: number;
   parseDurationMs: number;
   ocrEngine?: string;
+  ocrLanguage?: string;
+  ocrEngineNumber?: string;
   fromCache?: boolean;
   partial?: boolean;
   totalSuspect?: boolean;
   itemsSumDetected?: number;
   pdfPageCount?: number;
+  overlayLineCount?: number;
+  parseSource?: string;
+  invoiceKind?: "expense" | "credit";
+  needsReviewFields?: string[];
+  headerFound?: boolean;
+  columnBands?: { kind: string; minX: number; maxX: number; centerX: number }[];
+  overlayLinesPreview?: { text: string; top: number; wordCount: number }[];
 };
 
 type ScanApiPayload =
@@ -126,6 +135,14 @@ export type ScannedDocumentDto = {
   invoiceNumber: string;
   date: string;
   documentType?: string;
+  invoiceKind?: "expense" | "credit";
+  needsReviewFields?: string[];
+  fieldConfidence?: {
+    supplier?: number;
+    invoiceNumber?: number;
+    date?: number;
+    total?: number;
+  };
   vatAmount?: number | null;
   total?: number | null;
   totalSuspect?: boolean;
@@ -148,7 +165,7 @@ type Props = {
   onApply: (doc: ScannedDocumentDto) => void;
 };
 
-const ACCEPT = "image/jpeg,image/jpg,image/png,image/webp,application/pdf";
+const ACCEPT = "image/jpeg,image/jpg,image/png,application/pdf";
 
 /**
  * Outer wrapper that mounts the inner dialog component only while open=true.
@@ -639,6 +656,19 @@ function ExpenseScanDialogContent({
                     </span>
                   ) : null}
                 </div>
+                {result.invoiceKind === "credit" ? (
+                  <div className="rounded-xl border border-violet-200 bg-violet-50 px-3 py-2 text-sm font-bold text-violet-900">
+                    חשבונית זיכוי — יש לוודא סוג המסמך לפני הרישום
+                  </div>
+                ) : null}
+                {(result.needsReviewFields?.length ?? 0) > 0 ? (
+                  <div
+                    className={`flex items-start gap-2 rounded-xl border px-3 py-2 text-sm font-bold ${confidenceBadgeClass("medium")}`}
+                  >
+                    <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+                    <span>דורש אימות: {result.needsReviewFields?.join(" · ")}</span>
+                  </div>
+                ) : null}
                 {result.totalSuspect ? (
                   <div
                     className={`flex items-start gap-2 rounded-xl border px-3 py-2 text-sm font-bold ${confidenceBadgeClass("low")}`}
@@ -1167,10 +1197,41 @@ function OcrDebugModal({
             value={String(debug?.textLength ?? rawText.length)}
           />
           <DebugRow label={t("scan.ocrDebugEngine")} value={debug?.ocrEngine ?? "—"} />
+          <DebugRow
+            label={t("scan.ocrDebugLanguage")}
+            value={debug?.ocrLanguage ?? "—"}
+          />
+          <DebugRow
+            label={t("scan.ocrDebugParseSource")}
+            value={debug?.parseSource ?? "—"}
+          />
+          <DebugRow
+            label={t("scan.ocrDebugOverlayCount")}
+            value={String(debug?.overlayLineCount ?? 0)}
+          />
+          {debug?.columnBands?.length ? (
+            <DebugRow
+              label={t("scan.ocrDebugColumns")}
+              value={debug.columnBands.map((b) => b.kind).join(" | ")}
+            />
+          ) : null}
           {debug?.fromCache ? (
             <p className="font-bold text-slate-600">{t("scan.ocrDebugFromCache")}</p>
           ) : null}
+          {debug?.ocrLanguage === "eng" ? (
+            <p className="font-bold text-amber-800">{t("scan.ocrDebugEngWarning")}</p>
+          ) : null}
         </div>
+        <details className="border-t border-slate-200">
+          <summary className="cursor-pointer bg-slate-50 px-4 py-2 text-xs font-black text-slate-700">
+            {t("scan.ocrDebugOverlayLines")}
+          </summary>
+          <pre className="max-h-[28vh] overflow-auto bg-slate-800 p-3 text-[10px] text-slate-100 whitespace-pre-wrap">
+            {(debug?.overlayLinesPreview ?? [])
+              .map((l, i) => `${i + 1}. [y=${l.top}] (${l.wordCount}w) ${l.text}`)
+              .join("\n") || t("scan.noRawText")}
+          </pre>
+        </details>
         <details className="min-h-0 flex-1 overflow-hidden border-t border-slate-200">
           <summary className="cursor-pointer bg-slate-100 px-4 py-2 text-xs font-black text-slate-700">
             {t("scan.showRawOcr")}

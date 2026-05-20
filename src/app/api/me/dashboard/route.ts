@@ -1,21 +1,20 @@
 import { NextResponse } from "next/server";
 import { getSessionFromCookie } from "@/lib/auth/get-session";
-import { prismaAny } from "@/lib/prisma";
+import { prisma, prismaAny } from "@/lib/prisma";
 import { requireDb } from "@/lib/api-route";
-import { resolveEmployeeTaskAssigneeIdsForUser } from "@/lib/tasks/task-access";
+import {
+  filterWorkflowRunsForUser,
+  logStrictScope,
+  strictUserId,
+} from "@/lib/auth/strict-user-isolation";
 import { serializeWorkSession } from "@/lib/work-sessions/serialize";
 import { serializeWorkflowRunDetail } from "@/lib/workflows/serialize";
 
 export const dynamic = "force-dynamic";
 
 /**
- * GET /api/me/dashboard
- *
- * Single roundtrip for the employee home page. Returns:
- *  - The current active work-session (or null) + today's worked minutes
- *  - The current active workflow run for the caller (the "active task")
- *  - Open / late task counts across all in-progress runs
- *  - Today's history sessions to render the "today entry / exit" tile
+ * GET /api/me/dashboard — פורטל עובד בלבד.
+ * אין employeeId. רק userId = session.sub.
  */
 export async function GET() {
   const dbErr = await requireDb();
@@ -26,27 +25,27 @@ export async function GET() {
     return NextResponse.json({ ok: false, error: "נדרשת התחברות" }, { status: 401 });
   }
 
+  const uid = strictUserId(session);
+
   try {
     const startOfDay = new Date();
     startOfDay.setUTCHours(0, 0, 0, 0);
     const tomorrow = new Date(startOfDay.getTime() + 24 * 60 * 60 * 1000);
 
-    const viewerAssigneeIds = await resolveEmployeeTaskAssigneeIdsForUser(session.sub);
-
-    const [activeSession, todaySessions, activeRuns] = await Promise.all([
+    const [activeSession, todaySessions, activeRunsRaw, dailyWorkTasksOpen] = await Promise.all([
       prismaAny.workSession.findFirst({
-        where: { userId: session.sub, status: "ACTIVE" },
+        where: { userId: uid, status: "ACTIVE" },
         orderBy: { clockIn: "desc" },
       }),
       prismaAny.workSession.findMany({
         where: {
-          userId: session.sub,
+          userId: uid,
           workDate: { gte: startOfDay, lt: tomorrow },
         },
         orderBy: { clockIn: "asc" },
       }),
       prismaAny.workflowRun.findMany({
-        where: { assigneeId: { in: viewerAssigneeIds }, status: "IN_PROGRESS" },
+        where: { assigneeId: uid, status: "IN_PROGRESS" },
         include: {
           assignee: { select: { id: true, fullName: true } },
           createdBy: { select: { id: true, fullName: true } },
@@ -54,8 +53,20 @@ export async function GET() {
           items: { orderBy: { orderIndex: "asc" } },
         },
         orderBy: { startedAt: "desc" },
+        take: 20,
+      }),
+      prisma.employeeTask.count({
+        where: {
+          assignedToUserId: uid,
+          status: { in: ["PENDING", "IN_PROGRESS"] },
+        },
       }),
     ]);
+
+    const activeRuns = filterWorkflowRunsForUser(
+      activeRunsRaw as { assigneeId: string }[],
+      uid,
+    );
 
     const todayCompletedMinutes = todaySessions
       .filter((r: { status: string }) => r.status === "ENDED")
@@ -68,13 +79,22 @@ export async function GET() {
     let lateTasksCount = 0;
     type RunItem = { status: string; isLate: boolean };
     for (const run of activeRuns) {
-      for (const it of run.items as RunItem[]) {
+      for (const it of (run as { items: RunItem[] }).items) {
         if (it.status === "PENDING" || it.status === "ACTIVE") openTasksCount += 1;
         if (it.isLate) lateTasksCount += 1;
       }
     }
 
     const primaryRun = activeRuns[0] ?? null;
+
+    logStrictScope("[GET /api/me/dashboard]", session, {
+      returnedRuns: activeRuns.length,
+      returnedRunIds: activeRuns.map((r) => (r as { id: string }).id),
+      returnedAssignees: activeRuns.map((r) => ({
+        id: (r as { assigneeId: string }).assigneeId,
+        name: (r as { assignee?: { fullName: string } }).assignee?.fullName,
+      })),
+    });
 
     return NextResponse.json({
       ok: true,
@@ -90,6 +110,7 @@ export async function GET() {
           open_tasks: openTasksCount,
           late_tasks: lateTasksCount,
           active_runs: activeRuns.length,
+          daily_work_tasks: dailyWorkTasksOpen,
         },
       },
     });

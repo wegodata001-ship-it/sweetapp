@@ -19,6 +19,7 @@ import {
   SANITY_MAX_UNIT_PRICE,
   SANITY_MAX_LINE_TOTAL,
 } from "./invoice-line-sanity";
+import { normalizeLineTriple } from "./hebrew-decimal-normalize";
 
 const MAX_QTY = SANITY_MAX_QTY;
 const MAX_UNIT_PRICE = SANITY_MAX_UNIT_PRICE;
@@ -109,7 +110,7 @@ function detectColumns(headerLine: string): ColumnMap | null {
   const map: ColumnMap = {};
   parts.forEach((part, idx) => {
     const p = part.toLowerCase();
-    if (/מק[\"']?ט|^מקט$|sku|code/i.test(p)) map.sku = idx;
+    if (/מפתח\s*פריט|מק[\"']?ט|^מקט$|sku|code/i.test(p)) map.sku = idx;
     else if (/שם|תיאור|תאור|פריט|description/i.test(p)) map.description = idx;
     else if (/כמות|qty|quantity/i.test(p)) map.quantity = idx;
     else if (/מחיר|price/i.test(p) && !/סה[\"']?כ|סהכ/i.test(p)) map.unitPrice = idx;
@@ -302,6 +303,12 @@ function buildItem(
   lineTotal: number,
 ): ScannedItem | null {
   if (!isReadableProductName(rawName)) return null;
+
+  const norm = normalizeLineTriple(quantity, unitPrice, lineTotal);
+  quantity = norm.quantity;
+  unitPrice = norm.unitPrice;
+  lineTotal = norm.lineTotal;
+
   if (isUnreasonableTriple(quantity, unitPrice, lineTotal)) return null;
 
   const parseConfidence = scoreTripleConfidence(quantity, unitPrice, lineTotal);

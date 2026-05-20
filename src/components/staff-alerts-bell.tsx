@@ -1,8 +1,22 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Bell } from "lucide-react";
+import {
+  Bell,
+  Banknote,
+  CalendarClock,
+  ClipboardList,
+  Clock,
+  Info,
+  Megaphone,
+  UserX,
+  type LucideIcon,
+} from "lucide-react";
+import Link from "next/link";
 import { useI18n } from "@/components/i18n-provider";
+import { useToast } from "@/components/toast-provider";
+import { NOTIFICATIONS_REFRESH_EVENT } from "@/lib/notifications/refresh-event";
+import { priorityToColor } from "@/lib/notifications/priority";
 
 type InboxKind = "employee" | "admin";
 
@@ -12,14 +26,20 @@ type NotifItem = {
   section: string;
   title: string;
   message: string;
+  priority?: string;
   color: string | null;
   isRead: boolean;
+  actionUrl?: string | null;
   createdAt: string;
 };
 
 const SECTION_ORDER = ["employees", "tasks", "finance", "inventory", "orders", "other"] as const;
 
 type SectionKey = (typeof SECTION_ORDER)[number];
+
+const POLL_MS = 25_000;
+const API_LIST = "/api/me/notifications";
+const API_READ = "/api/me/notifications";
 
 function sectionTKey(section: string): string {
   switch (section) {
@@ -38,34 +58,194 @@ function sectionTKey(section: string): string {
   }
 }
 
+function iconForType(type: string): LucideIcon {
+  switch (type) {
+    case "TASK_ASSIGNED":
+    case "TASK_COMPLETED":
+    case "TASK_LATE":
+    case "TASK_OVERDUE":
+    case "TASK_STARTED":
+      return ClipboardList;
+    case "SHIFT_LATE":
+    case "CLOCK_IN_LATE":
+    case "MISSED_CLOCK_IN":
+      return UserX;
+    case "CHECK_DEPOSIT":
+    case "CHECK_DUE":
+    case "CHECK_DEPOSITED":
+      return Banknote;
+    case "FUTURE_ORDER":
+    case "NEW_ORDER":
+      return CalendarClock;
+    case "NEW_UPDATE":
+      return Megaphone;
+    case "OVERTIME":
+      return Clock;
+    default:
+      return Info;
+  }
+}
+
+function actionLabel(type: string, actionUrl: string | null | undefined, t: (k: string) => string): string {
+  if (type === "SHIFT_LATE") return t("alerts.actionAddReason");
+  if (actionUrl?.startsWith("tel:")) return t("alerts.actionContact");
+  if (actionUrl) return t("alerts.actionOpen");
+  return "";
+}
+
+function toastForNewNotification(item: NotifItem): { title: string; description?: string } {
+  if (item.type === "TASK_ASSIGNED") {
+    return { title: "נוספה לך משימה חדשה", description: item.message || item.title };
+  }
+  if (item.type === "TASK_COMPLETED") {
+    return { title: item.title, description: item.message };
+  }
+  if (item.type === "NEW_UPDATE") {
+    return { title: "פורסם עדכון חדש", description: item.message };
+  }
+  return { title: item.title, description: item.message || undefined };
+}
+
+function NotificationCard({
+  item,
+  onMarkRead,
+  t,
+  bcp47,
+}: {
+  item: NotifItem;
+  onMarkRead: (id: string) => void;
+  t: (k: string) => string;
+  bcp47: string;
+}) {
+  const Icon = iconForType(item.type);
+  const borderColor = item.color ?? priorityToColor(item.priority ?? "MEDIUM");
+  const action = actionLabel(item.type, item.actionUrl, t);
+
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      className={`cursor-pointer rounded-xl border-s-4 bg-white px-3 py-2.5 transition hover:bg-slate-50 ${
+        !item.isRead ? "bg-amber-50/40 ring-1 ring-amber-100" : ""
+      }`}
+      style={{ borderInlineStartColor: borderColor, borderInlineStartWidth: 4 }}
+      onClick={() => {
+        if (!item.isRead) onMarkRead(item.id);
+      }}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          if (!item.isRead) onMarkRead(item.id);
+        }
+      }}
+    >
+      <div className="flex gap-2.5">
+        <span
+          className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-full"
+          style={{ backgroundColor: `${borderColor}22`, color: borderColor }}
+        >
+          <Icon className="h-4 w-4" aria-hidden />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-start justify-between gap-2">
+            <p className="font-bold text-slate-900">{item.title}</p>
+            {!item.isRead ? (
+              <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-amber-500" aria-hidden />
+            ) : null}
+          </div>
+          {item.message ? (
+            <p className="mt-0.5 text-xs leading-snug text-slate-600">{item.message}</p>
+          ) : null}
+          <p className="mt-1 text-[11px] text-slate-400">
+            {new Date(item.createdAt).toLocaleString(bcp47, {
+              day: "2-digit",
+              month: "2-digit",
+              hour: "2-digit",
+              minute: "2-digit",
+            })}
+          </p>
+          {item.actionUrl && action ? (
+            <Link
+              href={item.actionUrl}
+              className="mt-2 inline-flex min-h-[36px] items-center rounded-lg bg-slate-900 px-3 text-xs font-bold text-white"
+              onClick={(e) => {
+                e.stopPropagation();
+                if (!item.isRead) onMarkRead(item.id);
+              }}
+            >
+              {action}
+            </Link>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function StaffAlertsBell() {
   const { t, bcp47 } = useI18n();
+  const { showToast } = useToast();
   const [open, setOpen] = useState(false);
   const [unread, setUnread] = useState(0);
   const [items, setItems] = useState<NotifItem[]>([]);
   const [inbox, setInbox] = useState<InboxKind>("employee");
   const wrapRef = useRef<HTMLDivElement>(null);
+  const knownIdsRef = useRef<Set<string>>(new Set());
+  const initialLoadRef = useRef(true);
+  const itemsRef = useRef<NotifItem[]>([]);
+
+  const applyPayload = useCallback(
+    (data: { unreadCount: number; items: NotifItem[]; inbox: InboxKind }, showNewToasts: boolean) => {
+      setUnread(data.unreadCount);
+      setItems(data.items);
+      itemsRef.current = data.items;
+      setInbox(data.inbox);
+
+      if (!showNewToasts) {
+        for (const it of data.items) knownIdsRef.current.add(it.id);
+        return;
+      }
+
+      const fresh = data.items.filter((it) => !it.isRead && !knownIdsRef.current.has(it.id));
+      for (const it of data.items) knownIdsRef.current.add(it.id);
+
+      if (initialLoadRef.current) {
+        initialLoadRef.current = false;
+        return;
+      }
+
+      for (const it of fresh.slice(0, 3)) {
+        const toast = toastForNewNotification(it);
+        showToast({ tone: "info", title: toast.title, description: toast.description, durationMs: 5000 });
+      }
+    },
+    [showToast],
+  );
 
   const load = useCallback(async () => {
     try {
-      const res = await fetch("/api/me/notifications", { credentials: "same-origin", cache: "no-store" });
+      const res = await fetch(API_LIST, { credentials: "same-origin", cache: "no-store" });
+      if (!res.ok) return;
       const j = (await res.json()) as {
         ok?: boolean;
         data?: { unreadCount: number; items: NotifItem[]; inbox: InboxKind };
       };
       if (!j.ok || !j.data) return;
-      setUnread(j.data.unreadCount);
-      setItems(j.data.items);
-      setInbox(j.data.inbox);
+      applyPayload(j.data, true);
     } catch {
       /* ignore */
     }
-  }, []);
+  }, [applyPayload]);
 
   useEffect(() => {
     void load();
-    const timer = setInterval(() => void load(), 30_000);
-    return () => clearInterval(timer);
+    const timer = setInterval(() => void load(), POLL_MS);
+    const onRefresh = () => void load();
+    window.addEventListener(NOTIFICATIONS_REFRESH_EVENT, onRefresh);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener(NOTIFICATIONS_REFRESH_EVENT, onRefresh);
+    };
   }, [load]);
 
   useEffect(() => {
@@ -92,9 +272,25 @@ export function StaffAlertsBell() {
     };
   }, [open]);
 
+  const markReadLocally = useCallback((ids: string[]) => {
+    if (!ids.length) return;
+    const idSet = new Set(ids);
+    let decrement = 0;
+    for (const it of itemsRef.current) {
+      if (idSet.has(it.id) && !it.isRead) decrement += 1;
+    }
+    setItems((prev) => {
+      const next = prev.map((it) => (idSet.has(it.id) ? { ...it, isRead: true } : it));
+      itemsRef.current = next;
+      return next;
+    });
+    setUnread((prev) => Math.max(0, prev - decrement));
+  }, []);
+
   async function markRead(ids: string[]) {
     if (!ids.length) return;
-    await fetch("/api/me/notifications", {
+    markReadLocally(ids);
+    await fetch(API_READ, {
       method: "PATCH",
       credentials: "same-origin",
       headers: { "Content-Type": "application/json" },
@@ -104,7 +300,13 @@ export function StaffAlertsBell() {
   }
 
   async function markAll() {
-    await fetch("/api/me/notifications", {
+    setItems((prev) => {
+      const next = prev.map((it) => ({ ...it, isRead: true }));
+      itemsRef.current = next;
+      return next;
+    });
+    setUnread(0);
+    await fetch(API_READ, {
       method: "PATCH",
       credentials: "same-origin",
       headers: { "Content-Type": "application/json" },
@@ -128,49 +330,21 @@ export function StaffAlertsBell() {
       ? "max-h-[min(52dvh,340px)] overflow-y-auto overscroll-y-contain lg:max-h-[300px]"
       : "max-h-[min(72dvh,520px)] overflow-y-auto overscroll-y-contain lg:max-h-[400px]";
 
-  const employeeTable = (
-    <div className="overflow-x-auto">
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="border-b border-slate-200 text-start text-xs font-bold text-slate-500">
-            <th className="px-3 py-2 font-bold">{t("alerts.alertLabel")}</th>
-            <th className="w-[1%] whitespace-nowrap px-3 py-2 font-bold">{t("alerts.time")}</th>
-          </tr>
-        </thead>
-        <tbody>
-          {items.length === 0 ? (
-            <tr>
-              <td colSpan={2} className="px-3 py-6 text-center text-slate-500">
-                {t("alerts.empty")}
-              </td>
-            </tr>
-          ) : (
-            items.map((a) => (
-              <tr
-                key={a.id}
-                className={`cursor-pointer border-b border-slate-50 transition hover:bg-slate-50 ${
-                  !a.isRead ? "bg-amber-50/40" : ""
-                }`}
-                onClick={() => {
-                  if (!a.isRead) void markRead([a.id]);
-                }}
-              >
-                <td className="px-3 py-2.5">
-                  <span
-                    className="me-2 inline-block h-2 w-2 shrink-0 rounded-full align-middle"
-                    style={{ backgroundColor: a.color ?? "#94a3b8" }}
-                    aria-hidden
-                  />
-                  <span className="align-middle font-semibold text-slate-900">{a.title}</span>
-                </td>
-                <td className="whitespace-nowrap px-3 py-2.5 text-xs text-slate-500" dir="ltr">
-                  {new Date(a.createdAt).toLocaleTimeString(bcp47, { hour: "2-digit", minute: "2-digit" })}
-                </td>
-              </tr>
-            ))
-          )}
-        </tbody>
-      </table>
+  const cardList = (list: NotifItem[]) => (
+    <div className="flex flex-col gap-2 px-2 py-1">
+      {list.length === 0 ? (
+        <p className="px-3 py-6 text-center text-sm text-slate-500">{t("alerts.empty")}</p>
+      ) : (
+        list.map((a) => (
+          <NotificationCard
+            key={a.id}
+            item={a}
+            t={t}
+            bcp47={bcp47}
+            onMarkRead={(id) => void markRead([id])}
+          />
+        ))
+      )}
     </div>
   );
 
@@ -184,33 +358,17 @@ export function StaffAlertsBell() {
             <p className="bg-slate-50 px-3 py-1.5 text-xs font-black uppercase tracking-wide text-slate-600">
               {t(sectionTKey(section))}
             </p>
-            {secItems.map((a) => (
-              <button
-                key={a.id}
-                type="button"
-                className={`block w-full min-h-[44px] border-b border-slate-50 px-3 py-2.5 text-start text-sm transition hover:bg-slate-50 ${
-                  !a.isRead ? "bg-amber-50/35" : ""
-                }`}
-                onClick={() => {
-                  if (!a.isRead) void markRead([a.id]);
-                }}
-              >
-                <div className="flex gap-2">
-                  <span
-                    className="mt-1.5 h-2 w-2 shrink-0 rounded-full"
-                    style={{ backgroundColor: a.color ?? "#94a3b8" }}
-                    aria-hidden
-                  />
-                  <div className="min-w-0 flex-1">
-                    <p className="font-bold text-slate-900">{a.title}</p>
-                    {a.message ? (
-                      <p className="mt-0.5 text-xs leading-snug text-slate-600">{a.message}</p>
-                    ) : null}
-                    <p className="mt-1 text-[11px] text-slate-400">{new Date(a.createdAt).toLocaleString(bcp47)}</p>
-                  </div>
-                </div>
-              </button>
-            ))}
+            <div className="flex flex-col gap-2 px-2 py-2">
+              {secItems.map((a) => (
+                <NotificationCard
+                  key={a.id}
+                  item={a}
+                  t={t}
+                  bcp47={bcp47}
+                  onMarkRead={(id) => void markRead([id])}
+                />
+              ))}
+            </div>
           </div>
         ))
       )}
@@ -231,7 +389,9 @@ export function StaffAlertsBell() {
           </button>
         ) : null}
       </div>
-      <div className={scrollAreaClass}>{inbox === "employee" ? employeeTable : adminGrouped}</div>
+      <div className={scrollAreaClass}>
+        {inbox === "employee" ? cardList(items) : adminGrouped}
+      </div>
     </>
   );
 
@@ -279,7 +439,7 @@ export function StaffAlertsBell() {
           </div>
           <div
             className={`absolute end-0 z-[100] mt-2 hidden rounded-2xl border border-slate-200 bg-white py-2 shadow-xl lg:block ${
-              inbox === "employee" ? "w-[min(100vw-2rem,300px)]" : "w-[min(100vw-2rem,420px)]"
+              inbox === "employee" ? "w-[min(100vw-2rem,340px)]" : "w-[min(100vw-2rem,440px)]"
             }`}
           >
             {listSection}

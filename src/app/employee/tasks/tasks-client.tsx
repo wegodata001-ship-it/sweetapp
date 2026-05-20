@@ -19,6 +19,7 @@ import { ChangePasswordDialog } from "@/components/auth/change-password-dialog";
 import { useAuth } from "@/components/auth-provider";
 import { useI18n } from "@/components/i18n-provider";
 import { useToast } from "@/components/toast-provider";
+import { dispatchNotificationsRefresh } from "@/lib/notifications/refresh-event";
 import { TaskCelebrationOverlay } from "@/components/employee/task-celebration-overlay";
 import { useEmployeeMiddayToast } from "@/hooks/use-employee-midday-toast";
 import { useEmployeeTodayMinutes } from "@/hooks/use-employee-today-minutes";
@@ -81,7 +82,10 @@ export function EmployeeTasksClient() {
   const load = useCallback(async () => {
     setError(null);
     try {
-      const res = await fetch("/api/work/my-tasks", { credentials: "same-origin", cache: "no-store" });
+      const res = await fetch(`/api/work/my-tasks?_=${Date.now()}`, {
+        credentials: "same-origin",
+        cache: "no-store",
+      });
       if (res.status === 401) {
         setNeedAuth(true);
         setError(t("employee.tasks.loginRequiredView"));
@@ -168,6 +172,7 @@ export function EmployeeTasksClient() {
         ok?: boolean;
         error?: string;
         code?: string;
+        notificationSent?: boolean;
       };
 
       if (res.ok && raw.ok !== false) {
@@ -191,6 +196,7 @@ export function EmployeeTasksClient() {
             title: t("employee.experience.completeToast"),
           });
         }
+        dispatchNotificationsRefresh();
         await load();
         return;
       }

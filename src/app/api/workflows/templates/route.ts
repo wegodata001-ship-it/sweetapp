@@ -2,7 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { prismaAny } from "@/lib/prisma";
 import { requireDb } from "@/lib/api-route";
 import { getSessionFromCookie } from "@/lib/auth/get-session";
+import { UserRole } from "@prisma/client";
 import { canManageAllTasks } from "@/lib/tasks/task-access";
+import { logTaskAccessBlocked } from "@/lib/work-tasks/task-security-log";
 import {
   serializeWorkflowTemplateDetail,
   serializeWorkflowTemplateSummary,
@@ -46,6 +48,14 @@ export async function GET(req: NextRequest) {
     const session = await getSessionFromCookie();
     if (!session) {
       return NextResponse.json({ ok: false, error: "נדרשת התחברות" }, { status: 401 });
+    }
+    if (session.role === UserRole.EMPLOYEE) {
+      logTaskAccessBlocked({
+        route: "GET /api/workflows/templates",
+        userId: session.sub,
+        reason: "employee_templates_denied",
+      });
+      return NextResponse.json({ ok: true, data: [] });
     }
     const { searchParams } = req.nextUrl;
     const includeArchived = searchParams.get("includeArchived") === "1";

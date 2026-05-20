@@ -4,6 +4,8 @@ import { appendSupplierAlias } from "@/lib/ocr/supplier-aliases";
 import { prisma } from "@/lib/prisma";
 
 export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
+export const maxDuration = 60;
 
 /** Link OCR supplier name to existing supplier + save alias for future scans. */
 export async function POST(req: NextRequest) {

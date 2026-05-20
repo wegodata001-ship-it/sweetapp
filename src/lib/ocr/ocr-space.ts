@@ -4,13 +4,21 @@
  */
 
 import { mapOcrSpaceMessageToCode, OcrServiceError } from "./ocr-errors";
-import { extractOverlayFromOcrSpaceJson, type OcrPositionedLine } from "./ocr-overlay";
+import {
+  buildRawTextFromOverlay,
+  extractOverlayFromOcrSpaceJson,
+  type OcrPositionedLine,
+} from "./ocr-overlay";
+import { normalizeHebrewOCR } from "./normalize-hebrew-ocr";
+import { logOcrFlow, OCR_PROVIDER } from "./ocr-flow";
 
 export type OcrSpaceResult = {
   rawText: string;
   lines: string[];
   confidence: number;
   overlay: OcrPositionedLine[];
+  ocrLanguage: string;
+  ocrEngine: string;
   /** Truncated OCR.space JSON body for debug/cache */
   rawApiResponse?: string | null;
 };
@@ -96,7 +104,11 @@ function lineTextFromOverlay(line: OcrSpaceLine): string {
   return words.join(" ").trim();
 }
 
-function normalizeOcrSpaceResponse(json: OcrSpaceApiResponse): OcrSpaceResult {
+function normalizeOcrSpaceResponse(
+  json: OcrSpaceApiResponse,
+  language: string,
+  ocrEngine: string,
+): OcrSpaceResult {
   if (json.IsErroredOnProcessing || json.OCRExitCode === 2 || json.OCRExitCode === 3) {
     const msg = collectErrorMessage(json);
     throw new OcrServiceError(mapOcrSpaceMessageToCode(msg), msg);
@@ -131,14 +143,21 @@ function normalizeOcrSpaceResponse(json: OcrSpaceApiResponse): OcrSpaceResult {
     }
   }
 
-  const rawText = pageTexts.join("\n\n").trim() || lines.join("\n").trim();
+  const overlay = extractOverlayFromOcrSpaceJson(json);
+  const overlayText = buildRawTextFromOverlay(overlay);
+  const parsedFallback = pageTexts.join("\n\n").trim() || lines.join("\n").trim();
+
+  /** Overlay is authoritative for table parsing; ParsedText only for empty overlay. */
+  const rawText = normalizeHebrewOCR(
+    overlayText.length > 20 ? overlayText : parsedFallback,
+  );
 
   const finalLines =
-    lines.length > 0
-      ? lines
+    overlay.length > 0
+      ? overlay.map((l) => l.text).filter(Boolean)
       : rawText
           .split(/\r?\n/)
-          .map((l) => l.trim())
+          .map((l) => normalizeHebrewOCR(l))
           .filter(Boolean);
 
   const confidence =
@@ -150,9 +169,20 @@ function normalizeOcrSpaceResponse(json: OcrSpaceApiResponse): OcrSpaceResult {
           : 0.65
         : 0;
 
-  const overlay = extractOverlayFromOcrSpaceJson(json);
+  if (language === "eng" && overlay.length > 0) {
+    console.warn(
+      "[OCR] language=eng — Hebrew invoice may parse poorly; set OCR_SPACE_ENGINE=2 or fix E201 for heb",
+    );
+  }
 
-  return { rawText, lines: finalLines, confidence, overlay };
+  return {
+    rawText,
+    lines: finalLines,
+    confidence,
+    overlay,
+    ocrLanguage: language,
+    ocrEngine,
+  };
 }
 
 /**
@@ -169,11 +199,28 @@ function buildOcrFormData(
   formData.append("apikey", apiKey);
   formData.append("language", language);
   formData.append("isTable", "true");
-  formData.append("OCREngine", "1");
+  const engine = process.env.OCR_SPACE_ENGINE?.trim() || "1";
+  formData.append("OCREngine", engine);
 
   const blob = new Blob([new Uint8Array(buffer)], { type: mimeType });
   formData.append("file", blob, fileName);
 
+  return formData;
+}
+
+/** OCR.space קורא את הקובץ ישירות מ־Storage (אותו binary כמו שהועלה). */
+function buildOcrFormDataFromUrl(
+  apiKey: string,
+  language: string,
+  sourceUrl: string,
+): FormData {
+  const formData = new FormData();
+  formData.append("apikey", apiKey);
+  formData.append("language", language);
+  formData.append("isTable", "true");
+  const engine = process.env.OCR_SPACE_ENGINE?.trim() || "1";
+  formData.append("OCREngine", engine);
+  formData.append("url", sourceUrl);
   return formData;
 }
 
@@ -190,16 +237,24 @@ async function postToOcrSpace(
   buffer: Buffer,
   mimeType: string,
   fileName: string,
+  opts?: { sourceUrl?: string; fileHash?: string },
 ): Promise<OcrPostResult> {
-  const formData = buildOcrFormData(apiKey, language, buffer, mimeType, fileName);
+  const useUrl = Boolean(opts?.sourceUrl?.trim());
+  const formData = useUrl
+    ? buildOcrFormDataFromUrl(apiKey, language, opts!.sourceUrl!)
+    : buildOcrFormData(apiKey, language, buffer, mimeType, fileName);
 
-  console.log("[OCR] OCR request start", {
-    provider: "ocr.space",
+  const ocrEngine = process.env.OCR_SPACE_ENGINE?.trim() || "1";
+  console.log("[OCR PROVIDER]", OCR_PROVIDER);
+  console.log("[OCR REQUEST]", {
+    provider: OCR_PROVIDER,
+    ocrEngine,
     language,
-    mimeType,
-    bytes: buffer.length,
+    mime: mimeType,
+    size: buffer.length,
+    hash: opts?.fileHash ?? null,
     fileName,
-    contentType: "multipart/form-data (auto boundary)",
+    mode: useUrl ? "signed_url" : "direct_buffer",
   });
 
   const requestStart = Date.now();
@@ -237,6 +292,7 @@ export async function runOcrSpace(
   buffer: Buffer,
   mimeType: string,
   fileName: string,
+  opts?: { sourceUrl?: string; fileHash?: string },
 ): Promise<OcrSpaceResult> {
   if (!SUPPORTED_MIMES.has(mimeType)) {
     throw new OcrServiceError(
@@ -262,6 +318,7 @@ export async function runOcrSpace(
       buffer,
       mimeType,
       safeName,
+      opts,
     );
 
     const errMsg = collectErrorMessage(json);
@@ -287,19 +344,18 @@ export async function runOcrSpace(
       throw new OcrServiceError(mapOcrSpaceMessageToCode(errMsg), errMsg);
     }
 
-    const result = normalizeOcrSpaceResponse(json);
+    const ocrEngine = process.env.OCR_SPACE_ENGINE?.trim() || "1";
+    const result = normalizeOcrSpaceResponse(json, language, ocrEngine);
     result.rawApiResponse = bodyText;
-    console.log(
-      "[OCR] RESPONSE confidence:",
-      result.confidence,
-      "language:",
-      language,
-      "lines:",
-      result.lines.length,
-    );
-    if (result.rawText.length > 0) {
-      console.log("[OCR] OCR text preview:", result.rawText.slice(0, 400));
-    }
+    logOcrFlow({
+      ocrLanguage: language,
+      ocrEngine,
+      overlayLines: result.overlay.length,
+      textLines: result.lines.length,
+      confidence: result.confidence,
+    });
+    console.log("[OCR RAW TEXT]\n", result.rawText.slice(0, 2000));
+    console.log("[OCR RAW LINES]", result.lines.length, "overlay:", result.overlay.length);
     return result;
   }
 
