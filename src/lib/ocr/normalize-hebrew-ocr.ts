@@ -7,7 +7,7 @@ const HEBREW_CHUNK_RE = /[\u0590-\u05FF]+/g;
 
 /** Known OCR.space garbage when language=eng on Hebrew invoices. */
 const GARBAGE_TOKEN_RE =
-  /^(?:rruwn|nnnun|nun+|no['\u2018\u2019`]*|@@@+|xxx+|---+|\.{3,}|[a-z]{2,5}[•·.]{0,2})$/i;
+  /^(?:rruwn|pnyn|nnnun|nun+|no['\u2018\u2019`]*|@@@+|xxx+|---+|\.{3,}|[a-z]{2,5}[•·.]{0,2})$/i;
 
 const JUNK_SYMBOLS_RE = /[@#*•·]{2,}|\.{4,}/g;
 
@@ -57,6 +57,7 @@ export function normalizeHebrewOCR(input: string): string {
     .replace(/[^\S\n\u0590-\u05FFa-zA-Z0-9.,\-'"״׳₪%]/g, " ");
 
   s = s.replace(HEBREW_CHUNK_RE, (chunk) => {
+    if (/\d/.test(chunk)) return chunk;
     if (looksReversedHebrew(chunk)) return reverseHebrewToken(chunk);
     return chunk;
   });

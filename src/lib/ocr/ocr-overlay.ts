@@ -2,6 +2,7 @@
  * OCR.space TextOverlay — word positions for column-aware table parsing.
  */
 import { normalizeHebrewOCR } from "./normalize-hebrew-ocr";
+import { extractOverlayFromVisionResponse } from "./vision-overlay";
 
 export type OcrPositionedWord = {
   text: string;
@@ -141,9 +142,23 @@ export function parseOverlayFromRawResponse(
 ): OcrPositionedLine[] {
   if (!rawResponse?.trim()) return [];
   try {
-    const json = JSON.parse(rawResponse) as OcrSpaceApiResponse;
-    return extractOverlayFromOcrSpaceJson(json);
+    const json = JSON.parse(rawResponse) as OcrSpaceApiResponse & {
+      responses?: Array<{
+        fullTextAnnotation?: unknown;
+        textAnnotations?: { description?: string }[];
+      }>;
+    };
+    if (json.ParsedResults?.length) {
+      return extractOverlayFromOcrSpaceJson(json);
+    }
+    const visionResp = json.responses?.[0];
+    if (visionResp) {
+      return extractOverlayFromVisionResponse(
+        visionResp as Parameters<typeof extractOverlayFromVisionResponse>[0],
+      );
+    }
   } catch {
     return [];
   }
+  return [];
 }

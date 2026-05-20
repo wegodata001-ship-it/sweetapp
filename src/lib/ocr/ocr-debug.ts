@@ -16,6 +16,8 @@ export type OcrDebugSnapshot = {
   headerFound?: boolean;
   parseSource?: string;
   rawApiResponsePreview?: string;
+  blockCount?: number;
+  detectedLanguages?: string[];
 };
 
 function runtimeLabel(): "local" | "vercel" {

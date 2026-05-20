@@ -9,8 +9,8 @@ import {
   extractOverlayFromOcrSpaceJson,
   type OcrPositionedLine,
 } from "./ocr-overlay";
-import { normalizeHebrewOCR } from "./normalize-hebrew-ocr";
-import { logOcrFlow, OCR_PROVIDER } from "./ocr-flow";
+import { normalizeRtlDocument, normalizeRtlLine } from "./rtl-document-normalize";
+import { getOcrProvider, logOcrFlow } from "./ocr-flow";
 
 export type OcrSpaceResult = {
   rawText: string;
@@ -148,7 +148,7 @@ function normalizeOcrSpaceResponse(
   const parsedFallback = pageTexts.join("\n\n").trim() || lines.join("\n").trim();
 
   /** Overlay is authoritative for table parsing; ParsedText only for empty overlay. */
-  const rawText = normalizeHebrewOCR(
+  const rawText = normalizeRtlDocument(
     overlayText.length > 20 ? overlayText : parsedFallback,
   );
 
@@ -157,7 +157,7 @@ function normalizeOcrSpaceResponse(
       ? overlay.map((l) => l.text).filter(Boolean)
       : rawText
           .split(/\r?\n/)
-          .map((l) => normalizeHebrewOCR(l))
+          .map((l) => normalizeRtlLine(l))
           .filter(Boolean);
 
   const confidence =
@@ -245,9 +245,9 @@ async function postToOcrSpace(
     : buildOcrFormData(apiKey, language, buffer, mimeType, fileName);
 
   const ocrEngine = process.env.OCR_SPACE_ENGINE?.trim() || "1";
-  console.log("[OCR PROVIDER]", OCR_PROVIDER);
+  console.log("[OCR PROVIDER]", getOcrProvider());
   console.log("[OCR REQUEST]", {
-    provider: OCR_PROVIDER,
+    provider: getOcrProvider(),
     ocrEngine,
     language,
     mime: mimeType,

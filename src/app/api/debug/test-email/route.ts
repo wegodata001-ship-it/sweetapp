@@ -11,6 +11,7 @@ export const dynamic = "force-dynamic";
 
 const VALID_TYPES = new Set<string>([
   "SIMPLE",
+  "OCR_WORDS",
   "TASK_ASSIGNED",
   "TASK_COMPLETED",
   "SHIFT_LATE",

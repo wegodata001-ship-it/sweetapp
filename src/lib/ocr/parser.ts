@@ -2,13 +2,21 @@ import type { ScannedDocument, ScannedItem } from "./types";
 import { normalizeOcrText, splitOcrLines } from "./normalize-ocr-text";
 import type { OcrPositionedLine } from "./ocr-overlay";
 import { parseStructuredInvoice } from "./structured-invoice-parser";
+import { isLayoutOnlyMode } from "./ocr-hard-verify";
 
 export type ParseReceiptOptions = {
   overlay?: OcrPositionedLine[];
 };
 
 export type ParseReceiptMeta = {
-  parseSource: "position" | "structured-rows" | "text-table" | "legacy" | "fallback" | "none";
+  parseSource:
+    | "layout-position"
+    | "position"
+    | "structured-rows"
+    | "text-table"
+    | "legacy"
+    | "fallback"
+    | "none";
   headerFound: boolean;
   columnBands?: { kind: string; minX: number; maxX: number; centerX: number }[];
   overlayLineCount: number;
@@ -771,7 +779,7 @@ export function parseReceiptText(
 
   const overlayUsable = overlay.length >= 3;
 
-  if (items.length === 0 && !overlayUsable) {
+  if (items.length === 0 && !overlayUsable && !isLayoutOnlyMode()) {
     const legacy = extractTableItems(lines);
     if (legacy.items.length > 0) {
       items = legacy.items;
@@ -781,9 +789,11 @@ export function parseReceiptText(
     }
   }
 
-  const fb = extractHebrewInvoiceFields(text, lines);
-  const fbItems = parseFallbackLineItems(lines);
-  if (items.length === 0 && fbItems.length > 0 && !overlayUsable) {
+  const fb = isLayoutOnlyMode()
+    ? { supplierRawName: "", invoiceNumber: "", date: "", total: null, vatAmount: null, documentType: "" }
+    : extractHebrewInvoiceFields(text, lines);
+  const fbItems = isLayoutOnlyMode() ? [] : parseFallbackLineItems(lines);
+  if (items.length === 0 && fbItems.length > 0 && !overlayUsable && !isLayoutOnlyMode()) {
     items = fbItems;
     parseSource = "fallback";
     console.log("[PARSER] vertical fallback items:", fbItems.length);

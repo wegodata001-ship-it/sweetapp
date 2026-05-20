@@ -127,4 +127,14 @@ export type OcrEngineResult = {
   lines?: string[];
   ocrLanguage?: string;
   ocrEngine?: string;
+  /** When true — UI must not treat scan as fully trusted */
+  needsManualReview?: boolean;
+  ocrProvider?: string;
+  blockCount?: number;
+  detectedLanguages?: string[];
+  rawTextPreview?: string;
+  ocrProviderActive?: "google_vision" | "ocr_space";
+  pageCount?: number;
+  visionWordsSample?: { text: string; x: number; y: number }[];
+  fromCache?: boolean;
 };

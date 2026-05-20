@@ -4,25 +4,44 @@ import {
   hashFileBuffer,
   setOcrCache,
   truncateRawOcrResponse,
+  clearAllOcrCache,
 } from "./ocr-cache";
 import { getPdfPageCount } from "./compress-pdf-for-ocr";
-import { parseOverlayFromRawResponse } from "./ocr-overlay";
+import { parseOverlayFromRawResponse, buildRawTextFromOverlay } from "./ocr-overlay";
 import { saveOriginalToOcrDebug } from "./ocr-debug-storage";
-import { detectInvoiceImageSource } from "./invoice-source-detect";
 import { logOcrFileIntegrity } from "./original-file-integrity";
-import { preprocessForPhonePhoto } from "./phone-photo-preprocess";
-import { ocrSpaceConfigured, runOcrSpace } from "./ocr-space";
+import { runGoogleVision } from "./google-vision";
+import { logActiveOcrProvider, resolveOcrProvider } from "./ocr-provider";
+import {
+  assertGoogleVisionHardRequirements,
+  isGoogleOnlyMode,
+  logOcrProviderActive,
+} from "./ocr-hard-verify";
+import { prepareOcrInput } from "./prepare-ocr-input";
+import { normalizeRtlDocument } from "./rtl-document-normalize";
+import { mergeOcrConfidence, ocrNeedsManualReview } from "./ocr-quality";
 import type { OcrEngineResult } from "./types";
+import type { OcrPositionedLine } from "./ocr-overlay";
+import { refineOverlayLines } from "./overlay-line-rebuild";
 
-/**
- * OCR via OCR.space — ללא resize/compress.
- * הקובץ שנשלח ל־OCR הוא אותו Buffer מקורי (או signed URL לאותו קובץ ב־Storage).
- */
 export type ExtractTextMeta = {
   fileHash?: string;
   route?: string;
-  onOcrInputMode?: (mode: "signed_url" | "direct_buffer") => void;
+  onOcrInputMode?: (mode: "signed_url" | "direct_buffer" | "preprocessed") => void;
+  /** מחיקת מטמון לפני סריקה (בדיקות hard verify) */
+  clearCacheFirst?: boolean;
 };
+
+function normalizeOverlayLines(overlay: OcrPositionedLine[]): OcrPositionedLine[] {
+  return overlay.map((line) => ({
+    ...line,
+    text: normalizeRtlDocument(line.text),
+    words: line.words.map((w) => ({
+      ...w,
+      text: normalizeRtlDocument(w.text),
+    })),
+  }));
+}
 
 export async function extractTextFromDocument(
   buffer: Buffer,
@@ -30,12 +49,20 @@ export async function extractTextFromDocument(
   fileName = "upload",
   meta?: ExtractTextMeta,
 ): Promise<OcrEngineResult> {
-  if (!ocrSpaceConfigured()) {
-    console.warn("[OCR] OCR_SPACE_API_KEY missing");
-    return { text: "", engine: "ocr_space", confidence: 0 };
+  if (isGoogleOnlyMode()) {
+    assertGoogleVisionHardRequirements();
+  }
+
+  const provider = logActiveOcrProvider();
+  logOcrProviderActive(provider);
+
+  if (meta?.clearCacheFirst || isGoogleOnlyMode()) {
+    const cleared = await clearAllOcrCache();
+    console.log("[OCR HARD VERIFY] cache cleared rows:", cleared.deletedRows);
   }
 
   const fileHash = meta?.fileHash ?? hashFileBuffer(buffer);
+
   logOcrFileIntegrity({
     size: buffer.length,
     mime: mimeType,
@@ -54,101 +81,100 @@ export async function extractTextFromDocument(
     }
   }
 
-  const cached = await getOcrFromCache(fileHash);
-  if (cached) {
+  const cached = await getOcrFromCache(fileHash, { engineMustBe: "google_vision" });
+  if (cached && cached.engine === "google_vision") {
     const overlay = parseOverlayFromRawResponse(cached.rawResponse);
-    if (overlay.length === 0) {
-      console.warn(
-        "[OCR] ocr_cache hit without TextOverlay — delete row or rescan for position parsing",
-        fileHash.slice(0, 12),
-      );
-    }
+    const normalizedOverlay = refineOverlayLines(normalizeOverlayLines(overlay));
+    const text =
+      normalizedOverlay.length > 0
+        ? buildRawTextFromOverlay(normalizedOverlay)
+        : normalizeRtlDocument(cached.rawText);
     const lines =
-      overlay.length > 0 ? overlay.map((l) => l.text) : cached.rawText.split("\n");
+      normalizedOverlay.length > 0
+        ? normalizedOverlay.map((l) => l.text)
+        : text.split("\n");
+    const confidence = mergeOcrConfidence(cached.confidence, text);
+    console.log("OCR PROVIDER ACTIVE: google_vision (cache)");
     return {
-      text: cached.rawText,
-      engine: `${cached.engine}_cache`,
-      confidence: cached.confidence,
+      text,
+      engine: "google_vision_cache",
+      confidence,
       pdfPageCount,
-      overlay,
+      overlay: normalizedOverlay,
       lines,
-      ocrLanguage: cached.rawResponse?.includes("language=heb") ? "heb" : "cache",
-      ocrEngine: "cache",
+      ocrLanguage: "he+ar+en",
+      ocrEngine: "google_vision_cache",
+      needsManualReview: ocrNeedsManualReview(confidence, text),
+      ocrProvider: "google_vision",
+      ocrProviderActive: "google_vision",
+      fromCache: true,
     };
   }
 
-  const debugUpload = await saveOriginalToOcrDebug(buffer, mimeType);
-  const ocrInputMode = debugUpload?.signedUrl ? "signed_url" : "direct_buffer";
-  meta?.onOcrInputMode?.(ocrInputMode);
-  if (debugUpload) {
-    logOcrFileIntegrity({
-      size: buffer.length,
-      mime: mimeType,
-      hash: fileHash,
-      fileName,
-      route: meta?.route,
-      debugPath: `${debugUpload.bucket}/${debugUpload.path}`,
-    });
-  }
+  await saveOriginalToOcrDebug(buffer, mimeType);
+  meta?.onOcrInputMode?.("preprocessed");
 
-  let ocrBuffer = buffer;
-  let ocrMime = mimeType;
-  if (mimeType.startsWith("image/")) {
-    const source = await detectInvoiceImageSource(buffer, mimeType, fileName);
-    console.log("[OCR] image source:", source);
-    if (source === "phone_photo") {
-      ocrBuffer = await preprocessForPhonePhoto(buffer);
-      ocrMime = "image/jpeg";
-    }
-  }
+  const prepared = await prepareOcrInput(buffer, mimeType, fileName);
+  console.log("[OCR PREPARE]", {
+    provider: "google_vision",
+    inMime: mimeType,
+    outMime: prepared.mimeType,
+    inBytes: buffer.length,
+    outBytes: prepared.buffer.length,
+  });
 
   const ocrStart = Date.now();
 
   try {
-    const useSignedUrl =
-      debugUpload?.signedUrl && ocrBuffer === buffer ? debugUpload.signedUrl : undefined;
+    const gv = await runGoogleVision(prepared.buffer, prepared.mimeType, prepared.fileName);
+    const refinedOverlay = refineOverlayLines(gv.overlay);
 
-    const { rawText, confidence, rawApiResponse, overlay, ocrLanguage, ocrEngine, lines } =
-      await runOcrSpace(ocrBuffer, ocrMime, fileName, {
-        sourceUrl: useSignedUrl,
-        fileHash,
-      });
-    console.log("[OCR] OCR recognize duration ms:", Date.now() - ocrStart);
+    console.log("[OCR] recognize duration ms:", Date.now() - ocrStart);
+    console.log("OCR PROVIDER ACTIVE: google_vision");
     console.log("[OCR RESPONSE]", {
-      confidence,
-      textLength: rawText.length,
-      lines: lines.length,
-      overlayLines: overlay.length,
-      ocrLanguage,
-      ocrEngine,
-      viaSignedUrl: Boolean(debugUpload?.signedUrl),
+      confidence: gv.confidence,
+      textLength: gv.rawText.length,
+      lines: gv.lines.length,
+      overlayLines: refinedOverlay.length,
+      pageCount: gv.pageCount,
+      blockCount: gv.blockCount,
+      visionWordsSample: gv.visionWordsSample,
     });
 
     await setOcrCache(
       fileHash,
       {
-        rawText,
-        confidence,
-        engine: "ocr_space",
-        rawResponse: truncateRawOcrResponse(rawApiResponse),
+        rawText: gv.rawText,
+        confidence: gv.confidence,
+        engine: "google_vision",
+        rawResponse: truncateRawOcrResponse(gv.rawApiResponse),
       },
       { fileName, mimeType },
     );
 
     return {
-      text: rawText,
-      engine: "ocr_space",
-      confidence,
+      text: gv.rawText,
+      engine: "google_vision",
+      confidence: gv.confidence,
       pdfPageCount,
-      overlay,
-      lines,
-      ocrLanguage,
-      ocrEngine,
+      overlay: refinedOverlay,
+      lines: gv.lines,
+      ocrLanguage: gv.ocrLanguage,
+      ocrEngine: gv.ocrEngine,
+      needsManualReview: gv.needsManualReview,
+      blockCount: gv.blockCount,
+      pageCount: gv.pageCount,
+      detectedLanguages: gv.detectedLanguages,
+      ocrProvider: "google_vision",
+      ocrProviderActive: "google_vision",
+      rawTextPreview: gv.rawText.slice(0, 2000),
+      visionWordsSample: gv.visionWordsSample,
+      fromCache: false,
     };
   } catch (e) {
     console.error("[OCR] OCR errors:", e instanceof Error ? e.message : e);
     if (e instanceof OcrServiceError) throw e;
-    const msg = e instanceof Error ? e.message : "OCR.space failed";
+    const msg = e instanceof Error ? e.message : "Google Vision failed";
     throw new OcrServiceError("OCR_PROVIDER_ERROR", msg);
   }
 }

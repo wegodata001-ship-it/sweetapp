@@ -42,9 +42,16 @@ function memorySet(hash: string, payload: OcrCachePayload): void {
 /**
  * Lookup OCR result by SHA-256 of original file bytes.
  */
-export async function getOcrFromCache(fileHash: string): Promise<OcrCachePayload | null> {
+export async function getOcrFromCache(
+  fileHash: string,
+  opts?: { engineMustBe?: string },
+): Promise<OcrCachePayload | null> {
   const mem = memoryGet(fileHash);
   if (mem) {
+    if (opts?.engineMustBe && mem.engine !== opts.engineMustBe) {
+      console.log("[OCR] ocr_cache skip (memory wrong engine)", mem.engine);
+      return null;
+    }
     console.log("[OCR] ocr_cache hit (memory)", fileHash.slice(0, 12));
     return mem;
   }
@@ -60,6 +67,10 @@ export async function getOcrFromCache(fileHash: string): Promise<OcrCachePayload
       data: { lastUsedAt: new Date() },
     });
 
+    if (opts?.engineMustBe && row.engine !== opts.engineMustBe) {
+      console.log("[OCR] ocr_cache skip (db wrong engine)", row.engine);
+      return null;
+    }
     const payload: OcrCachePayload = {
       rawText: row.rawText,
       confidence: row.confidence,
@@ -67,11 +78,27 @@ export async function getOcrFromCache(fileHash: string): Promise<OcrCachePayload
       rawResponse: row.rawResponse,
     };
     memorySet(fileHash, payload);
-    console.log("[OCR] ocr_cache hit (db)", fileHash.slice(0, 12));
+    console.log("[OCR] ocr_cache hit (db)", fileHash.slice(0, 12), "engine:", row.engine);
     return payload;
   } catch (e) {
     console.warn("[OCR] ocr_cache read skipped (run migration?):", e);
     return null;
+  }
+}
+
+/** מחיקת כל מטמון OCR (DB + memory) — לפני בדיקות Vision */
+export async function clearAllOcrCache(): Promise<{ deletedRows: number }> {
+  if (g.__wegoOcrCacheMem) {
+    g.__wegoOcrCacheMem.clear();
+    console.log("[OCR] ocr_cache memory cleared");
+  }
+  try {
+    const result = await prisma.ocrCache.deleteMany();
+    console.log("[OCR] ocr_cache db cleared rows:", result.count);
+    return { deletedRows: result.count };
+  } catch (e) {
+    console.warn("[OCR] ocr_cache db clear failed:", e);
+    return { deletedRows: 0 };
   }
 }
 

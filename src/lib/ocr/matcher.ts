@@ -4,6 +4,45 @@ import { canAutoMatchProductName } from "./ocr-line-filters";
 import { supplierMatchLabels, supplierNamesMatch } from "./supplier-aliases";
 import type { ScannedDocument, ScannedItem } from "./types";
 
+type SupplierRow = { id: string; name: string; notes: string | null };
+
+let supplierFuseCache: {
+  search: (q: string) => Array<{ item: SupplierRow; score?: number }>;
+  at: number;
+} | null = null;
+const FUSE_CACHE_MS = 60_000;
+
+async function fuseSearchSuppliers(clean: string): Promise<{ id: string; name: string } | null> {
+  try {
+    const now = Date.now();
+    if (!supplierFuseCache || now - supplierFuseCache.at > FUSE_CACHE_MS) {
+      const Fuse = (await import("fuse.js")).default;
+      const rows = await prisma.supplier.findMany({
+        select: { id: true, name: true, notes: true },
+      });
+      const fuse = new Fuse(rows, {
+        keys: ["name"],
+        threshold: 0.45,
+        ignoreLocation: true,
+        distance: 120,
+        minMatchCharLength: 2,
+      });
+      supplierFuseCache = {
+        at: now,
+        search: (q) => fuse.search(q),
+      };
+    }
+    const hits = supplierFuseCache.search(clean);
+    const best = hits[0];
+    if (best && best.score != null && best.score <= 0.38) {
+      return { id: best.item.id, name: best.item.name };
+    }
+  } catch (e) {
+    console.warn("[MATCHER] fuse.js unavailable — run npm install fuse.js", e);
+  }
+  return null;
+}
+
 /**
  * Supplier + product matching and price-baseline comparison.
  *
@@ -64,6 +103,10 @@ export async function matchSupplier(
 ): Promise<{ id: string; name: string } | null> {
   const clean = rawName.trim();
   if (!clean) return null;
+
+  const fuseHit = await fuseSearchSuppliers(clean);
+  if (fuseHit) return fuseHit;
+
   const suppliers = await prisma.supplier.findMany({
     select: { id: true, name: true, notes: true },
   });

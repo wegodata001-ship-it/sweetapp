@@ -5,7 +5,7 @@ import {
   isSupportedMimeType,
   scanDocument,
   OcrServiceError,
-  OCR_PROVIDER,
+  getOcrProvider,
   logOcrFlow,
 } from "@/lib/ocr";
 import { hashFileBuffer } from "@/lib/ocr/ocr-cache";
@@ -38,7 +38,7 @@ function isTimeoutError(e: unknown): boolean {
  */
 export async function POST(req: NextRequest) {
   const started = Date.now();
-  console.log("[OCR PROVIDER]", OCR_PROVIDER);
+  console.log("[OCR PROVIDER]", getOcrProvider());
   logOcrFlow({ route: "expenses/scan" });
 
   try {
@@ -110,9 +110,11 @@ export async function POST(req: NextRequest) {
               ? 504
               : 502;
       const userMessage =
-        e.code === "OCR_PROVIDER_ERROR" || e.code === "OCR_TIMEOUT"
-          ? "שירות OCR זמנית לא זמין"
-          : e.message;
+        e.code === "OCR_NOT_CONFIGURED"
+          ? "Google Vision not configured — הוסף GOOGLE_CLOUD_VISION_API_KEY ל-.env"
+          : e.code === "OCR_PROVIDER_ERROR" || e.code === "OCR_TIMEOUT"
+            ? "שירות OCR זמנית לא זמין"
+            : e.message;
       return scanJsonError(userMessage, status, e.code);
     }
 

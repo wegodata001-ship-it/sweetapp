@@ -1,8 +1,6 @@
 import { NextResponse } from "next/server";
 import type { ScannedDocument } from "./types";
 
-const PROVIDER = "ocr.space" as const;
-
 export type ScanDebugMeta = {
   provider: string;
   confidence: number;
@@ -27,14 +25,26 @@ export type ScanDebugMeta = {
   /** SHA-256 של הקובץ המקורי — להשוואת LOCAL מול PROD */
   fileHash?: string;
   fileSizeBytes?: number;
-  ocrInputMode?: "signed_url" | "direct_buffer";
+  ocrInputMode?: "signed_url" | "direct_buffer" | "preprocessed";
+  blockCount?: number;
+  detectedLanguages?: string[];
+  needsManualReview?: boolean;
+  rawOcrPreview?: string;
+  garbageRatio?: number;
+  /** מזהה ספק פעיל — google_vision | ocr_space */
+  ocrProviderActive?: "google_vision" | "ocr_space";
+  ocrConfidence?: number;
+  pageCount?: number;
+  visionWordsSample?: { text: string; x: number; y: number }[];
+  layoutOnlyMode?: boolean;
+  firstOverlayLines?: string[];
 };
 
 export type ScanApiSuccess = {
   success: true;
   ok: true;
   data: ScannedDocument & { error?: string; partial?: boolean };
-  provider: typeof PROVIDER;
+  provider: string;
   debug?: ScanDebugMeta;
 };
 
@@ -42,7 +52,7 @@ export type ScanApiFailure = {
   success: false;
   ok: false;
   error: string;
-  provider: typeof PROVIDER;
+  provider: string;
   code?: string;
 };
 
@@ -54,7 +64,7 @@ export function scanJsonSuccess(
     success: true,
     ok: true,
     data,
-    provider: PROVIDER,
+    provider: debug?.provider ?? "unknown",
     ...(debug ? { debug } : {}),
   });
 }
@@ -69,7 +79,7 @@ export function scanJsonError(
       success: false,
       ok: false,
       error,
-      provider: PROVIDER,
+      provider: "unknown",
       ...(code ? { code } : {}),
     },
     { status },

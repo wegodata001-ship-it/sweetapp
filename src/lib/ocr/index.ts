@@ -1,4 +1,4 @@
-import { ocrSpaceConfigured } from "./ocr-space";
+import { anyOcrConfigured, logActiveOcrProvider } from "./ocr-provider";
 import { extractTextFromDocument, hasMeaningfulText } from "./extract-text";
 import { OcrServiceError } from "./ocr-errors";
 import { parseReceiptText, summarizeParsed } from "./parser";
@@ -8,19 +8,30 @@ import { uploadReceiptToStorage } from "./storage";
 import type { ScanDebugMeta } from "./api-response";
 import type { ScannedDocument } from "./types";
 import { writeOcrDebugSnapshot } from "./ocr-debug";
-import { hashFileBuffer } from "./ocr-cache";
-import { logOcrFlow, OCR_PROVIDER } from "./ocr-flow";
+import { hashFileBuffer, clearAllOcrCache } from "./ocr-cache";
+import { getOcrProvider, logOcrFlow } from "./ocr-flow";
+import { computeGarbageRatio } from "./ocr-quality";
+import { isLayoutOnlyMode, type OcrProviderActive } from "./ocr-hard-verify";
 
 export * from "./types";
 export { parseReceiptText, summarizeParsed } from "./parser";
 export { parseHebrewInvoiceTable } from "./hebrew-invoice-table-parser";
 export { enrichScannedDocument } from "./matcher";
 export { ocrSpaceConfigured } from "./ocr-space";
+export { googleVisionConfigured } from "./google-vision";
+export { anyOcrConfigured, resolveOcrProvider } from "./ocr-provider";
 export type { OcrSpaceResult } from "./ocr-space";
 export { confidenceTier } from "./confidence-ui";
 export type { ScanDebugMeta } from "./api-response";
-export { OCR_PROVIDER, logOcrFlow } from "./ocr-flow";
+export { getOcrProvider, logOcrFlow } from "./ocr-flow";
 export { parseStructuredInvoice } from "./structured-invoice-parser";
+export { parseInvoiceByLayout } from "./invoice-layout-engine";
+export { clearAllOcrCache } from "./ocr-cache";
+export {
+  isGoogleOnlyMode,
+  isLayoutOnlyMode,
+  googleVisionApiKeyPresent,
+} from "./ocr-hard-verify";
 
 export const SUPPORTED_MIME_TYPES = [
   "image/jpeg",
@@ -52,7 +63,7 @@ function emptyScannedDocument(fileName: string): ScannedDocument {
     items: [],
     rawText: "",
     receiptFileName: fileName,
-    engine: "ocr_space",
+    engine: getOcrProvider(),
     confidence: 0,
   };
 }
@@ -64,7 +75,7 @@ export type ScanDocumentResult = ScannedDocument & {
 };
 
 /**
- * Upload → OCR.space → parse → supplier/product match.
+ * Upload → OCR (Google Vision / OCR.space) → RTL normalize → parse → match.
  */
 export async function scanDocument(input: {
   buffer: Buffer;
@@ -74,28 +85,29 @@ export async function scanDocument(input: {
 }): Promise<ScanDocumentResult> {
   const { buffer, fileName, mimeType } = input;
   const fileHash = input.fileHash ?? hashFileBuffer(buffer);
-
   logOcrFlow({ phase: "start", fileName, mimeType, bytes: buffer.length });
-  console.log("[OCR PROVIDER]", OCR_PROVIDER);
 
-  if (!ocrSpaceConfigured()) {
+  if (!anyOcrConfigured()) {
     return {
       ...emptyScannedDocument(fileName),
       error: "OCR_NOT_CONFIGURED",
     };
   }
 
+  const provider = logActiveOcrProvider();
+  console.log("OCR PROVIDER ACTIVE:", provider);
+
   let upload: { url: string; path: string } | null = null;
   let rawText = "";
-  let engine = "ocr_space";
+  let engine: string = provider;
   let confidence = 0;
   let ocrLanguage = "unknown";
-  let ocrEngineUsed = "1";
+  let ocrEngineUsed: string = provider;
 
   const uploadStart = Date.now();
   const ocrPipelineStart = Date.now();
 
-  let ocrInputMode: ScanDebugMeta["ocrInputMode"] = "direct_buffer";
+  let ocrInputMode: ScanDebugMeta["ocrInputMode"] = "preprocessed";
 
   const [uploadResult, ocrResult] = await Promise.all([
     uploadReceiptToStorage(buffer, fileName, mimeType).then((r) => {
@@ -105,6 +117,7 @@ export async function scanDocument(input: {
     extractTextFromDocument(buffer, mimeType, fileName, {
       fileHash,
       route: "scanDocument",
+      clearCacheFirst: true,
       onOcrInputMode: (mode) => {
         ocrInputMode = mode;
       },
@@ -119,10 +132,11 @@ export async function scanDocument(input: {
   engine = ocrResult.engine;
   confidence = ocrResult.confidence;
   ocrLanguage = ocrResult.ocrLanguage ?? "unknown";
-  ocrEngineUsed = ocrResult.ocrEngine ?? "1";
+  ocrEngineUsed = ocrResult.ocrEngine ?? provider;
   const ocrFromCache = engine.includes("_cache");
   const pdfPageCount = ocrResult.pdfPageCount;
   const overlay = ocrResult.overlay ?? [];
+  const needsOcrReview = ocrResult.needsManualReview ?? false;
 
   console.log("[OCR RAW TEXT]\n", rawText);
   console.log("[OCR RAW LINES]");
@@ -147,11 +161,19 @@ export async function scanDocument(input: {
   parsed.confidence = Math.max(parsed.confidence, confidence);
   parsed.receiptFileUrl = upload?.url ?? null;
   parsed.receiptFileName = fileName;
-  parsed.rawText = rawText;
   parsed.ocrFromCache = ocrFromCache;
+
+  if (needsOcrReview) {
+    const fields = new Set(parsed.needsReviewFields ?? []);
+    fields.add("ocr_quality");
+    parsed.needsReviewFields = [...fields];
+    parsed.confidence = Math.min(parsed.confidence, 0.45);
+  }
 
   if (!hasMeaningfulText(rawText) && !hasExtractedFields(parsed)) {
     error = "OCR_READ_FAILED";
+  } else if (needsOcrReview && !error) {
+    error = "OCR_PARTIAL";
   }
 
   const matchStart = Date.now();
@@ -168,10 +190,17 @@ export async function scanDocument(input: {
     error = error ?? "OCR_PARTIAL";
   }
 
+  if (needsOcrReview) {
+    const fields = new Set(enriched.needsReviewFields ?? []);
+    fields.add("ocr_quality");
+    enriched.needsReviewFields = [...fields];
+  }
+
   const partial =
-    !enriched.supplierId &&
-    hasExtractedFields(enriched) &&
-    Boolean(enriched.supplierRawName?.trim() || enriched.items.length > 0);
+    needsOcrReview ||
+    (!enriched.supplierId &&
+      hasExtractedFields(enriched) &&
+      Boolean(enriched.supplierRawName?.trim() || enriched.items.length > 0));
 
   if (partial && !error) {
     error = "OCR_PARTIAL";
@@ -190,12 +219,18 @@ export async function scanDocument(input: {
     }
   ).parseMeta;
 
+  const ocrProviderActive: OcrProviderActive =
+    ocrResult.ocrProviderActive ??
+    (provider === "google_vision" ? "google_vision" : "ocr_space");
+
   const debug: ScanDebugMeta = {
-    provider: OCR_PROVIDER,
+    provider: ocrProviderActive,
+    ocrProviderActive,
     fileHash,
     fileSizeBytes: buffer.length,
     ocrInputMode,
     confidence: enriched.confidence,
+    ocrConfidence: confidence,
     textLength: rawText.length,
     itemsFound: enriched.items.length,
     parseDurationMs,
@@ -210,7 +245,7 @@ export async function scanDocument(input: {
     overlayLineCount: overlay.length,
     parseSource: parseMeta?.parseSource,
     invoiceKind: parseMeta?.invoiceKind ?? parsed.invoiceKind,
-    needsReviewFields: parseMeta?.needsReviewFields ?? parsed.needsReviewFields,
+    needsReviewFields: enriched.needsReviewFields,
     headerFound: parseMeta?.headerFound,
     columnBands: parseMeta?.columnBands,
     overlayLinesPreview: overlay.slice(0, 25).map((l) => ({
@@ -218,10 +253,19 @@ export async function scanDocument(input: {
       top: l.top,
       wordCount: l.words.length,
     })),
+    blockCount: ocrResult.blockCount,
+    pageCount: ocrResult.pageCount,
+    detectedLanguages: ocrResult.detectedLanguages,
+    needsManualReview: needsOcrReview,
+    rawOcrPreview: ocrResult.rawTextPreview ?? rawText.slice(0, 2000),
+    garbageRatio: computeGarbageRatio(rawText),
+    visionWordsSample: ocrResult.visionWordsSample,
+    layoutOnlyMode: isLayoutOnlyMode(),
+    firstOverlayLines: overlay.slice(0, 10).map((l) => l.text),
   };
 
   void writeOcrDebugSnapshot({
-    provider: OCR_PROVIDER,
+    provider,
     ocrLanguage,
     ocrEngine: ocrEngineUsed,
     fromCache: ocrFromCache,
@@ -236,6 +280,8 @@ export async function scanDocument(input: {
     columnBands: parseMeta?.columnBands,
     headerFound: parseMeta?.headerFound,
     parseSource: parseMeta?.parseSource,
+    blockCount: ocrResult.blockCount,
+    detectedLanguages: ocrResult.detectedLanguages,
   }).catch((e) => console.warn("[OCR DEBUG] write failed", e));
 
   console.log("[OCR] RESPONSE", { partial, error: error ?? null, debug });

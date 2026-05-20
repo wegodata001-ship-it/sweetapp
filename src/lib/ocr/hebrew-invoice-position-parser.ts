@@ -17,7 +17,8 @@ import {
   SANITY_MAX_QTY,
   SANITY_MAX_UNIT_PRICE,
 } from "./invoice-line-sanity";
-import { normalizeHebrewOCR, isOcrGarbageText } from "./normalize-hebrew-ocr";
+import { isOcrGarbageText } from "./normalize-hebrew-ocr";
+import { normalizeRtlLine } from "./rtl-document-normalize";
 import type { OcrPositionedLine, OcrPositionedWord } from "./ocr-overlay";
 
 const NUMBER_RE =
@@ -123,7 +124,7 @@ function wordsToCells(
 
 function joinDescriptionWords(descWords: OcrPositionedWord[]): string {
   const sorted = [...descWords].sort((a, b) => b.centerX - a.centerX);
-  return normalizeHebrewOCR(sorted.map((w) => w.text).join(" "));
+  return normalizeRtlLine(sorted.map((w) => w.text).join(" "));
 }
 
 function parseNumericCell(words: OcrPositionedWord[]): number {
@@ -211,7 +212,7 @@ function parsePositionRow(
   line: OcrPositionedLine,
   bands: ColumnBand[],
 ): ScannedItem | null {
-  const text = normalizeHebrewOCR(line.text);
+  const text = normalizeRtlLine(line.text);
   if (shouldSkipItemLine(text)) return null;
 
   const cells = wordsToCells(line.words, bands);
@@ -222,7 +223,7 @@ function parsePositionRow(
       .sort((a, b) => b.centerX - a.centerX)
       .map((w) => w.text)
       .join(" ");
-    rawName = normalizeHebrewOCR(unknownText) || text.replace(NUMBER_RE, "").trim();
+    rawName = normalizeRtlLine(unknownText) || text.replace(NUMBER_RE, "").trim();
   }
 
   let quantity = parseNumericCell(cells.quantity);
@@ -237,6 +238,77 @@ function parsePositionRow(
   return buildItemFromRow(rawName, quantity, unitPrice, lineTotal);
 }
 
+/** כשאין שורת כותרת — מסיק 3 עמודות מספריות (כמות, מחיר, סה״כ) ממיקום X */
+function inferColumnBandsFromDataRows(
+  overlay: OcrPositionedLine[],
+  bodyStart: number,
+  bodyEnd: number,
+): ColumnBand[] {
+  const numericCenters: number[] = [];
+  let descMinX = Infinity;
+  let descMaxX = 0;
+
+  for (let i = bodyStart; i < bodyEnd; i++) {
+    for (const w of overlay[i].words) {
+      const t = w.text.replace(/,/g, "");
+      if (/^\d+(\.\d{1,2})?$/.test(t)) {
+        const n = parseFloat(t);
+        if (n > 0 && n < 500_000) numericCenters.push(w.centerX);
+      } else if (!/^\d{4,12}$/.test(t) && /[א-תa-z]/i.test(t)) {
+        descMinX = Math.min(descMinX, w.left);
+        descMaxX = Math.max(descMaxX, w.left + w.width);
+      }
+    }
+  }
+
+  if (numericCenters.length < 6) return [];
+
+  numericCenters.sort((a, b) => a - b);
+  const clusters: number[][] = [[numericCenters[0]]];
+  const gap = 35;
+  for (let i = 1; i < numericCenters.length; i++) {
+    const x = numericCenters[i];
+    const last = clusters[clusters.length - 1];
+    if (x - last[last.length - 1] <= gap) last.push(x);
+    else clusters.push([x]);
+  }
+
+  const merged = clusters
+    .map((c) => c.reduce((a, b) => a + b, 0) / c.length)
+    .sort((a, b) => a - b);
+
+  const numericBands: ColumnKind[] = ["quantity", "unitPrice", "lineTotal"];
+  const pick = merged.slice(-3);
+  if (pick.length < 2) return [];
+
+  const bands: ColumnBand[] = pick.map((centerX, idx) => {
+    const kind = numericBands[numericBands.length - pick.length + idx] ?? "lineTotal";
+    return {
+      kind,
+      centerX,
+      minX: centerX - 50,
+      maxX: centerX + 50,
+    };
+  });
+
+  if (descMaxX > descMinX) {
+    bands.unshift({
+      kind: "description",
+      centerX: (descMinX + descMaxX) / 2,
+      minX: descMinX - 8,
+      maxX: pick[0] - 20,
+    });
+    bands.unshift({
+      kind: "sku",
+      centerX: descMinX - 40,
+      minX: 0,
+      maxX: descMinX - 10,
+    });
+  }
+
+  return expandColumnBands(bands);
+}
+
 function findTableBounds(overlay: OcrPositionedLine[]): {
   headerIdx: number;
   bands: ColumnBand[];
@@ -247,7 +319,7 @@ function findTableBounds(overlay: OcrPositionedLine[]): {
   let bands: ColumnBand[] = [];
 
   for (let i = 0; i < Math.min(overlay.length, 45); i++) {
-    const text = normalizeHebrewOCR(overlay[i].text);
+    const text = normalizeRtlLine(overlay[i].text);
     if (isTableHeaderLine(text) && overlay[i].words.length >= 2) {
       headerIdx = i;
       bands = detectColumnBands(overlay[i]);
@@ -260,7 +332,7 @@ function findTableBounds(overlay: OcrPositionedLine[]): {
   const bodyStart = headerIdx >= 0 ? headerIdx + 1 : 0;
   let bodyEnd = overlay.length;
   for (let i = bodyStart; i < overlay.length; i++) {
-    if (isFooterLine(normalizeHebrewOCR(overlay[i].text))) {
+    if (isFooterLine(normalizeRtlLine(overlay[i].text))) {
       bodyEnd = i;
       break;
     }
@@ -276,7 +348,14 @@ export function parseHebrewInvoiceByPosition(
     return { items: [], skipped: 0, headerFound: false, parseSource: "position" };
   }
 
-  const { headerIdx, bands, bodyStart, bodyEnd } = findTableBounds(overlay);
+  let { headerIdx, bands, bodyStart, bodyEnd } = findTableBounds(overlay);
+  if (bands.length < 2) {
+    const inferred = inferColumnBandsFromDataRows(overlay, bodyStart, bodyEnd);
+    if (inferred.length >= 2) {
+      bands = inferred;
+      console.log("[hebrew-position] inferred column bands from data rows");
+    }
+  }
   if (bands.length < 2) {
     return { items: [], skipped: 0, headerFound: false, parseSource: "position" };
   }
@@ -293,7 +372,7 @@ export function parseHebrewInvoiceByPosition(
 
   for (let i = bodyStart; i < bodyEnd; i++) {
     const line = overlay[i];
-    const text = normalizeHebrewOCR(line.text);
+    const text = normalizeRtlLine(line.text);
     if (shouldSkipItemLine(text) || isTableHeaderLine(text)) {
       skipped++;
       continue;

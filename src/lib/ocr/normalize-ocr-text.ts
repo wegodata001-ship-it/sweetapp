@@ -1,8 +1,8 @@
-import { normalizeHebrewOCR } from "./normalize-hebrew-ocr";
+import { normalizeRtlDocument, normalizeRtlLine } from "./rtl-document-normalize";
 
-/** @deprecated use normalizeHebrewOCR */
+/** @deprecated use normalizeRtlLine */
 export function fixRtlLineText(line: string): string {
-  return normalizeHebrewOCR(line);
+  return normalizeRtlLine(line);
 }
 
 function mergeFragmentedWords(line: string): string {
@@ -15,17 +15,19 @@ function mergeFragmentedWords(line: string): string {
  * Step 1 — Normalize OCR output before Hebrew invoice parsing.
  */
 export function normalizeOcrText(raw: string): string {
-  const lines = (raw ?? "")
+  const cleaned = (raw ?? "")
     .replace(/\uFEFF/g, "")
     .replace(/[\u200E\u200F\u202A-\u202E\u2066-\u2069]/g, "")
     .replace(/\u00a0/g, " ")
     .replace(/\r/g, "\n")
-    .replace(/\t/g, " ")
+    .replace(/\t/g, " ");
+
+  const lines = cleaned
     .split("\n")
-    .map((l) => mergeFragmentedWords(normalizeHebrewOCR(l)))
+    .map((l) => mergeFragmentedWords(normalizeRtlLine(l)))
     .filter(Boolean);
 
-  return lines.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+  return normalizeRtlDocument(lines.join("\n"));
 }
 
 /** Split into lines; preserve table rows (don't collapse spaces inside line). */

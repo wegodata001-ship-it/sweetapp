@@ -52,6 +52,17 @@ type ScanDebugDto = {
   headerFound?: boolean;
   columnBands?: { kind: string; minX: number; maxX: number; centerX: number }[];
   overlayLinesPreview?: { text: string; top: number; wordCount: number }[];
+  blockCount?: number;
+  detectedLanguages?: string[];
+  needsManualReview?: boolean;
+  rawOcrPreview?: string;
+  garbageRatio?: number;
+  ocrProviderActive?: "google_vision" | "ocr_space";
+  ocrConfidence?: number;
+  pageCount?: number;
+  visionWordsSample?: { text: string; x: number; y: number }[];
+  layoutOnlyMode?: boolean;
+  firstOverlayLines?: string[];
 };
 
 type ScanApiPayload =
@@ -1178,11 +1189,20 @@ function OcrDebugModal({
           </button>
         </div>
         <div className="grid gap-2 border-b border-slate-100 px-4 py-3 text-xs">
-          <DebugRow label={t("scan.ocrDebugProvider")} value={debug?.provider ?? "ocr.space"} />
+          <DebugRow
+            label={t("scan.ocrDebugProvider")}
+            value={debug?.ocrProviderActive ?? debug?.provider ?? "—"}
+          />
           <DebugRow
             label={t("scan.ocrDebugConfidence")}
-            value={`${Math.round(conf * 100)}%`}
+            value={`${Math.round((debug?.ocrConfidence ?? conf) * 100)}%`}
           />
+          {debug?.pageCount != null ? (
+            <DebugRow label={t("scan.ocrDebugPages")} value={String(debug.pageCount)} />
+          ) : null}
+          {debug?.layoutOnlyMode ? (
+            <p className="font-bold text-emerald-800">{t("scan.ocrDebugLayoutOnly")}</p>
+          ) : null}
           <DebugRow
             label={t("scan.ocrDebugParseMs")}
             value={
@@ -1209,6 +1229,24 @@ function OcrDebugModal({
             label={t("scan.ocrDebugOverlayCount")}
             value={String(debug?.overlayLineCount ?? 0)}
           />
+          {debug?.blockCount != null ? (
+            <DebugRow
+              label={t("scan.ocrDebugBlocks")}
+              value={String(debug.blockCount)}
+            />
+          ) : null}
+          {debug?.detectedLanguages?.length ? (
+            <DebugRow
+              label={t("scan.ocrDebugDetectedLang")}
+              value={debug.detectedLanguages.join(", ")}
+            />
+          ) : null}
+          {debug?.garbageRatio != null ? (
+            <DebugRow
+              label={t("scan.ocrDebugGarbage")}
+              value={`${Math.round(debug.garbageRatio * 100)}%`}
+            />
+          ) : null}
           {debug?.columnBands?.length ? (
             <DebugRow
               label={t("scan.ocrDebugColumns")}
@@ -1221,7 +1259,32 @@ function OcrDebugModal({
           {debug?.ocrLanguage === "eng" ? (
             <p className="font-bold text-amber-800">{t("scan.ocrDebugEngWarning")}</p>
           ) : null}
+          {debug?.needsManualReview ? (
+            <p className="font-bold text-amber-900">{t("scan.ocrDebugManualReview")}</p>
+          ) : null}
         </div>
+        {debug?.visionWordsSample?.length ? (
+          <details className="border-t border-slate-200">
+            <summary className="cursor-pointer bg-emerald-50 px-4 py-2 text-xs font-black text-emerald-900">
+              {t("scan.ocrDebugWordSamples")}
+            </summary>
+            <pre className="max-h-[20vh] overflow-auto bg-slate-800 p-3 text-[10px] text-slate-100 whitespace-pre-wrap">
+              {debug.visionWordsSample
+                .map((w, i) => `${i + 1}. "${w.text}" x=${w.x} y=${w.y}`)
+                .join("\n")}
+            </pre>
+          </details>
+        ) : null}
+        {debug?.firstOverlayLines?.length ? (
+          <details className="border-t border-slate-200">
+            <summary className="cursor-pointer bg-slate-50 px-4 py-2 text-xs font-black text-slate-700">
+              {t("scan.ocrDebugFirstOverlay")}
+            </summary>
+            <pre className="max-h-[20vh] overflow-auto bg-slate-800 p-3 text-[10px] text-slate-100 whitespace-pre-wrap">
+              {debug.firstOverlayLines.map((l, i) => `${i + 1}. ${l}`).join("\n")}
+            </pre>
+          </details>
+        ) : null}
         <details className="border-t border-slate-200">
           <summary className="cursor-pointer bg-slate-50 px-4 py-2 text-xs font-black text-slate-700">
             {t("scan.ocrDebugOverlayLines")}
@@ -1230,6 +1293,14 @@ function OcrDebugModal({
             {(debug?.overlayLinesPreview ?? [])
               .map((l, i) => `${i + 1}. [y=${l.top}] (${l.wordCount}w) ${l.text}`)
               .join("\n") || t("scan.noRawText")}
+          </pre>
+        </details>
+        <details className="border-t border-slate-200">
+          <summary className="cursor-pointer bg-slate-100 px-4 py-2 text-xs font-black text-slate-700">
+            {t("scan.ocrDebugRawPreview")}
+          </summary>
+          <pre className="max-h-[32vh] overflow-auto bg-slate-900 p-4 text-[10px] leading-relaxed text-slate-100 whitespace-pre-wrap">
+            {debug?.rawOcrPreview || rawText || t("scan.noRawText")}
           </pre>
         </details>
         <details className="min-h-0 flex-1 overflow-hidden border-t border-slate-200">

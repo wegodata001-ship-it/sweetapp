@@ -1,5 +1,7 @@
 import { parseNumber } from "./hebrew-invoice-table-parser";
 import { splitOcrLines } from "./normalize-ocr-text";
+import type { OcrPositionedLine } from "./ocr-overlay";
+import { normalizeRtlLine } from "./rtl-document-normalize";
 
 export type StructuredHeader = {
   supplierRawName: string;
@@ -179,5 +181,38 @@ export function parseStructuredHeader(rawText: string, lines?: string[]): Struct
     vatAmount,
     customerBlock,
     needsReview: [...new Set(needsReview)],
+  };
+}
+
+/**
+ * כותרת חשבונית מאזור עליון לפי Y — לא מתוך טקסט שטוח שבור.
+ */
+export function parseStructuredHeaderFromOverlay(
+  overlay: OcrPositionedLine[],
+  fullTextFallback = "",
+): StructuredHeader {
+  if (overlay.length === 0) {
+    return parseStructuredHeader(fullTextFallback);
+  }
+
+  const maxTop = Math.max(...overlay.map((l) => l.top), 1);
+  const headerCutoff = maxTop * 0.34;
+  const headerLines = overlay
+    .filter((l) => l.top <= headerCutoff)
+    .map((l) => normalizeRtlLine(l.text))
+    .filter((t) => t.length > 1);
+
+  const headerBlock = headerLines.join("\n");
+  const base = parseStructuredHeader(
+    headerBlock.length > 20 ? headerBlock : fullTextFallback,
+    headerLines,
+  );
+
+  if (base.supplierRawName) return base;
+
+  const merged = parseStructuredHeader(fullTextFallback, splitOcrLines(fullTextFallback));
+  return {
+    ...merged,
+    needsReview: [...new Set([...merged.needsReview, ...base.needsReview])],
   };
 }
