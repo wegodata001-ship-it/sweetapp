@@ -113,7 +113,6 @@ export function shouldBatchEmail(
 ): boolean {
   if (importance === "CRITICAL" || importance === "HIGH") return false;
   if (notificationType === "TASK_ASSIGNED") return false;
-  if (notificationType === "SYSTEM_ALERT" && importance === "CRITICAL") return false;
   if (emailMode === "daily_digest") return true;
   return importance === "NORMAL";
 }

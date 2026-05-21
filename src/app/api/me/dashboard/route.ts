@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import type { Prisma } from "@prisma/client";
 import { getSessionFromCookie } from "@/lib/auth/get-session";
 import { prisma, prismaAny } from "@/lib/prisma";
 import { requireDb } from "@/lib/api-route";
@@ -11,6 +12,13 @@ import { serializeWorkSession } from "@/lib/work-sessions/serialize";
 import { serializeWorkflowRunDetail } from "@/lib/workflows/serialize";
 
 export const dynamic = "force-dynamic";
+
+const activeRunInclude = {
+  assignee: { select: { id: true, fullName: true } },
+  createdBy: { select: { id: true, fullName: true } },
+  template: { select: { id: true, title: true, color: true } },
+  items: true,
+} satisfies Prisma.WorkflowRunInclude;
 
 /**
  * GET /api/me/dashboard — פורטל עובד בלבד.
@@ -44,14 +52,9 @@ export async function GET() {
         },
         orderBy: { clockIn: "asc" },
       }),
-      prismaAny.workflowRun.findMany({
+      prisma.workflowRun.findMany({
         where: { assigneeId: uid, status: "IN_PROGRESS" },
-        include: {
-          assignee: { select: { id: true, fullName: true } },
-          createdBy: { select: { id: true, fullName: true } },
-          template: { select: { id: true, title: true, color: true } },
-          items: { orderBy: { orderIndex: "asc" } },
-        },
+        include: activeRunInclude,
         orderBy: { startedAt: "desc" },
         take: 20,
       }),
@@ -63,10 +66,7 @@ export async function GET() {
       }),
     ]);
 
-    const activeRuns = filterWorkflowRunsForUser(
-      activeRunsRaw as { assigneeId: string }[],
-      uid,
-    );
+    const activeRuns = filterWorkflowRunsForUser(activeRunsRaw, uid);
 
     const todayCompletedMinutes = todaySessions
       .filter((r: { status: string }) => r.status === "ENDED")
@@ -77,9 +77,8 @@ export async function GET() {
 
     let openTasksCount = 0;
     let lateTasksCount = 0;
-    type RunItem = { status: string; isLate: boolean };
     for (const run of activeRuns) {
-      for (const it of (run as { items: RunItem[] }).items) {
+      for (const it of run.items) {
         if (it.status === "PENDING" || it.status === "ACTIVE") openTasksCount += 1;
         if (it.isLate) lateTasksCount += 1;
       }
@@ -89,10 +88,10 @@ export async function GET() {
 
     logStrictScope("[GET /api/me/dashboard]", session, {
       returnedRuns: activeRuns.length,
-      returnedRunIds: activeRuns.map((r) => (r as { id: string }).id),
+      returnedRunIds: activeRuns.map((r) => r.id),
       returnedAssignees: activeRuns.map((r) => ({
-        id: (r as { assigneeId: string }).assigneeId,
-        name: (r as { assignee?: { fullName: string } }).assignee?.fullName,
+        id: r.assigneeId,
+        name: r.assignee?.fullName,
       })),
     });
 
