@@ -1,0 +1,127 @@
+{
+  "exportedAt": "2026-05-21T11:36:06.070Z",
+  "counts": {
+    "financialDocuments": 12,
+    "payments": 0,
+    "ledgerEntries": 0,
+    "cashFlow": 0,
+    "checks": 0,
+    "customers": 0,
+    "futureOrders": 0,
+    "notifications": 2,
+    "employeeTasks": 0,
+    "taskGroups": 0,
+    "ocrCache": 0,
+    "activityLogs": 140
+  },
+  "financialDocumentsSample": [
+    {
+      "id": "cmp15oeer00078wb2w3v8hg7g",
+      "title": "חשבונית מס קבלה — מוחמד אבוליל",
+      "category": "הכנסה",
+      "totalAmount": 1250,
+      "paymentStatus": "partial",
+      "remainingAmount": 450,
+      "createdAt": "2026-05-11T12:06:11.188Z"
+    },
+    {
+      "id": "cmp15sx480003tlj51wkj8zzn",
+      "title": "חשבונית מס קבלה — חתונות",
+      "category": "הכנסה",
+      "totalAmount": 5000,
+      "paymentStatus": "partial",
+      "remainingAmount": 2500,
+      "createdAt": "2026-05-11T12:09:42.056Z"
+    },
+    {
+      "id": "cmp17xtw00004tgz661uto300",
+      "title": "הזמנה — ספק א",
+      "category": "הוצאה",
+      "totalAmount": 1500,
+      "paymentStatus": "partial",
+      "remainingAmount": 500,
+      "createdAt": "2026-05-11T13:09:30.385Z"
+    },
+    {
+      "id": "cmp181o790001q60133guf5y9",
+      "title": "דוח Z 1684",
+      "category": "דוח Z",
+      "totalAmount": 40102,
+      "paymentStatus": "paid",
+      "remainingAmount": 0,
+      "createdAt": "2026-05-11T13:12:29.568Z"
+    },
+    {
+      "id": "cmp2ey7fj0002gns3bdj5285p",
+      "title": "חשבונית מס קבלה — חתונות",
+      "category": "הכנסה",
+      "totalAmount": 1234,
+      "paymentStatus": "unpaid",
+      "remainingAmount": 1234,
+      "createdAt": "2026-05-12T09:13:31.421Z"
+    },
+    {
+      "id": "cmp2fenw9000ugns3zbvv2o25",
+      "title": "חשבונית מס קבלה — חתונות",
+      "category": "הכנסה",
+      "totalAmount": 1234,
+      "paymentStatus": "partial",
+      "remainingAmount": 1021,
+      "createdAt": "2026-05-12T09:26:19.257Z"
+    },
+    {
+      "id": "cmpb3whyv000afl2l6vbc5qcw",
+      "title": "חשבונית מס — עבאסי שיווק בעמ",
+      "category": "הוצאה",
+      "totalAmount": 2326.71,
+      "paymentStatus": "partial",
+      "remainingAmount": 1326.71,
+      "createdAt": "2026-05-18T11:14:11.575Z"
+    },
+    {
+      "id": "cmpb91ilp0001ntg846ir3u5h",
+      "title": "דוח Z קגקג",
+      "category": "דוח Z",
+      "totalAmount": 2802,
+      "paymentStatus": "paid",
+      "remainingAmount": 0,
+      "createdAt": "2026-05-18T13:38:03.757Z"
+    },
+    {
+      "id": "cmpbb4yzf0002pydt1o4ywun4",
+      "title": "חשבונית מס — תסנים",
+      "category": "הכנסה",
+      "totalAmount": 100,
+      "paymentStatus": "paid",
+      "remainingAmount": 0,
+      "createdAt": "2026-05-18T14:36:44.187Z"
+    },
+    {
+      "id": "cmpe0ian700014sg35a4upceu",
+      "title": "דוח Z 1210",
+      "category": "דוח Z",
+      "totalAmount": 6534,
+      "paymentStatus": "paid",
+      "remainingAmount": 0,
+      "createdAt": "2026-05-20T12:02:28.510Z"
+    },
+    {
+      "id": "cmpe0l4b80003ikachtjemg1q",
+      "title": "תעודת משלוח — الرضوان",
+      "category": "הכנסה",
+      "totalAmount": 1980,
+      "paymentStatus": "unpaid",
+      "remainingAmount": 1980,
+      "createdAt": "2026-05-20T12:04:40.341Z"
+    },
+    {
+      "id": "cmpe11hrs0002rui813p7j371",
+      "title": "חשבונית מס — الرضوان",
+      "category": "הכנסה",
+      "totalAmount": 1539.76,
+      "paymentStatus": "partial",
+      "remainingAmount": 339.76,
+      "createdAt": "2026-05-20T12:17:24.280Z"
+    }
+  ]
+}

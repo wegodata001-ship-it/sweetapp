@@ -28,6 +28,7 @@ export const PERMISSION_LABELS: Record<PermissionKey, string> = {
 /** דפים — לפי התאמה ארוכה ביותר */
 export const PAGE_ACCESS_RULES: { prefix: string; permission: PermissionKey | "SUPER_ADMIN_ONLY" }[] = [
   { prefix: "/admin/users", permission: "SUPER_ADMIN_ONLY" },
+  { prefix: "/admin/system", permission: "SUPER_ADMIN_ONLY" },
   { prefix: "/finance/suppliers-prices", permission: "financial_registration" },
   { prefix: "/finance/register", permission: "financial_registration" },
   { prefix: "/finance/archive", permission: "financial_registration" },
@@ -54,6 +55,7 @@ export const PAGE_ACCESS_RULES: { prefix: string; permission: PermissionKey | "S
 /** API — נתיב לפי קידומת */
 export const API_ACCESS_RULES: { prefix: string; permission: PermissionKey | "SUPER_ADMIN_ONLY" }[] = [
   { prefix: "/api/admin/users", permission: "SUPER_ADMIN_ONLY" },
+  { prefix: "/api/admin/system", permission: "SUPER_ADMIN_ONLY" },
   { prefix: "/api/procurement", permission: "financial_registration" },
   { prefix: "/api/documents", permission: "financial_registration" },
   { prefix: "/api/payments", permission: "financial_registration" },

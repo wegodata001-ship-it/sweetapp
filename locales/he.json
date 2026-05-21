@@ -141,6 +141,7 @@
     "inventoryLocations": "מיקומי מלאי",
     "recipes": "מתכונים",
     "users": "ניהול משתמשים",
+    "systemReset": "איפוס ללקוח",
     "myTasks": "המשימות שלי",
     "myWorkflows": "המשימות שלי",
     "myAttendance": "נוכחות ושעות",
@@ -326,6 +327,8 @@
     "alertSoonDetail": "{{when}} · {{customer}} · הזמנה #{{orderNumber}}",
     "alertNoDepositDetail": "ללא פיקדון · {{customer}} · הזמנה #{{orderNumber}}",
     "alertBalanceDetail": "יתרה לתשלום · {{customer}} · הזמנה #{{orderNumber}}",
+    "dbUnavailableTitle": "לא ניתן להתחבר למסד הנתונים",
+    "dbUnavailableHint": "הדשבורד מוצג במצב ריק. ודאו שפרויקט Supabase פעיל (לא מושהה), ש־DATABASE_URL נכון, ונסו DATABASE_USE_DIRECT=true אם ה-pooler (6543) נכשל.",
     "trendNoChange": "ללא שינוי מחודש קודם",
     "trendDiff": "{{sign}}{{amount}} מחודש קודם"
   },
@@ -1157,6 +1160,22 @@
         "nationalIdInvalid": "תעודת זהות לא תקינה"
       },
       "confirmDelete": "למחוק משתמש זה?"
+    },
+    "system": {
+      "title": "איפוס מערכת ללקוח",
+      "subtitle": "מחיקת נתוני עסקים (חשבוניות, תזרים, משימות, התראות) — שומר משתמשים וקטלוגים.",
+      "backupTitle": "גיבוי JSON",
+      "backupHint": "ייצוא לפני איפוס — חובה.",
+      "backupBtn": "הורד גיבוי",
+      "backupOk": "הגיבוי הורד בהצלחה",
+      "resetTitle": "RESET CLIENT SYSTEM",
+      "resetHint": "פעולה בלתי הפיכה. מוחק חשבוניות, תשלומים, כרטסות, OCR, משימות, התראות ועוד. משאיר: משתמשים, ספקים, מוצרים, תבניות.",
+      "confirmLabel": "הקלד RESET_CLIENT לאישור",
+      "confirmRequired": "יש להקליד RESET_CLIENT בדיוק",
+      "resetBtn": "אפס מערכת ללקוח",
+      "resetOk": "המערכת אופסה",
+      "resetFailed": "האיפוס נכשל",
+      "openInvoices": "חשבוניות פתוחות"
     },
     "staff": {
       "kicker": "תפעול",

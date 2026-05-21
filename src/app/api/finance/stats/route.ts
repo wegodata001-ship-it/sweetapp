@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireDb } from "@/lib/api-route";
+import { countOpenInvoices } from "@/lib/finance/open-invoices";
 
 export const dynamic = "force-dynamic";
 
@@ -66,9 +67,7 @@ export async function GET() {
       return sum + amount;
     }, 0);
     const totalOrders = incomeDocRows.reduce((sum, row) => sum + Math.max(0, row.totalAmount), 0);
-    const openInvoices = incomeDocRows.filter(
-      (row) => Math.max(0, row.totalAmount - (paymentsByDocument.get(row.id) ?? 0)) > 0,
-    ).length;
+    const openInvoices = await countOpenInvoices({ log: true });
     const openBalancesTotal = Math.max(0, totalOrders - totalPayments);
 
     return NextResponse.json({

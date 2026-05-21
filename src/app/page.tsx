@@ -16,7 +16,10 @@ import { formatShekel } from "@/lib/format-shekel";
 import { WEGO_LOCALE_COOKIE, normalizeLocale, localeToBcp47, type AppLocale } from "@/lib/i18n/constants";
 import { createTranslator, type TranslateFn } from "@/lib/i18n/translator";
 import { prisma, prismaAny } from "@/lib/prisma";
+import { isDbConnectionError } from "@/lib/prisma-db-health";
 import { getAdminNotificationWidgets } from "@/lib/notifications/admin-widgets";
+import { countOpenInvoices } from "@/lib/finance/open-invoices";
+import { isSystemCleanMode } from "@/lib/system/clean-mode";
 import { cookies } from "next/headers";
 
 export const dynamic = "force-dynamic";
@@ -81,14 +84,72 @@ function daysFromToday(eventDate: Date, today: Date) {
   return Math.round((t1 - t0) / 86400000);
 }
 
+function emptyDashboardData(t: TranslateFn, locale: AppLocale) {
+  const chart = Array.from({ length: 3 }, (_, idx) => {
+    const d = monthStart(idx - 2);
+    return {
+      label: monthLabel(d, locale),
+      income: 0,
+      expenses: 0,
+      profit: 0,
+    };
+  });
+  return {
+    income: 0,
+    expenses: 0,
+    profit: 0,
+    prevIncome: 0,
+    prevExpenses: 0,
+    prevProfit: 0,
+    openBalances: 0,
+    openTaskCount: 0,
+    urgentTaskCount: 0,
+    openInvoices: 0,
+    shortageRows: [] as { name: string; diff: number }[],
+    chart,
+    futureOrdersWeekCount: 0,
+    futureOrdersTodayCount: 0,
+    futureOrdersNoDepositCount: 0,
+    futureOrdersOpenCount: 0,
+    futureOrderAlerts: [] as { kind: "soon" | "no_deposit" | "balance"; detail: string; href: string }[],
+    checks: {
+      open: 0,
+      late: 0,
+      lateAmount: 0,
+      thisWeek: 0,
+      thisWeekAmount: 0,
+      futureAmount: 0,
+    },
+    notifyWidgets: {
+      lateEmployees: 0,
+      overdueTasks: 0,
+      pendingChecks: 0,
+      upcomingOrders: 0,
+    },
+    dbUnavailable: true as const,
+  };
+}
+
 async function getDashboardData(t: TranslateFn, locale: AppLocale) {
+  try {
+    return await loadDashboardData(t, locale);
+  } catch (e) {
+    if (isDbConnectionError(e)) {
+      console.error("[DASHBOARD] database unreachable — showing zero state", e);
+      return emptyDashboardData(t, locale);
+    }
+    throw e;
+  }
+}
+
+async function loadDashboardData(t: TranslateFn, locale: AppLocale) {
   const nowStart = monthStart(0);
   const nowEnd = monthEnd(0);
   const prevStart = monthStart(-1);
   const prevEnd = monthEnd(-1);
   const chartStart = monthStart(-3);
 
-  const [docs, payments, supplierRows, employeeRows, ledgerRows, openTaskCount, urgentTaskCount, inventoryProducts, notifyWidgets] =
+  const [docs, payments, supplierRows, employeeRows, ledgerRows, openTaskCount, urgentTaskCount, inventoryProducts, notifyWidgets, openInvoicesCount] =
     await Promise.all([
       prisma.financialDocument.findMany({
         where: {
@@ -96,7 +157,6 @@ async function getDashboardData(t: TranslateFn, locale: AppLocale) {
           OR: [
             { docDate: { gte: chartStart } },
             { docDate: null, createdAt: { gte: chartStart } },
-            { category: "הכנסה" },
           ],
         },
         select: {
@@ -134,12 +194,20 @@ async function getDashboardData(t: TranslateFn, locale: AppLocale) {
           },
         },
       }),
-      getAdminNotificationWidgets().catch(() => ({
-        lateEmployees: 0,
-        overdueTasks: 0,
-        pendingChecks: 0,
-        upcomingOrders: 0,
-      })),
+      isSystemCleanMode()
+        ? Promise.resolve({
+            lateEmployees: 0,
+            overdueTasks: 0,
+            pendingChecks: 0,
+            upcomingOrders: 0,
+          })
+        : getAdminNotificationWidgets().catch(() => ({
+            lateEmployees: 0,
+            overdueTasks: 0,
+            pendingChecks: 0,
+            upcomingOrders: 0,
+          })),
+      countOpenInvoices({ log: true }),
     ]);
 
   // Checks stats — best-effort; failure must not break the whole dashboard.
@@ -255,9 +323,7 @@ async function getDashboardData(t: TranslateFn, locale: AppLocale) {
   );
   const openBalances = openCustomerBalance + supplierOpen + employeeOpen;
 
-  const openInvoices = financeDocs.filter(
-    (doc) => doc.category === "הכנסה" && Math.max(0, doc.totalAmount - (paymentsByDocument.get(doc.id) ?? 0)) > 0,
-  ).length;
+  const openInvoices = openInvoicesCount;
   const shortageRows = inventoryProducts
     .map((item) => ({ name: item.name, diff: item.counts[0]?.difference ?? 0 }))
     .filter((item) => item.diff < 0)
@@ -374,6 +440,7 @@ async function getDashboardData(t: TranslateFn, locale: AppLocale) {
     futureOrderAlerts: futureOrderAlerts.slice(0, 12),
     checks: checkStats,
     notifyWidgets,
+    dbUnavailable: false as const,
   };
 }
 
@@ -427,6 +494,17 @@ export default async function Home() {
 
   return (
     <div className="mx-auto flex max-w-[1680px] flex-col gap-2.5 pb-2 pt-0">
+      {"dbUnavailable" in data && data.dbUnavailable ? (
+        <div
+          role="alert"
+          className="rounded-[14px] border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950"
+        >
+          <p className="font-black">{t("dashboard.dbUnavailableTitle")}</p>
+          <p className="mt-1 text-xs font-semibold leading-relaxed opacity-90">
+            {t("dashboard.dbUnavailableHint")}
+          </p>
+        </div>
+      ) : null}
       {/* Hero — ERP compact */}
       <section className="relative flex min-h-0 flex-col justify-center overflow-hidden rounded-[18px] border border-luxury-gold/20 bg-gradient-to-br from-luxury-navy-rich via-luxury-charcoal to-slate-950 px-8 py-7 text-white shadow-sm lg:flex-row lg:items-center lg:justify-between lg:gap-6">
         <div className="absolute -left-16 -top-20 h-48 w-48 rounded-full bg-luxury-gold/15 blur-3xl" aria-hidden />

@@ -141,6 +141,7 @@
     "inventoryLocations": "مواقع المخزون",
     "recipes": "الوصفات",
     "users": "إدارة المستخدمين",
+    "systemReset": "إعادة ضبط للعميل",
     "myTasks": "مهامي",
     "myWorkflows": "مهامي",
     "myAttendance": "الحضور والساعات",
@@ -326,6 +327,8 @@
     "alertSoonDetail": "{{when}} · {{customer}} · طلب #{{orderNumber}}",
     "alertNoDepositDetail": "بدون عربون · {{customer}} · طلب #{{orderNumber}}",
     "alertBalanceDetail": "رصيد للدفع · {{customer}} · طلب #{{orderNumber}}",
+    "dbUnavailableTitle": "تعذّر الاتصال بقاعدة البيانات",
+    "dbUnavailableHint": "لوحة التحكم فارغة مؤقتًا. تأكد أن مشروع Supabase نشط (غير موقوف)، وأن DATABASE_URL صحيح، وجرّب DATABASE_USE_DIRECT=true إذا فشل الـ pooler (6543).",
     "trendNoChange": "لا تغيير عن الشهر السابق",
     "trendDiff": "{{sign}}{{amount}} عن الشهر السابق"
   },
@@ -1157,6 +1160,22 @@
         "nationalIdInvalid": "رقم هوية غير صحيح"
       },
       "confirmDelete": "هل تريد حذف هذا المستخدم؟"
+    },
+    "system": {
+      "title": "إعادة ضبط النظام للعميل",
+      "subtitle": "حذف بيانات العمل (فواتير، تدفق نقدي، مهام، إشعارات) — يبقي المستخدمين والكتالوجات.",
+      "backupTitle": "نسخ JSON احتياطي",
+      "backupHint": "تصدير قبل الإعادة — مطلوب.",
+      "backupBtn": "تنزيل النسخة",
+      "backupOk": "تم تنزيل النسخة",
+      "resetTitle": "RESET CLIENT SYSTEM",
+      "resetHint": "لا رجعة. يحذف الفواتير والمدفوعات والدفاتر وOCR والمهام والتنبيهات. يبقي: المستخدمين والموردين والمنتجات والقوالب.",
+      "confirmLabel": "اكتب RESET_CLIENT للتأكيد",
+      "confirmRequired": "اكتب RESET_CLIENT بالضبط",
+      "resetBtn": "إعادة ضبط للعميل",
+      "resetOk": "اكتملت إعادة الضبط",
+      "resetFailed": "فشلت إعادة الضبط",
+      "openInvoices": "فواتير مفتوحة"
     },
     "staff": {
       "kicker": "تشغيل",

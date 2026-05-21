@@ -141,6 +141,7 @@
     "inventoryLocations": "Inventory locations",
     "recipes": "Recipes",
     "users": "User management",
+    "systemReset": "Client reset",
     "myTasks": "My tasks",
     "myWorkflows": "My tasks",
     "myAttendance": "Attendance & hours",
@@ -326,6 +327,8 @@
     "alertSoonDetail": "{{when}} · {{customer}} · order #{{orderNumber}}",
     "alertNoDepositDetail": "No deposit · {{customer}} · order #{{orderNumber}}",
     "alertBalanceDetail": "Balance due · {{customer}} · order #{{orderNumber}}",
+    "dbUnavailableTitle": "Cannot connect to the database",
+    "dbUnavailableHint": "Dashboard shows empty data. Ensure your Supabase project is active (not paused), DATABASE_URL is correct, and try DATABASE_USE_DIRECT=true if the pooler (port 6543) fails.",
     "trendNoChange": "No change vs last month",
     "trendDiff": "{{sign}}{{amount}} vs last month"
   },
@@ -1157,6 +1160,22 @@
         "nationalIdInvalid": "Invalid ID number"
       },
       "confirmDelete": "Delete this user?"
+    },
+    "system": {
+      "title": "Client system reset",
+      "subtitle": "Removes business data (invoices, cashflow, tasks, notifications) — keeps users and catalogs.",
+      "backupTitle": "JSON backup",
+      "backupHint": "Export before reset — required.",
+      "backupBtn": "Download backup",
+      "backupOk": "Backup downloaded",
+      "resetTitle": "RESET CLIENT SYSTEM",
+      "resetHint": "Irreversible. Deletes invoices, payments, ledgers, OCR, tasks, alerts, etc. Keeps: users, suppliers, products, templates.",
+      "confirmLabel": "Type RESET_CLIENT to confirm",
+      "confirmRequired": "Type RESET_CLIENT exactly",
+      "resetBtn": "Reset client system",
+      "resetOk": "System reset complete",
+      "resetFailed": "Reset failed",
+      "openInvoices": "Open invoices"
     },
     "staff": {
       "kicker": "Operations",

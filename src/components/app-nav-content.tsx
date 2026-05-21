@@ -16,6 +16,7 @@ import {
   Truck,
   UserCircle2,
   Users,
+  RotateCcw,
   Workflow,
   type LucideIcon,
 } from "lucide-react";
@@ -123,6 +124,12 @@ export const adminOnlyNav: NavItem[] = [
     href: "/admin/users",
     permission: "SUPER_ADMIN_ONLY",
     icon: Users,
+  },
+  {
+    labelKey: "nav.systemReset",
+    href: "/admin/system",
+    permission: "SUPER_ADMIN_ONLY",
+    icon: RotateCcw,
   },
 ];
 
