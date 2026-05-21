@@ -37,7 +37,7 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  console.log("[CLIENT RESET] started by", session.id, session.email);
+  console.log("[CLIENT RESET] started by", session.sub, session.email);
 
   const backup = await exportClientDataBackup();
   const openBefore = await countOpenInvoices({ log: true });
