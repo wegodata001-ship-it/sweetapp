@@ -44,15 +44,37 @@ function LoginContent() {
         credentials: "same-origin",
         body: JSON.stringify({ identifier: identifier.trim(), password }),
       });
-      const data = (await res.json()) as { ok?: boolean; error?: string };
+      const data = (await res.json()) as {
+        ok?: boolean;
+        error?: string;
+        code?: string;
+        user?: { mustChangePassword?: boolean; role?: string };
+      };
       if (!res.ok || !data.ok) {
-        setError(data.error || t("auth.errorFailed"));
+        const code = data.code ?? "";
+        const msg =
+          code === "inactive"
+            ? t("auth.errorInactive")
+            : code === "use_national_id"
+              ? t("auth.errorUseNationalId")
+              : code === "server_config"
+                ? t("auth.errorServerConfig")
+                : data.error || t("auth.errorInvalidCredentials");
+        setError(msg);
         setSubmitting(false);
         return;
       }
       await refresh();
-      router.replace(nextUrl);
-      router.refresh();
+      if (data.user?.mustChangePassword) {
+        router.replace("/change-password");
+        setSubmitting(false);
+        return;
+      }
+      const dest =
+        data.user?.role === "EMPLOYEE" && (nextUrl === "/" || nextUrl === "")
+          ? "/employee"
+          : nextUrl;
+      router.replace(dest);
       setSubmitting(false);
     } catch {
       setError(t("auth.errorNetwork"));
@@ -93,6 +115,7 @@ function LoginContent() {
                 <label htmlFor="identifier" className={styles.label}>
                   {t("auth.identifier")}
                 </label>
+                <p className="mb-1 text-[11px] font-semibold text-slate-500">{t("auth.identifierHint")}</p>
                 <div className={styles.inputWrap}>
                   <span className={styles.inputIcon}>
                     <User className="h-4 w-4" aria-hidden />

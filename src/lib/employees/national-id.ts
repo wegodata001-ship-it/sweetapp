@@ -12,6 +12,17 @@ export function normalizeNationalId(input: string | null | undefined): string {
   return String(input).replace(/\D+/g, "");
 }
 
+/** וריאציות ת.ז. לחיפוש — 8/9 ספרות, עם/בלי 0 מוביל */
+export function nationalIdLookupVariants(input: string | null | undefined): string[] {
+  const n = normalizeNationalId(input);
+  if (!n) return [];
+  const out = new Set<string>([n]);
+  if (n.length === 8) out.add(`0${n}`);
+  if (n.length === 9 && !n.startsWith("0")) out.add(`0${n}`);
+  if (n.length === 10 && n.startsWith("0")) out.add(n.slice(1));
+  return [...out];
+}
+
 export function isValidNationalId(input: string | null | undefined): boolean {
   const v = normalizeNationalId(input);
   if (!v) return false;

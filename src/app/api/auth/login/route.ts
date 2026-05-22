@@ -2,10 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { prismaAny } from "@/lib/prisma";
 import { ensureBootstrapSuperAdmin } from "@/lib/auth/bootstrap";
 import { verifyPassword } from "@/lib/auth/password";
+import { resolveLoginUser } from "@/lib/auth/resolve-login-user";
 import { signSessionToken, COOKIE_NAME } from "@/lib/auth/jwt";
 import { getPermissionStringsForUser } from "@/lib/auth/user-permissions";
 import { logActivity } from "@/lib/activity-log";
-import { looksLikeEmail, normalizeNationalId } from "@/lib/employees/national-id";
+import { looksLikeEmail } from "@/lib/employees/national-id";
 
 async function writeAudit(params: {
   userId: string | null;
@@ -54,23 +55,12 @@ export async function POST(req: NextRequest) {
     const password = body.password;
     if (!rawIdentifier || !password) {
       return NextResponse.json(
-        { ok: false, error: "תעודת זהות / אימייל וסיסמה נדרשים" },
+        { ok: false, code: "missing_fields", error: "תעודת זהות / אימייל וסיסמה נדרשים" },
         { status: 400 },
       );
     }
 
-    // נחזיק את שתי הפניות — אימייל / תעודת זהות
-    const isEmail = looksLikeEmail(rawIdentifier);
-    const lookupEmail = isEmail ? rawIdentifier.toLowerCase() : null;
-    const lookupNationalId = !isEmail ? normalizeNationalId(rawIdentifier) : null;
-
-    const user = await prismaAny.user.findFirst({
-      where: lookupEmail
-        ? { email: lookupEmail }
-        : lookupNationalId
-          ? { nationalId: lookupNationalId }
-          : { id: "__never__" },
-    });
+    const user = await resolveLoginUser(rawIdentifier);
 
     if (!user) {
       await writeAudit({
@@ -80,7 +70,17 @@ export async function POST(req: NextRequest) {
         reason: "not_found",
         req,
       });
-      return NextResponse.json({ ok: false, error: "פרטי התחברות שגויים" }, { status: 401 });
+      const hint = looksLikeEmail(rawIdentifier)
+        ? "bad_credentials"
+        : "use_national_id";
+      return NextResponse.json(
+        {
+          ok: false,
+          code: hint,
+          error: "פרטי התחברות שגויים",
+        },
+        { status: 401 },
+      );
     }
 
     if (!user.isActive) {
@@ -91,7 +91,14 @@ export async function POST(req: NextRequest) {
         reason: "inactive",
         req,
       });
-      return NextResponse.json({ ok: false, error: "המשתמש אינו פעיל" }, { status: 401 });
+      return NextResponse.json(
+        {
+          ok: false,
+          code: "inactive",
+          error: "המשתמש אינו פעיל — פנו למנהל",
+        },
+        { status: 401 },
+      );
     }
 
     const ok = await verifyPassword(password, user.passwordHash);
@@ -103,15 +110,18 @@ export async function POST(req: NextRequest) {
         reason: "bad_password",
         req,
       });
-      return NextResponse.json({ ok: false, error: "פרטי התחברות שגויים" }, { status: 401 });
+      return NextResponse.json(
+        { ok: false, code: "bad_credentials", error: "פרטי התחברות שגויים" },
+        { status: 401 },
+      );
     }
 
-    const permissions = await getPermissionStringsForUser(user.id, user.role);
+    const permissions = await getPermissionStringsForUser(user.id, user.role as "EMPLOYEE" | "ADMIN" | "SUPER_ADMIN");
 
     const token = await signSessionToken({
       sub: user.id,
       email: user.email,
-      role: user.role,
+      role: user.role as "EMPLOYEE" | "ADMIN" | "SUPER_ADMIN",
       permissions,
       mustChangePassword: Boolean(user.mustChangePassword),
     });
@@ -150,8 +160,10 @@ export async function POST(req: NextRequest) {
 
     return res;
   } catch (e) {
+    const msg = e instanceof Error ? e.message : "שגיאה";
+    const code = msg.includes("JWT_SECRET") ? "server_config" : "server_error";
     return NextResponse.json(
-      { ok: false, error: e instanceof Error ? e.message : "שגיאה" },
+      { ok: false, code, error: msg },
       { status: 500 },
     );
   }
