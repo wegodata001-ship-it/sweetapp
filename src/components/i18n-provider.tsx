@@ -19,7 +19,7 @@ import {
   normalizeLocale,
   type AppLocale,
 } from "@/lib/i18n/constants";
-import { createTranslator, type TranslateFn } from "@/lib/i18n/translator";
+import { createTranslator, type Messages, type TranslateFn } from "@/lib/i18n/translator";
 
 type I18nContextValue = {
   locale: AppLocale;
@@ -96,7 +96,26 @@ export function I18nProvider({
     setLocaleState((prev) => (n === prev ? prev : n));
   }, [initialLocale]);
 
-  const t = useMemo(() => createTranslator(locale), [locale]);
+  const [devMessages, setDevMessages] = useState<Messages | null>(null);
+
+  /** בפיתוח — טוען JSON מהדיסק כדי שעדכוני locales/ar.json יופיעו בלי restart */
+  useEffect(() => {
+    if (process.env.NODE_ENV !== "development") return;
+    let cancelled = false;
+    void fetch(`/api/dev/messages?locale=${encodeURIComponent(locale)}`, { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (!cancelled && data) setDevMessages(data as Messages);
+      })
+      .catch(() => {
+        if (!cancelled) setDevMessages(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [locale]);
+
+  const t = useMemo(() => createTranslator(locale, devMessages ?? undefined), [locale, devMessages]);
   const dir = isRtlLocale(locale) ? "rtl" : "ltr";
   const bcp47 = localeToBcp47(locale);
 

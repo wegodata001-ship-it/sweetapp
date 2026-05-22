@@ -23,10 +23,11 @@ function dig(obj: unknown, path: string): unknown {
 
 export type TranslateFn = (key: string, vars?: Record<string, string | number>) => string;
 
-/** Server / Node-safe translator — no React. */
-export function createTranslator(locale: AppLocale): TranslateFn {
-  const messages = catalogs[normalizeLocale(locale)] ?? he;
-  const fallback = he;
+/** Server / Node-safe translator — no React. Optional messages override (dev hot reload). */
+export function createTranslator(locale: AppLocale, messagesOverride?: Messages): TranslateFn {
+  const loc = normalizeLocale(locale);
+  const messages = messagesOverride ?? catalogs[loc] ?? he;
+  const fallback = catalogs.he;
   return function t(key: string, vars?: Record<string, string | number>): string {
     let raw = dig(messages, key);
     if (typeof raw !== "string") raw = dig(fallback, key);

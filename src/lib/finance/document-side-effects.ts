@@ -7,6 +7,12 @@ import {
   type IncomeExpensePayload,
   type PaymentLinePayload,
 } from "@/lib/finance/document-payload";
+import { normalizeExpenseType } from "@/lib/finance/expense-types";
+
+function expenseTypeForDocument(meta: ReturnType<typeof parsePayload>): string | null {
+  if (meta?.kind !== "expense") return null;
+  return normalizeExpenseType(meta.expenseType);
+}
 
 /** תזרים לפי דוח Z — פירוט לפי מזומן / אשראי / העברה; סימון source=z_report וקישור zReportId. */
 export async function syncZReportCashFlowEntries(documentId: string): Promise<void> {
@@ -211,6 +217,7 @@ export async function replaceCashFlowForDocument(documentId: string): Promise<vo
       : 0;
 
   if (isExpenseDoc) {
+    const docExpenseType = expenseTypeForDocument(metaParsed);
     const expensePayments =
       metaParsed?.kind === "expense" ? normalizedPaymentLines(metaParsed) : [];
     if (expensePayments.length > 0) {
@@ -229,6 +236,7 @@ export async function replaceCashFlowForDocument(documentId: string): Promise<vo
           relatedDocumentId: documentId,
           entryDate,
           isDirect: false,
+          expenseType: docExpenseType,
         });
       }
     } else {
@@ -246,6 +254,7 @@ export async function replaceCashFlowForDocument(documentId: string): Promise<vo
         relatedDocumentId: documentId,
         entryDate,
         isDirect: false,
+        expenseType: docExpenseType,
       });
     }
   }

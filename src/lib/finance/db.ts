@@ -124,8 +124,19 @@ export async function fetchCashOpeningBalance(): Promise<number> {
   }
 }
 
-export async function fetchCashFlowEntries(): Promise<CashFlowRow[]> {
-  const res = await fetch("/api/cashflow", { credentials: "same-origin" });
+export type CashFlowFetchFilters = {
+  entryType?: "income" | "expense";
+  expenseType?: string;
+};
+
+export async function fetchCashFlowEntries(filters?: CashFlowFetchFilters): Promise<CashFlowRow[]> {
+  const params = new URLSearchParams();
+  if (filters?.entryType) params.set("entryType", filters.entryType);
+  if (filters?.entryType === "expense" && filters.expenseType) {
+    params.set("expenseType", filters.expenseType);
+  }
+  const qs = params.toString();
+  const res = await fetch(`/api/cashflow${qs ? `?${qs}` : ""}`, { credentials: "same-origin" });
   try {
     const j = (await res.json()) as { ok?: boolean; data?: CashFlowRow[] };
     if (!j.ok || !j.data) return [];

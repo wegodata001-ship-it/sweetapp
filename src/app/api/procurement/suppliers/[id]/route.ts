@@ -64,3 +64,20 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
     );
   }
 }
+
+export async function DELETE(_req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
+  const block = await requireDb();
+  if (block) return block;
+  const { id } = await ctx.params;
+  try {
+    const existing = await prisma.supplier.findUnique({ where: { id }, select: { id: true } });
+    if (!existing) return NextResponse.json({ ok: false, error: "לא נמצא" }, { status: 404 });
+    await prisma.supplier.delete({ where: { id } });
+    return NextResponse.json({ ok: true });
+  } catch (e) {
+    return NextResponse.json(
+      { ok: false, error: e instanceof Error ? e.message : "שגיאה" },
+      { status: 500 },
+    );
+  }
+}

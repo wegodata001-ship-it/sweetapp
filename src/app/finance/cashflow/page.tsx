@@ -1,21 +1,29 @@
 "use client";
 
-import {
-  Check,
-  CirclePlus,
-  Eye,
-  FileText,
-  Loader2,
-  Minus,
-  Pencil,
-  Plus,
-  Trash2,
-  ScanLine,
-  Wallet,
-  X,
-} from "lucide-react";
+import { CirclePlus, Minus, Plus, ScanLine, Wallet } from "lucide-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { CashflowMenuAction } from "@/components/finance/cashflow-row-actions-menu";
+import {
+  CashflowZReportTableGroupDesktop,
+  CashflowZReportTableGroupMobile,
+} from "@/components/finance/cashflow-z-report-table-group";
+import {
+  CashflowDescriptionCell,
+  CashflowMethodCustomerCell,
+  CashflowRowActions,
+  CashflowTypeCell,
+} from "@/components/finance/cashflow-table-ui";
+import {
+  buildJournalDisplayItems,
+  groupCashflowByZReport,
+  journalDisplayTotals,
+  type JournalDisplayItem,
+  type ZReportCashflowSummary,
+  type ZReportDetailPayload,
+  zReportMatchesPaymentFilter,
+} from "@/lib/finance/cashflow-z-report";
 import { PdfPreviewModal } from "@/components/pdf-preview-modal";
 import { useI18n } from "@/components/i18n-provider";
 import {
@@ -24,25 +32,23 @@ import {
   insertDirectCashFlow,
   updateCashFlowEntry,
 } from "@/lib/finance/db";
-import { paymentMethodPill, sanitizeCashFlowDescription } from "@/lib/finance/cashflow-display";
+import { EXPENSE_TYPE_I18N, EXPENSE_TYPE_VALUES } from "@/lib/finance/expense-types";
 import type { CashFlowRow } from "@/lib/finance/types";
 import { formatShekel, parseNum } from "@/lib/format-shekel";
 
-const cellPad = "px-3 py-[10px]";
-const rowH = "min-h-[64px]";
-
-function isZReportCashFlow(row: CashFlowRow): boolean {
-  return row.source === "z_report" || Boolean(row.z_report_id);
-}
+const thClass = "text-xs font-semibold text-slate-500";
+const rowClass = "cashflow-journal-row max-h-[80px]";
 
 export default function CashflowPage() {
   const { t, bcp47 } = useI18n();
+  const router = useRouter();
   const [rows, setRows] = useState<CashFlowRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [notice, setNotice] = useState<string | null>(null);
 
   const [filterCustomer, setFilterCustomer] = useState("");
   const [filterType, setFilterType] = useState<"all" | "income" | "expense">("all");
+  const [filterExpenseType, setFilterExpenseType] = useState("");
   const [filterDateFrom, setFilterDateFrom] = useState("");
   const [filterDateTo, setFilterDateTo] = useState("");
   const [filterPaymentMethod, setFilterPaymentMethod] = useState("");
@@ -62,6 +68,10 @@ export default function CashflowPage() {
   const typeMenuRef = useRef<HTMLDivElement>(null);
 
   const [pdfPreview, setPdfPreview] = useState<{ url: string; title: string } | null>(null);
+  const [pdfBusyId, setPdfBusyId] = useState<string | null>(null);
+  const [expandedZIds, setExpandedZIds] = useState<Set<string>>(new Set());
+  const [zDetailById, setZDetailById] = useState<Record<string, ZReportDetailPayload>>({});
+  const [zDetailLoadingIds, setZDetailLoadingIds] = useState<Set<string>>(new Set());
 
   const [directOpen, setDirectOpen] = useState(false);
   const [directDate, setDirectDate] = useState("");
@@ -73,18 +83,30 @@ export default function CashflowPage() {
   const loadAll = useCallback(async () => {
     setLoading(true);
     try {
-      const list = await fetchCashFlowEntries();
+      const list = await fetchCashFlowEntries(
+        filterType === "all"
+          ? undefined
+          : {
+              entryType: filterType,
+              expenseType:
+                filterType === "expense" && filterExpenseType ? filterExpenseType : undefined,
+            },
+      );
       setRows(list);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [filterType, filterExpenseType]);
 
   useEffect(() => {
     queueMicrotask(() => {
       void loadAll();
     });
   }, [loadAll]);
+
+  useEffect(() => {
+    if (filterType !== "expense") setFilterExpenseType("");
+  }, [filterType]);
 
   useEffect(() => {
     const close = (e: MouseEvent) => {
@@ -108,17 +130,79 @@ export default function CashflowPage() {
   const filteredRows = useMemo(() => {
     const q = filterCustomer.trim().toLowerCase();
     return rows.filter((row) => {
-      if (filterType !== "all" && row.entry_type?.toLowerCase() !== filterType) return false;
       if (q && !(row.customer_name ?? "").toLowerCase().includes(q)) return false;
       if (filterDateFrom.trim() && row.entry_date < filterDateFrom.trim()) return false;
       if (filterDateTo.trim() && row.entry_date > filterDateTo.trim()) return false;
       if (filterPaymentMethod && (row.payment_method ?? "").trim() !== filterPaymentMethod) return false;
       return true;
     });
-  }, [rows, filterCustomer, filterType, filterDateFrom, filterDateTo, filterPaymentMethod]);
+  }, [rows, filterCustomer, filterDateFrom, filterDateTo, filterPaymentMethod]);
 
-  const totalIn = useMemo(() => filteredRows.reduce((s, r) => s + r.inflow, 0), [filteredRows]);
-  const totalOut = useMemo(() => filteredRows.reduce((s, r) => s + r.outflow, 0), [filteredRows]);
+  const zGroups = useMemo(() => groupCashflowByZReport(filteredRows), [filteredRows]);
+
+  const journalItems = useMemo((): JournalDisplayItem[] => {
+    const q = filterCustomer.trim().toLowerCase();
+    const items = buildJournalDisplayItems(filteredRows);
+    if (!filterPaymentMethod.trim()) return items;
+    return items.filter((item) => {
+      if (item.kind === "row") {
+        return (item.row.payment_method ?? "").trim() === filterPaymentMethod.trim();
+      }
+      const lines = zGroups.get(item.summary.zReportId) ?? [];
+      return zReportMatchesPaymentFilter(item.summary, lines, filterPaymentMethod);
+    });
+  }, [filteredRows, filterPaymentMethod, zGroups]);
+
+  const { totalIn, totalOut } = useMemo(() => journalDisplayTotals(journalItems), [journalItems]);
+
+  const toggleZExpand = useCallback(
+    async (zReportId: string) => {
+      if (expandedZIds.has(zReportId)) {
+        setExpandedZIds((prev) => {
+          const next = new Set(prev);
+          next.delete(zReportId);
+          return next;
+        });
+        return;
+      }
+      setExpandedZIds((prev) => new Set(prev).add(zReportId));
+      if (zDetailById[zReportId]) return;
+
+      setZDetailLoadingIds((prev) => new Set(prev).add(zReportId));
+      try {
+        const res = await fetch(`/api/cashflow/z-report/${encodeURIComponent(zReportId)}`, {
+          credentials: "same-origin",
+        });
+        const json = (await res.json()) as {
+          ok?: boolean;
+          data?: ZReportDetailPayload;
+        };
+        if (res.ok && json.ok && json.data) {
+          setZDetailById((prev) => ({ ...prev, [zReportId]: json.data! }));
+        }
+      } finally {
+        setZDetailLoadingIds((prev) => {
+          const next = new Set(prev);
+          next.delete(zReportId);
+          return next;
+        });
+      }
+    },
+    [expandedZIds, zDetailById],
+  );
+
+  const zGroupDetailProps = (summary: ZReportCashflowSummary) => {
+    const detail = zDetailById[summary.zReportId];
+    return {
+      expanded: expandedZIds.has(summary.zReportId),
+      onToggle: () => void toggleZExpand(summary.zReportId),
+      detailLines: detail?.lines ?? null,
+      detailTime: detail?.summary.time ?? null,
+      detailStatus: detail?.summary.status ?? null,
+      detailCashier: detail?.summary.cashierLabel ?? null,
+      loadingDetail: zDetailLoadingIds.has(summary.zReportId),
+    };
+  };
   const totalBalance = useMemo(() => totalIn - totalOut, [totalIn, totalOut]);
 
   const persistPatch = async (row: CashFlowRow, patch: Parameters<typeof updateCashFlowEntry>[1]) => {
@@ -221,125 +305,177 @@ export default function CashflowPage() {
   const compactInput =
     "w-full min-w-0 rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-right text-sm font-medium text-slate-900 outline-none focus:border-luxury-gold focus:ring-1 focus:ring-luxury-gold/25";
 
-  const renderTypeBadgeOnly = (row: CashFlowRow) => {
-    const isExp = ["expense", "refund", "supplier_payment", "salary"].includes(row.entry_type?.toLowerCase() ?? "");
-    const isZ = !isExp && isZReportCashFlow(row);
-    return (
-      <span
-        className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-bold ${
-          isExp ? "bg-rose-100 text-rose-800" : "bg-emerald-100 text-emerald-800"
-        }`}
-      >
-        {isExp ? (
-          <>
-            <Minus className="h-3 w-3 shrink-0 stroke-[3]" aria-hidden />
-            {t("cashflow.expense")}
-          </>
-        ) : isZ ? (
-          <>
-            <Plus className="h-3 w-3 shrink-0 stroke-[3]" aria-hidden />
-            {t("cashflow.incomeWithZ")} <span aria-hidden>🧾</span>
-          </>
-        ) : (
-          <>
-            <Plus className="h-3 w-3 shrink-0 stroke-[3]" aria-hidden />
-            {t("cashflow.income")}
-          </>
-        )}
-      </span>
-    );
+  const duplicateRow = async (row: CashFlowRow) => {
+    const amt = Math.max(row.inflow, row.outflow);
+    if (amt <= 0) return;
+    const side = row.inflow > 0 ? "credit" : "debit";
+    const suffix = t("cashflow.duplicateSuffix");
+    const desc = row.description?.trim()
+      ? `${row.description.trim()} ${suffix}`
+      : suffix.trim();
+    const res = await insertDirectCashFlow({
+      entry_date: row.entry_date,
+      description: desc,
+      side,
+      amount: amt,
+    });
+    if (!res.ok) {
+      setNotice(res.error ?? t("common.error"));
+      return;
+    }
+    setNotice(null);
+    await loadAll();
   };
 
-  const renderTypeCell = (row: CashFlowRow) => {
-    const isExp = ["expense", "refund", "supplier_payment", "salary"].includes(row.entry_type?.toLowerCase() ?? "");
-    const isZ = !isExp && isZReportCashFlow(row);
-    return (
-      <div className="relative inline-flex items-center gap-1" ref={openTypeMenuId === row.id ? typeMenuRef : undefined}>
-        <span
-          className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-bold ${
-            isExp ? "bg-rose-100 text-rose-800" : "bg-emerald-100 text-emerald-800"
-          }`}
-        >
-        {isExp ? (
-          <>
-            <Minus className="h-3 w-3 shrink-0 stroke-[3]" aria-hidden />
-            {t("cashflow.expense")}
-          </>
-        ) : isZ ? (
-          <>
-            <Plus className="h-3 w-3 shrink-0 stroke-[3]" aria-hidden />
-            {t("cashflow.incomeWithZ")} <span aria-hidden>🧾</span>
-          </>
-        ) : (
-          <>
-            <Plus className="h-3 w-3 shrink-0 stroke-[3]" aria-hidden />
-            {t("cashflow.income")}
-          </>
-        )}
-      </span>
-        {isZ ? (
-          <span className="rounded-md bg-emerald-50 px-1 py-px text-[9px] font-extrabold uppercase tracking-tight text-emerald-900 ring-1 ring-emerald-200/80">
-            Z REPORT
-          </span>
-        ) : null}
-        <button
-          type="button"
-          title={t("cashflow.changeType")}
-          className="rounded-md p-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-800"
-          onClick={() => setOpenTypeMenuId((id) => (id === row.id ? null : row.id))}
-        >
-          <Pencil className="h-3.5 w-3.5" aria-hidden />
-        </button>
-        {openTypeMenuId === row.id && (
-          <div className="absolute start-0 top-full z-40 mt-1 min-w-[132px] rounded-lg border border-slate-200 bg-white py-1 shadow-lg">
-            <button
-              type="button"
-              className="block w-full px-3 py-2 text-right text-xs font-semibold text-emerald-900 hover:bg-emerald-50"
-              onClick={() => void applyEntryType(row, "income")}
-            >
-              {t("cashflow.income")}
-            </button>
-            <button
-              type="button"
-              className="block w-full px-3 py-2 text-right text-xs font-semibold text-rose-900 hover:bg-rose-50"
-              onClick={() => void applyEntryType(row, "expense")}
-            >
-              {t("cashflow.expense")}
-            </button>
-          </div>
-        )}
-      </div>
-    );
+  const removeZReportDocument = async (documentId: string) => {
+    if (!window.confirm(t("cashflow.zReport.confirmDeleteDocument"))) return;
+    const res = await fetch(`/api/documents/${encodeURIComponent(documentId)}`, {
+      method: "DELETE",
+      credentials: "same-origin",
+    });
+    const json = (await res.json()) as { ok?: boolean; error?: string };
+    if (!res.ok || !json.ok) {
+      setNotice(json.error ?? t("common.errorDelete"));
+      return;
+    }
+    setNotice(null);
+    setExpandedZIds((prev) => {
+      const next = new Set(prev);
+      next.delete(documentId);
+      return next;
+    });
+    setZDetailById((prev) => {
+      const next = { ...prev };
+      delete next[documentId];
+      return next;
+    });
+    await loadAll();
   };
 
-  const renderMethodCustomer = (row: CashFlowRow) => {
-    const pm = paymentMethodPill(row.payment_method);
-    const cust = row.customer_name?.trim();
-    return (
-      <div className="flex flex-wrap items-center justify-end gap-1.5">
-        {pm ? (
-          <span className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs font-semibold text-slate-800">
-            <span aria-hidden>{pm.emoji}</span>
-            {pm.label}
-          </span>
-        ) : null}
-        {cust ? (
-          <span className="inline-flex items-center gap-1 rounded-full border border-cyan-100 bg-cyan-50 px-2 py-0.5 text-xs font-semibold text-cyan-950">
-            <span aria-hidden>👤</span>
-            {cust}
-          </span>
-        ) : null}
-        {!pm && !cust ? <span className="text-slate-400">—</span> : null}
-      </div>
-    );
+  const openDocumentPdf = async (documentId: string) => {
+    setPdfBusyId(documentId);
+    try {
+      const latest = await fetch(`/api/reports/latest?relatedId=${encodeURIComponent(documentId)}`, {
+        credentials: "same-origin",
+      });
+      const lj = (await latest.json()) as { data?: { publicUrl: string; fileName: string } | null };
+      if (lj.data?.publicUrl) {
+        setPdfPreview({ url: lj.data.publicUrl, title: lj.data.fileName });
+        return;
+      }
+      const gen = await fetch("/api/reports/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({ entity: "document", relatedId: documentId }),
+      });
+      const gj = (await gen.json()) as { publicUrl?: string; pdfUrl?: string };
+      const url = gj.publicUrl ?? gj.pdfUrl;
+      if (url) setPdfPreview({ url, title: `z-report-${documentId.slice(0, 8)}.pdf` });
+    } finally {
+      setPdfBusyId(null);
+    }
   };
 
-  const renderRowDesktop = (row: CashFlowRow) => {
+  const handleZReportMenuAction = (summary: ZReportCashflowSummary, action: CashflowMenuAction) => {
+    const docId = summary.documentId;
+    switch (action) {
+      case "edit":
+        router.push(`/finance/register?edit=${encodeURIComponent(docId)}`);
+        break;
+      case "delete":
+        void removeZReportDocument(docId);
+        break;
+      case "pdf":
+      case "print":
+        void openDocumentPdf(docId);
+        break;
+      default:
+        break;
+    }
+  };
+
+  const handleRowMenuAction = (row: CashFlowRow, action: CashflowMenuAction) => {
+    switch (action) {
+      case "view":
+        if (row.document_id) {
+          router.push(`/finance/register?edit=${encodeURIComponent(row.document_id)}`);
+        }
+        break;
+      case "edit":
+        startEdit(row);
+        break;
+      case "delete":
+        void removeRow(row);
+        break;
+      case "pdf":
+        void openCashflowPdf(row.id);
+        break;
+      case "print":
+        if (row.document_id) void openDocumentPdf(row.document_id);
+        else void openCashflowPdf(row.id);
+        break;
+      case "duplicate":
+        void duplicateRow(row);
+        break;
+      case "addPayment":
+        if (row.document_id) {
+          router.push(`/finance/register?edit=${encodeURIComponent(row.document_id)}`);
+        } else {
+          const tab = row.entry_type === "expense" ? "expenses" : "income";
+          router.push(`/finance/register?tab=${tab}`);
+        }
+        break;
+      case "generateDocument": {
+        const tab = row.entry_type === "expense" ? "expenses" : "income";
+        router.push(`/finance/register?tab=${tab}`);
+        break;
+      }
+      default:
+        break;
+    }
+  };
+
+  const openCashflowPdf = async (rowId: string) => {
+    setPdfBusyId(rowId);
+    try {
+      const latest = await fetch(`/api/reports/latest?relatedId=${encodeURIComponent(rowId)}`, {
+        credentials: "same-origin",
+      });
+      const lj = (await latest.json()) as { data?: { publicUrl: string; fileName: string } | null };
+      if (lj.data?.publicUrl) {
+        setPdfPreview({ url: lj.data.publicUrl, title: lj.data.fileName });
+        return;
+      }
+      const gen = await fetch("/api/reports/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({ entity: "cashflow", relatedId: rowId }),
+      });
+      const gj = (await gen.json()) as { publicUrl?: string; pdfUrl?: string };
+      const url = gj.publicUrl ?? gj.pdfUrl;
+      if (url) setPdfPreview({ url, title: `cashflow-${rowId.slice(0, 8)}.pdf` });
+    } finally {
+      setPdfBusyId(null);
+    }
+  };
+
+  const renderRowDesktop = (row: CashFlowRow, nested = false) => {
     const editing = editingRowId === row.id && editForm;
 
     return (
-      <tr key={row.id} className={`${rowH} border-b border-slate-100`}>
-        <td className={`${cellPad} align-middle`}>
+      <tr
+        key={row.id}
+        className={`${rowClass} ${nested ? "border-slate-100 bg-slate-50/40" : ""}`}
+      >
+        <td className={`align-middle ${nested ? "relative ps-10" : ""}`}>
+          {nested ? (
+            <span
+              className="absolute start-4 top-1/2 h-1.5 w-1.5 -translate-y-1/2 rounded-full bg-slate-300"
+              aria-hidden
+            />
+          ) : null}
           {editing ? (
             <input
               type="date"
@@ -348,11 +484,21 @@ export default function CashflowPage() {
               onChange={(e) => setEditForm((f) => (f ? { ...f, entry_date: e.target.value } : f))}
             />
           ) : (
-            <span className="text-sm font-medium text-slate-800">{row.entry_date}</span>
+            <span className="text-[13px] font-medium text-slate-700">{row.entry_date}</span>
           )}
         </td>
-        <td className={`${cellPad} align-middle`}>{editing ? renderTypeBadgeOnly(row) : renderTypeCell(row)}</td>
-        <td className={`${cellPad} align-middle max-w-[280px]`}>
+        <td className="align-middle">
+          <CashflowTypeCell
+            row={row}
+            editable={!editing}
+            menuOpen={openTypeMenuId === row.id}
+            menuRef={openTypeMenuId === row.id ? typeMenuRef : undefined}
+            onToggleMenu={() => setOpenTypeMenuId((id) => (id === row.id ? null : row.id))}
+            onPickIncome={() => void applyEntryType(row, "income")}
+            onPickExpense={() => void applyEntryType(row, "expense")}
+          />
+        </td>
+        <td className="align-middle">
           {editing ? (
             <input
               type="text"
@@ -361,10 +507,10 @@ export default function CashflowPage() {
               onChange={(e) => setEditForm((f) => (f ? { ...f, description: e.target.value } : f))}
             />
           ) : (
-            <span className="line-clamp-2 text-sm text-slate-800">{sanitizeCashFlowDescription(row.description)}</span>
+            <CashflowDescriptionCell description={row.description} />
           )}
         </td>
-        <td className={`${cellPad} align-middle min-w-[160px]`}>
+        <td className="align-middle">
           {editing ? (
             <div className="flex flex-col gap-1">
               <input
@@ -383,10 +529,10 @@ export default function CashflowPage() {
               />
             </div>
           ) : (
-            renderMethodCustomer(row)
+            <CashflowMethodCustomerCell row={row} />
           )}
         </td>
-        <td className={`${cellPad} align-middle text-left tabular-nums`}>
+        <td className="align-middle text-end tabular-nums">
           {editing ? (
             <input
               type="number"
@@ -407,10 +553,12 @@ export default function CashflowPage() {
               }
             />
           ) : (
-            <span className="text-sm font-semibold text-emerald-800">{row.inflow > 0 ? formatShekel(row.inflow) : "—"}</span>
+            <span className="text-[13px] font-semibold text-emerald-700">
+              {row.inflow > 0 ? formatShekel(row.inflow) : "—"}
+            </span>
           )}
         </td>
-        <td className={`${cellPad} align-middle text-left tabular-nums`}>
+        <td className="align-middle text-end tabular-nums">
           {editing ? (
             <input
               type="number"
@@ -431,114 +579,60 @@ export default function CashflowPage() {
               }
             />
           ) : (
-            <span className="text-sm font-semibold text-rose-800">{row.outflow > 0 ? formatShekel(row.outflow) : "—"}</span>
+            <span className="text-[13px] font-semibold text-rose-700">
+              {row.outflow > 0 ? formatShekel(row.outflow) : "—"}
+            </span>
           )}
         </td>
-        <td className={`${cellPad} align-middle`}>
-          {editing ? (
-            <span className="text-slate-300">—</span>
-          ) : (
-            <CashflowPdfButton rowId={row.id} onOpen={(url, title) => setPdfPreview({ url, title })} />
-          )}
-        </td>
-        <td className={`${cellPad} align-middle`}>
-          <div className="flex items-center justify-end gap-1">
-            {editing ? (
-              <>
-                <button
-                  type="button"
-                  title={t("cashflow.actionSave")}
-                  className="rounded-lg border border-emerald-200 bg-emerald-50 p-1.5 text-emerald-800 hover:bg-emerald-100"
-                  onClick={() => void saveEdit(row)}
-                >
-                  <Check className="h-4 w-4" aria-hidden />
-                </button>
-                <button
-                  type="button"
-                  title={t("common.cancel")}
-                  className="rounded-lg border border-slate-200 bg-white p-1.5 text-slate-600 hover:bg-slate-50"
-                  onClick={cancelEdit}
-                >
-                  <X className="h-4 w-4" aria-hidden />
-                </button>
-              </>
-            ) : (
-              <>
-                <button
-                  type="button"
-                  title={t("common.edit")}
-                  className="rounded-lg border border-slate-200 bg-white p-1.5 text-slate-700 shadow-sm hover:bg-slate-50"
-                  onClick={() => startEdit(row)}
-                >
-                  <Pencil className="h-4 w-4" aria-hidden />
-                </button>
-                <button
-                  type="button"
-                  title={t("cashflow.actionDelete")}
-                  className="rounded-lg border border-slate-200 bg-white p-1.5 text-rose-700 shadow-sm hover:bg-rose-50"
-                  onClick={() => void removeRow(row)}
-                >
-                  <Trash2 className="h-4 w-4" aria-hidden />
-                </button>
-                {row.document_id ? (
-                  <Link
-                    title={t("cashflow.viewDocument")}
-                    href={`/finance/register?edit=${encodeURIComponent(row.document_id)}`}
-                    className="rounded-lg border border-cyan-200 bg-cyan-50 p-1.5 text-cyan-900 hover:bg-cyan-100"
-                  >
-                    <Eye className="h-4 w-4" aria-hidden />
-                  </Link>
-                ) : (
-                  <span
-                    title={t("cashflow.noLinkedDocument")}
-                    className="inline-flex rounded-lg border border-slate-100 bg-slate-50 p-1.5 text-slate-300"
-                  >
-                    <Eye className="h-4 w-4" aria-hidden />
-                  </span>
-                )}
-              </>
-            )}
-          </div>
+        <td className="align-middle">
+          <CashflowRowActions
+            row={row}
+            editing={Boolean(editing)}
+            onSave={() => void saveEdit(row)}
+            onCancel={cancelEdit}
+            pdfBusy={pdfBusyId === row.id}
+            onMenuAction={(action) => handleRowMenuAction(row, action)}
+          />
         </td>
       </tr>
     );
   };
 
-  const renderMobileCard = (row: CashFlowRow) => {
+  const renderMobileCard = (row: CashFlowRow, nested = false) => {
     const editing = editingRowId === row.id && editForm;
 
     return (
-      <div
+      <article
         key={`m-${row.id}`}
-        className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm md:hidden"
+        className={`rounded-xl border border-slate-200 bg-white p-3 shadow-sm transition-colors hover:bg-[#fafafa] ${
+          nested ? "border-slate-100 bg-slate-50/90" : "md:hidden"
+        }`}
       >
-        <div className="flex items-start justify-between gap-2">
-          <div className="flex flex-wrap items-center gap-2">
-            {editing ? renderTypeBadgeOnly(row) : renderTypeCell(row)}
-          </div>
+        <div className="flex items-start justify-between gap-3">
+          <CashflowTypeCell row={row} editable={false} />
           {editing && editForm ? (
             <input
               type="date"
-              className={`${compactInput} max-w-[140px]`}
+              className={`${compactInput} max-w-[132px] shrink-0`}
               value={editForm.entry_date}
               onChange={(e) => setEditForm((f) => (f ? { ...f, entry_date: e.target.value } : f))}
             />
           ) : (
-            <span className="text-xs font-semibold text-slate-500">{row.entry_date}</span>
+            <span className="shrink-0 text-[12px] font-medium text-slate-500">{row.entry_date}</span>
           )}
         </div>
-        <p className="mt-2 text-sm font-medium leading-snug text-slate-900">
+        <div className="mt-2">
           {editing ? (
             <input
               type="text"
-              className={`${compactInput} mt-1`}
+              className={compactInput}
               value={editForm?.description ?? ""}
               onChange={(e) => setEditForm((f) => (f ? { ...f, description: e.target.value } : f))}
             />
           ) : (
-            sanitizeCashFlowDescription(row.description)
+            <CashflowDescriptionCell description={row.description} />
           )}
-        </p>
+        </div>
         <div className="mt-2">
           {editing && editForm ? (
             <div className="flex flex-col gap-1">
@@ -558,18 +652,18 @@ export default function CashflowPage() {
               />
             </div>
           ) : (
-            renderMethodCustomer(row)
+            <CashflowMethodCustomerCell row={row} />
           )}
         </div>
-        <div className="mt-3 flex justify-between gap-4 border-t border-slate-100 pt-3 text-sm">
+        <div className="mt-3 grid grid-cols-2 gap-3 border-t border-slate-100 pt-3">
           <div>
-            <p className="text-xs text-slate-500">{t("cashflow.thIncoming")}</p>
+            <p className="text-[11px] font-medium text-slate-500">{t("cashflow.thIncoming")}</p>
             {editing && editForm ? (
               <input
                 type="number"
                 min={0}
                 step="0.01"
-                className={`${compactInput} mt-1 text-emerald-900`}
+                className={`${compactInput} mt-1`}
                 value={editForm.inflow || ""}
                 onChange={(e) =>
                   setEditForm((f) =>
@@ -584,17 +678,19 @@ export default function CashflowPage() {
                 }
               />
             ) : (
-              <p className="font-bold text-emerald-800">{row.inflow > 0 ? formatShekel(row.inflow) : "—"}</p>
+              <p className="mt-0.5 text-[13px] font-semibold text-emerald-700">
+                {row.inflow > 0 ? formatShekel(row.inflow) : "—"}
+              </p>
             )}
           </div>
           <div>
-            <p className="text-xs text-slate-500">{t("cashflow.thOutgoing")}</p>
+            <p className="text-[11px] font-medium text-slate-500">{t("cashflow.thOutgoing")}</p>
             {editing && editForm ? (
               <input
                 type="number"
                 min={0}
                 step="0.01"
-                className={`${compactInput} mt-1 text-rose-900`}
+                className={`${compactInput} mt-1`}
                 value={editForm.outflow || ""}
                 onChange={(e) =>
                   setEditForm((f) =>
@@ -609,42 +705,23 @@ export default function CashflowPage() {
                 }
               />
             ) : (
-              <p className="font-bold text-rose-800">{row.outflow > 0 ? formatShekel(row.outflow) : "—"}</p>
+              <p className="mt-0.5 text-[13px] font-semibold text-rose-700">
+                {row.outflow > 0 ? formatShekel(row.outflow) : "—"}
+              </p>
             )}
           </div>
         </div>
-        <div className="mt-3 flex justify-end gap-1 border-t border-slate-100 pt-3">
-          {editing ? (
-            <>
-              <button
-                type="button"
-                className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-sm font-bold text-emerald-900"
-                onClick={() => void saveEdit(row)}
-              >
-                {t("cashflow.actionSave")}
-              </button>
-              <button type="button" className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-bold text-slate-700" onClick={cancelEdit}>
-                {t("common.cancel")}
-              </button>
-            </>
-          ) : (
-            <>
-              <CashflowPdfButton rowId={row.id} onOpen={(url, title) => setPdfPreview({ url, title })} />
-              <button type="button" className="rounded-lg border border-slate-200 p-2 text-slate-700" onClick={() => startEdit(row)}>
-                <Pencil className="h-4 w-4" aria-hidden />
-              </button>
-              <button type="button" className="rounded-lg border border-slate-200 p-2 text-rose-700" onClick={() => void removeRow(row)}>
-                <Trash2 className="h-4 w-4" aria-hidden />
-              </button>
-              {row.document_id ? (
-                <Link href={`/finance/register?edit=${encodeURIComponent(row.document_id)}`} className="rounded-lg border border-cyan-200 bg-cyan-50 p-2 text-cyan-900">
-                  <Eye className="h-4 w-4" aria-hidden />
-                </Link>
-              ) : null}
-            </>
-          )}
+        <div className="mt-3 flex justify-end border-t border-slate-100 pt-3">
+          <CashflowRowActions
+            row={row}
+            editing={Boolean(editing)}
+            onSave={() => void saveEdit(row)}
+            onCancel={cancelEdit}
+            pdfBusy={pdfBusyId === row.id}
+            onMenuAction={(action) => handleRowMenuAction(row, action)}
+          />
         </div>
-      </div>
+      </article>
     );
   };
 
@@ -718,39 +795,54 @@ export default function CashflowPage() {
         </div>
       </div>
 
-      <div className="mt-[14px] grid min-h-[56px] items-center gap-2.5 rounded-[18px] border border-slate-100 bg-slate-50/80 p-3 shadow-sm md:grid-cols-2 lg:grid-cols-5">
+      <div className="mt-[14px] flex min-h-[56px] flex-wrap items-center gap-2.5 rounded-[18px] border border-slate-100 bg-slate-50/80 p-3 shadow-sm">
         <input
           type="text"
           value={filterCustomer}
           onChange={(e) => setFilterCustomer(e.target.value)}
-          className={filterInputClass}
+          className={`${filterInputClass} min-w-[10rem] flex-1`}
           placeholder={t("cashflow.searchCustomer")}
         />
         <select
           value={filterType}
           onChange={(e) => setFilterType(e.target.value as "all" | "income" | "expense")}
-          className={filterInputClass}
+          className={`${filterInputClass} min-w-[10rem] flex-1`}
         >
           <option value="all">{t("cashflow.allTypes")}</option>
           <option value="income">{t("cashflow.incomeOnly")}</option>
           <option value="expense">{t("cashflow.expenseOnly")}</option>
         </select>
+        {filterType === "expense" ? (
+          <select
+            value={filterExpenseType}
+            onChange={(e) => setFilterExpenseType(e.target.value)}
+            className={`${filterInputClass} min-w-[11rem] flex-1 motion-safe:animate-[cashflowFilterIn_0.2s_ease-out]`}
+            aria-label={t("cashflow.expenseTypeFilter")}
+          >
+            <option value="">{t("cashflow.allExpenseTypes")}</option>
+            {EXPENSE_TYPE_VALUES.map((type) => (
+              <option key={type} value={type}>
+                {t(EXPENSE_TYPE_I18N[type])}
+              </option>
+            ))}
+          </select>
+        ) : null}
         <input
           type="date"
           value={filterDateFrom}
           onChange={(e) => setFilterDateFrom(e.target.value)}
-          className={filterInputClass}
+          className={`${filterInputClass} min-w-[9rem] flex-1`}
         />
         <input
           type="date"
           value={filterDateTo}
           onChange={(e) => setFilterDateTo(e.target.value)}
-          className={filterInputClass}
+          className={`${filterInputClass} min-w-[9rem] flex-1`}
         />
         <select
           value={filterPaymentMethod}
           onChange={(e) => setFilterPaymentMethod(e.target.value)}
-          className={filterInputClass}
+          className={`${filterInputClass} min-w-[10rem] flex-1`}
         >
           <option value="">{t("cashflow.allPaymentMethods")}</option>
           {paymentMethodOptions.map((p) => (
@@ -761,42 +853,82 @@ export default function CashflowPage() {
         </select>
       </div>
 
-      {/* Desktop table */}
+      {/* Desktop table — שורות רגילות + דוחות Z מקובצים */}
       <div className="mt-6 hidden md:block overflow-x-auto rounded-2xl border border-slate-200 shadow-sm">
-        <table className="min-w-[960px] w-full table-fixed border-collapse text-right text-sm">
+        <table className="cashflow-journal-table min-w-[920px] w-full table-fixed border-collapse text-right text-sm">
           <thead>
-            <tr className="border-b border-slate-200 bg-slate-50">
-              <th className={`${cellPad} w-[11%] font-bold text-slate-600`}>{t("cashflow.thDate")}</th>
-              <th className={`${cellPad} w-[12%] font-bold text-slate-600`}>{t("cashflow.thType")}</th>
-              <th className={`${cellPad} w-[28%] font-bold text-slate-600`}>{t("cashflow.thActionDescription")}</th>
-              <th className={`${cellPad} w-[22%] font-bold text-slate-600`}>{t("cashflow.thCustomerOrMethod")}</th>
-              <th className={`${cellPad} w-[10%] font-bold text-emerald-700`}>{t("cashflow.thIncoming")}</th>
-              <th className={`${cellPad} w-[10%] font-bold text-rose-700`}>{t("cashflow.thOutgoing")}</th>
-              <th className={`${cellPad} w-[7%] font-bold text-slate-600`}>{t("cashflow.thPdf")}</th>
-              <th className={`${cellPad} w-[7%] font-bold text-slate-600`}>{t("cashflow.thActions")}</th>
+            <tr>
+              <th className={`${thClass} w-[10%]`}>{t("cashflow.thDate")}</th>
+              <th className={`${thClass} w-[12%]`}>{t("cashflow.thType")}</th>
+              <th className={`${thClass} w-[30%]`}>{t("cashflow.thActionDescription")}</th>
+              <th className={`${thClass} w-[20%]`}>{t("cashflow.thCustomerOrMethod")}</th>
+              <th className={`${thClass} w-[10%] text-emerald-700`}>{t("cashflow.thIncoming")}</th>
+              <th className={`${thClass} w-[10%] text-rose-700`}>{t("cashflow.thOutgoing")}</th>
+              <th className={`${thClass} w-[4%] min-w-[48px]`}>{t("cashflow.thActions")}</th>
             </tr>
           </thead>
           <tbody className="bg-white">
             {loading && (
               <tr>
-                <td colSpan={8} className="px-4 py-10 text-center font-semibold text-slate-500">
+                <td colSpan={7} className="px-4 py-10 text-center text-sm font-medium text-slate-500">
                   {t("common.loading")}
                 </td>
               </tr>
             )}
-            {!loading && filteredRows.map(renderRowDesktop)}
+            {!loading && journalItems.length === 0 ? (
+              <tr>
+                <td colSpan={7} className="px-4 py-10 text-center text-sm font-medium text-slate-500">
+                  {t("cashflow.noEntriesShown")}
+                </td>
+              </tr>
+            ) : null}
+            {!loading &&
+              journalItems.map((item) =>
+                item.kind === "z" ? (
+                  <CashflowZReportTableGroupDesktop
+                    key={`z-${item.summary.zReportId}`}
+                    summary={item.summary}
+                    pdfBusy={pdfBusyId === item.summary.documentId}
+                    onMenuAction={(action) => handleZReportMenuAction(item.summary, action)}
+                    renderDesktopRow={renderRowDesktop}
+                    renderMobileRow={renderMobileCard}
+                    {...zGroupDetailProps(item.summary)}
+                  />
+                ) : (
+                  renderRowDesktop(item.row)
+                ),
+              )}
           </tbody>
         </table>
       </div>
 
-      {/* Mobile cards */}
+      {/* Mobile — שורות רגילות + דוחות Z מקובצים */}
       <div className="mt-6 space-y-3 md:hidden">
         {loading && <p className="text-center text-sm font-semibold text-slate-500">{t("common.loading")}</p>}
-        {!loading && filteredRows.map(renderMobileCard)}
+        {!loading &&
+          journalItems.map((item) =>
+            item.kind === "z" ? (
+              <CashflowZReportTableGroupMobile
+                key={`z-m-${item.summary.zReportId}`}
+                summary={item.summary}
+                pdfBusy={pdfBusyId === item.summary.documentId}
+                onMenuAction={(action) => handleZReportMenuAction(item.summary, action)}
+                renderDesktopRow={renderRowDesktop}
+                renderMobileRow={renderMobileCard}
+                {...zGroupDetailProps(item.summary)}
+              />
+            ) : (
+              renderMobileCard(item.row)
+            ),
+          )}
       </div>
 
-      {!loading && filteredRows.length === 0 && (
-        <p className="mt-8 text-center text-sm font-semibold text-slate-500">{t("cashflow.noEntriesShown")}</p>
+      {!loading && journalItems.length === 0 && (
+        <p className="mt-8 text-center text-sm font-semibold text-slate-500">
+          {filterType === "expense" && filterExpenseType
+            ? t("cashflow.noExpenseTypeEntries")
+            : t("cashflow.noEntriesShown")}
+        </p>
       )}
 
       {directOpen && (
@@ -878,49 +1010,3 @@ export default function CashflowPage() {
   );
 }
 
-function CashflowPdfButton({
-  rowId,
-  onOpen,
-}: {
-  rowId: string;
-  onOpen: (url: string, title: string) => void;
-}) {
-  const [busy, setBusy] = useState(false);
-
-  const handle = async () => {
-    setBusy(true);
-    try {
-      const latest = await fetch(`/api/reports/latest?relatedId=${encodeURIComponent(rowId)}`, {
-        credentials: "same-origin",
-      });
-      const lj = (await latest.json()) as { data?: { publicUrl: string; fileName: string } | null };
-      if (lj.data?.publicUrl) {
-        onOpen(lj.data.publicUrl, lj.data.fileName);
-        return;
-      }
-      const gen = await fetch("/api/reports/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "same-origin",
-        body: JSON.stringify({ entity: "cashflow", relatedId: rowId }),
-      });
-      const gj = (await gen.json()) as { publicUrl?: string; pdfUrl?: string };
-      const url = gj.publicUrl ?? gj.pdfUrl;
-      if (url) onOpen(url, `cashflow-${rowId.slice(0, 8)}.pdf`);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <button
-      type="button"
-      title="PDF"
-      disabled={busy}
-      onClick={() => void handle()}
-      className="rounded-lg border border-indigo-200 bg-indigo-50 p-1.5 text-indigo-900 hover:bg-indigo-100 disabled:opacity-50"
-    >
-      {busy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <FileText className="h-4 w-4" aria-hidden />}
-    </button>
-  );
-}

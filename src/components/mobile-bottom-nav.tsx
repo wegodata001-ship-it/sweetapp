@@ -1,13 +1,14 @@
 "use client";
 
 import {
-  CalendarClock,
+  Activity,
   CheckSquare,
   Clock3,
+  Gem,
   LayoutDashboard,
   MoreHorizontal,
+  Package,
   UserCircle2,
-  Workflow,
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -43,8 +44,7 @@ export function MobileBottomNav() {
     permSet.has("employee_clock") ||
     permSet.has("tasks");
 
-  const showFuture =
-    role === "SUPER_ADMIN" || role === "ADMIN" || permSet.has("tasks");
+  const showWedding = role === "SUPER_ADMIN" || role === "ADMIN";
 
   let tabs: Tab[];
 
@@ -52,9 +52,9 @@ export function MobileBottomNav() {
     // Focused 4-tab employee portal (Home / My Tasks / Hours / Profile).
     tabs = [
       { href: "/employee", labelKey: "mobileNav.employeeHome", icon: LayoutDashboard, match: (p) => p === "/employee" },
-      { href: "/employee/workflows", labelKey: "mobileNav.myTasks", icon: Workflow, match: (p) => p.startsWith("/employee/workflows") },
+      { href: "/admin/daily-orders", labelKey: "mobileNav.dailyOrders", icon: Package, match: (p) => p.startsWith("/admin/daily-orders") || p.startsWith("/admin/future-orders") },
+      { href: "/employee/work-status", labelKey: "mobileNav.workStatus", icon: Activity, match: (p) => p.startsWith("/employee/work-status") },
       { href: "/employee/hours", labelKey: "mobileNav.myHours", icon: Clock3, match: (p) => p.startsWith("/employee/hours") || p.startsWith("/employee/attendance") },
-      { href: "/employee/profile", labelKey: "mobileNav.profile", icon: UserCircle2, match: (p) => p.startsWith("/employee/profile") },
     ];
   } else {
     tabs = [{ href: "/", labelKey: "mobileNav.home", icon: LayoutDashboard, match: (p) => p === "/" }];
@@ -80,12 +80,12 @@ export function MobileBottomNav() {
           match: (p) => p.startsWith("/employee/hours") || p.startsWith("/employee/attendance"),
         });
       }
-      if (showFuture) {
+      if (showWedding) {
         tabs.push({
-          href: "/admin/future-orders",
-          labelKey: "mobileNav.futureOrders",
-          icon: CalendarClock,
-          match: (p) => p.startsWith("/admin/future-orders"),
+          href: "/admin/wedding-orders",
+          labelKey: "mobileNav.weddingOrders",
+          icon: Gem,
+          match: (p) => p.startsWith("/admin/wedding-orders"),
         });
       }
     }

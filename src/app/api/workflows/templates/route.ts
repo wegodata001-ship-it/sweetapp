@@ -61,7 +61,7 @@ export async function GET(req: NextRequest) {
     const includeArchived = searchParams.get("includeArchived") === "1";
     const q = (searchParams.get("q") ?? "").trim();
 
-    const where: Record<string, unknown> = {};
+    const where: Record<string, unknown> = { deletedAt: null };
     if (!includeArchived) where.archivedAt = null;
     if (q) {
       where.OR = [
@@ -136,8 +136,8 @@ export async function POST(req: NextRequest) {
         }[]
       | null = null;
     if (body.duplicateFromId) {
-      const source = await prismaAny.workflowTemplate.findUnique({
-        where: { id: body.duplicateFromId },
+      const source = await prismaAny.workflowTemplate.findFirst({
+        where: { id: body.duplicateFromId, deletedAt: null },
         include: { items: { orderBy: { orderIndex: "asc" } } },
       });
       if (!source) {

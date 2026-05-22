@@ -2,19 +2,15 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireDb } from "@/lib/api-route";
 import { prismaCashFlowToRow } from "@/lib/finance/cashflow-map";
+import { listCashFlowRows, parseCashflowQueryFilters } from "@/lib/finance/cashflow-filters";
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   const block = await requireDb();
   if (block) return block;
   try {
-    const rows = await prisma.cashFlowEntry.findMany({
-      orderBy: [{ entryDate: "asc" }, { createdAt: "asc" }],
-    });
-
-    return NextResponse.json({
-      ok: true,
-      data: rows.map((row) => prismaCashFlowToRow(row)),
-    });
+    const filters = parseCashflowQueryFilters(req.nextUrl.searchParams);
+    const data = await listCashFlowRows(filters);
+    return NextResponse.json({ ok: true, data });
   } catch (e) {
     return NextResponse.json(
       { ok: false, error: e instanceof Error ? e.message : "שגיאה" },
@@ -40,6 +36,7 @@ export async function POST(req: NextRequest) {
       documentId?: string | null;
       relatedDocumentId?: string | null;
       isDirect?: boolean;
+      expenseType?: string | null;
     };
     if (!body.entryType?.trim() || !body.entryDate) {
       return NextResponse.json({ ok: false, error: "חסרים שדות" }, { status: 400 });
@@ -72,6 +69,7 @@ export async function POST(req: NextRequest) {
         documentId: body.documentId || body.relatedDocumentId || null,
         relatedDocumentId: body.relatedDocumentId || null,
         isDirect: Boolean(body.isDirect),
+        expenseType: t === "expense" && body.expenseType?.trim() ? body.expenseType.trim() : null,
       },
     });
     return NextResponse.json({ ok: true, data: prismaCashFlowToRow(row) });

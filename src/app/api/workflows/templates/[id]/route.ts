@@ -4,6 +4,7 @@ import { requireDb } from "@/lib/api-route";
 import { getSessionFromCookie } from "@/lib/auth/get-session";
 import { canManageAllTasks } from "@/lib/tasks/task-access";
 import { serializeWorkflowTemplateDetail } from "@/lib/workflows/serialize";
+import { deleteTaskGroup, TaskGroupServiceError } from "@/lib/workflows/task-group-service";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -41,8 +42,8 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string
       return NextResponse.json({ ok: false, error: "נדרשת התחברות" }, { status: 401 });
     }
     const { id } = await ctx.params;
-    const row = await prismaAny.workflowTemplate.findUnique({
-      where: { id },
+    const row = await prismaAny.workflowTemplate.findFirst({
+      where: { id, deletedAt: null },
       include: TEMPLATE_DETAIL_INCLUDE,
     });
     if (!row) return NextResponse.json({ ok: false, error: "תבנית לא נמצאה" }, { status: 404 });
@@ -107,7 +108,7 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
 /**
  * DELETE /api/workflows/templates/:id
  *
- * Archive when historical runs exist, hard delete otherwise. Manager-only.
+ * Soft-delete group + related runs + workflow notifications. Manager-only.
  */
 export async function DELETE(_req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const block = await requireDb();
@@ -118,17 +119,13 @@ export async function DELETE(_req: NextRequest, ctx: { params: Promise<{ id: str
       return NextResponse.json({ ok: false, error: "אין הרשאה" }, { status: 403 });
     }
     const { id } = await ctx.params;
-    const runs = await prismaAny.workflowRun.count({ where: { templateId: id } });
-    if (runs > 0) {
-      await prismaAny.workflowTemplate.update({
-        where: { id },
-        data: { archivedAt: new Date() },
-      });
-      return NextResponse.json({ ok: true, archived: true });
-    }
-    await prismaAny.workflowTemplate.delete({ where: { id } });
-    return NextResponse.json({ ok: true, archived: false });
+    const result = await deleteTaskGroup(id);
+    return NextResponse.json({ ok: true, softDeleted: true, ...result });
   } catch (e) {
+    if (e instanceof TaskGroupServiceError) {
+      const status = e.code === "NOT_FOUND" ? 404 : 400;
+      return NextResponse.json({ ok: false, error: e.message, code: e.code }, { status });
+    }
     console.error("[DELETE /api/workflows/templates/:id]", e);
     return NextResponse.json(
       { ok: false, error: e instanceof Error ? e.message : "שגיאה" },

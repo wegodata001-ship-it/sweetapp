@@ -308,7 +308,7 @@ export function EmployeeDashboard() {
               {t("employee.dashboard.noActiveHint")}
             </p>
             <Link
-              href="/employee/workflows"
+              href="/employee/work-status"
               className="mt-4 inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-black text-white shadow-sm hover:bg-blue-700"
             >
               <Sparkles className="h-4 w-4" aria-hidden />

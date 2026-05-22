@@ -3,17 +3,11 @@
 import { useCallback, useEffect, useState } from "react";
 import { useAuth } from "@/components/auth-provider";
 import { useI18n } from "@/components/i18n-provider";
-import {
-  WorkflowRunnerPage,
-  type WorkflowEmployeeOption,
-} from "@/components/workflows/workflow-runner-page";
+import { EmployeeWorkHub } from "@/components/employee-work/employee-work-hub";
+import type { WorkflowEmployeeOption } from "@/components/tasks/cards/workflow-types";
 
 /**
- * Admin → Workflows
- *
- * Monday/Notion/Kitchen-style live workflow runner. This is the new primary
- * "Tasks" page; the legacy `/admin/tasks` page stays available for backward
- * compatibility (and is also linked from this page header).
+ * משימות לעובדים + סדר עבודה יומי — מסך מאוחד.
  */
 export default function AdminWorkflowsPage() {
   const { t, dir } = useI18n();
@@ -34,12 +28,7 @@ export default function AdminWorkflowsPage() {
     try {
       const res = await fetch("/api/employees?forTasks=1", { credentials: "same-origin" });
       if (!res.ok) {
-        setEmployees([]);
-        setEmployeesError(
-          res.status === 403
-            ? t("admin.tasks.createForm.errLoadEmployeesForbidden")
-            : t("admin.tasks.createForm.errLoadEmployees"),
-        );
+        setEmployeesError(t("admin.tasks.createForm.errLoadEmployees"));
         return;
       }
       const json = (await res.json().catch(() => null)) as
@@ -62,14 +51,28 @@ export default function AdminWorkflowsPage() {
   }, [loadEmployees]);
 
   return (
-    <div dir={dir} className="mx-auto w-full max-w-[1480px] space-y-3 p-3 md:p-5">
+    <div dir={dir} className="tcg-page mx-auto w-full max-w-[1480px] space-y-3 p-2 sm:p-4 md:p-5">
+      <header className="px-0.5">
+        <p className="text-[10px] font-black uppercase tracking-wider text-violet-800">
+          {t("workflows.page.kicker")}
+        </p>
+        <h1 className="text-xl font-black text-slate-950 sm:text-2xl">
+          {t("workflows.page.hub.pageTitle")}
+        </h1>
+        <p className="mt-0.5 text-sm text-slate-600">{t("workflows.employeeWork.pageSubtitle")}</p>
+      </header>
+
       {employeesError ? (
         <div className="rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-900">
           {employeesError}
         </div>
       ) : null}
 
-      <WorkflowRunnerPage employees={employees} canManage={canManage} />
+      <EmployeeWorkHub
+        employees={employees}
+        canManage={canManage}
+        isSuperAdmin={user?.role === "SUPER_ADMIN"}
+      />
     </div>
   );
 }

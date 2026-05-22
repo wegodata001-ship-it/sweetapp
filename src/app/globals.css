@@ -303,4 +303,171 @@ textarea {
       text-shadow: 0 0 20px rgba(37, 99, 235, 0.35);
     }
   }
+
+  /* Task group cards grid — mobile-first Kanban-style */
+  .tcg-page {
+    @apply bg-gradient-to-b from-slate-100/80 via-violet-50/30 to-slate-50/50;
+  }
+  .tcg-card {
+    @apply motion-safe:transition-transform;
+  }
+  .tcg-fade-in {
+    animation: tcg-fade-in 0.25s ease-out;
+  }
+  @keyframes tcg-fade-in {
+    from {
+      opacity: 0;
+      transform: translateY(4px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  @keyframes cashflowFilterIn {
+    from {
+      opacity: 0;
+      transform: translateY(-4px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  /* יומן תזרים — מפרידי עמודות עדינים (דסקטופ) */
+  .cashflow-journal-table th,
+  .cashflow-journal-table td {
+    padding-inline: 1rem;
+    padding-block: 0.625rem;
+  }
+  @media (min-width: 1024px) {
+    .cashflow-journal-table th,
+    .cashflow-journal-table td {
+      padding-inline: 1.25rem;
+    }
+  }
+  .cashflow-journal-table thead th {
+    background-color: rgb(248 250 252 / 0.95);
+  }
+  .cashflow-journal-table thead tr {
+    border-bottom: 1px solid #edf1f5;
+  }
+  .cashflow-journal-table th:not(:first-child),
+  .cashflow-journal-table td:not(:first-child) {
+    border-inline-start: 1px solid #edf1f5;
+  }
+  .cashflow-journal-table tbody tr.cashflow-journal-row {
+    border-bottom: 1px solid #edf1f5;
+    transition: background-color 0.15s ease;
+  }
+  .cashflow-journal-table tbody tr.cashflow-journal-row:hover {
+    background-color: #fafafa;
+  }
+  .cashflow-journal-table tbody tr.cashflow-journal-row:hover td {
+    border-inline-start-color: #edf1f5;
+  }
+
+  .tcg-pulse-soft {
+    animation: tcg-pulse-soft 2s ease-in-out infinite;
+  }
+  @keyframes tcg-pulse-soft {
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.85;
+    }
+  }
+  .tcg-mini-card:active {
+    @apply scale-[0.99];
+  }
+
+  .tcg-card-enter {
+    animation: tcg-card-enter 0.45s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  @keyframes tcg-card-enter {
+    from {
+      opacity: 0;
+      transform: scale(0.92) translateY(8px);
+    }
+    to {
+      opacity: 1;
+      transform: scale(1) translateY(0);
+    }
+  }
+
+  .tcg-card-exit {
+    animation: tcg-card-exit 0.32s ease-in forwards;
+  }
+  @keyframes tcg-card-exit {
+    to {
+      opacity: 0;
+      transform: scale(0.9);
+      max-height: 0;
+      margin: 0;
+      padding: 0;
+    }
+  }
+
+  /* Employee work order — groups accordion + task lock */
+  .ew-accordion-grid {
+    display: grid;
+    grid-template-rows: 0fr;
+    transition: grid-template-rows 0.35s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .ew-accordion-grid.ew-accordion-open {
+    grid-template-rows: 1fr;
+  }
+  .ew-accordion-inner {
+    overflow: hidden;
+  }
+  .ew-task-locked {
+    filter: grayscale(0.35);
+  }
+  .ew-task-unlock-glow {
+    animation: ew-unlock-glow 1.2s ease-out;
+  }
+  @keyframes ew-unlock-glow {
+    from {
+      box-shadow: 0 0 0 0 rgba(139, 92, 246, 0.5);
+    }
+    to {
+      box-shadow: 0 0 0 8px rgba(139, 92, 246, 0);
+    }
+  }
+  .ew-task-complete-pop {
+    animation: ew-task-complete-pop 0.55s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  @keyframes ew-task-complete-pop {
+    0% {
+      transform: scale(1);
+    }
+    40% {
+      transform: scale(1.02);
+      background-color: rgb(220 252 231);
+    }
+    100% {
+      transform: scale(1);
+    }
+  }
+  .ew-progress-bar {
+    transition: width 0.45s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+}
+
+.ws-hero {
+  background: linear-gradient(135deg, #0f172a 0%, #312e81 45%, #059669 100%);
+  box-shadow: 0 12px 40px rgba(49, 46, 129, 0.25);
+}
+
+/* Arabic — long labels on financial register tabs */
+.locale-ar .finance-register-tab {
+  min-height: 52px;
+  height: auto;
+  padding-block: 10px;
+  text-align: center;
+  white-space: normal;
+  line-height: 1.35;
 }

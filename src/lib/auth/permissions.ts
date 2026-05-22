@@ -9,6 +9,7 @@ export const PERMISSION_KEYS = [
   "reports",
   "settings",
   "admin",
+  "wedding_orders",
 ] as const;
 
 export type PermissionKey = (typeof PERMISSION_KEYS)[number];
@@ -23,12 +24,14 @@ export const PERMISSION_LABELS: Record<PermissionKey, string> = {
   reports: "דוחות",
   settings: "הגדרות",
   admin: "ניהול משתמשים (ADMIN)",
+  wedding_orders: "הזמנות חתונות / אירועים",
 };
 
 /** דפים — לפי התאמה ארוכה ביותר */
-export const PAGE_ACCESS_RULES: { prefix: string; permission: PermissionKey | "SUPER_ADMIN_ONLY" }[] = [
+export type PagePermission = PermissionKey | "SUPER_ADMIN_ONLY" | "ADMIN_ONLY";
+
+export const PAGE_ACCESS_RULES: { prefix: string; permission: PagePermission }[] = [
   { prefix: "/admin/users", permission: "SUPER_ADMIN_ONLY" },
-  { prefix: "/admin/system", permission: "SUPER_ADMIN_ONLY" },
   { prefix: "/finance/suppliers-prices", permission: "financial_registration" },
   { prefix: "/finance/register", permission: "financial_registration" },
   { prefix: "/finance/archive", permission: "financial_registration" },
@@ -37,7 +40,10 @@ export const PAGE_ACCESS_RULES: { prefix: string; permission: PermissionKey | "S
   { prefix: "/finance/ledgers", permission: "ledger" },
   { prefix: "/finance/cashflow", permission: "cash_flow" },
   { prefix: "/finance", permission: "financial_registration" },
-  { prefix: "/admin/future-orders", permission: "tasks" },
+  { prefix: "/admin/work-status", permission: "tasks" },
+  { prefix: "/admin/wedding-orders", permission: "wedding_orders" },
+  { prefix: "/admin/daily-orders", permission: "employee_clock" },
+  { prefix: "/admin/future-orders", permission: "employee_clock" },
   { prefix: "/admin/staff", permission: "tasks" },
   { prefix: "/admin/email-logs", permission: "tasks" },
   { prefix: "/admin/debug", permission: "tasks" },
@@ -55,13 +61,13 @@ export const PAGE_ACCESS_RULES: { prefix: string; permission: PermissionKey | "S
 /** API — נתיב לפי קידומת */
 export const API_ACCESS_RULES: { prefix: string; permission: PermissionKey | "SUPER_ADMIN_ONLY" }[] = [
   { prefix: "/api/admin/users", permission: "SUPER_ADMIN_ONLY" },
-  { prefix: "/api/admin/system", permission: "SUPER_ADMIN_ONLY" },
   { prefix: "/api/procurement", permission: "financial_registration" },
   { prefix: "/api/documents", permission: "financial_registration" },
   { prefix: "/api/payments", permission: "financial_registration" },
   { prefix: "/api/pdfs", permission: "financial_registration" },
   { prefix: "/api/product-history", permission: "financial_registration" },
   { prefix: "/api/finance/stats", permission: "financial_registration" },
+  { prefix: "/api/finance/product-picker", permission: "financial_registration" },
   { prefix: "/api/customers/", permission: "ledger" },
   { prefix: "/api/suppliers/", permission: "ledger" },
   { prefix: "/api/employees/", permission: "ledger" },
@@ -73,12 +79,13 @@ export const API_ACCESS_RULES: { prefix: string; permission: PermissionKey | "SU
   { prefix: "/api/employees", permission: "ledger" },
   { prefix: "/api/inventory", permission: "inventory" },
   { prefix: "/api/recipes", permission: "tasks" },
+  { prefix: "/api/work-status", permission: "tasks" },
   { prefix: "/api/admin/work-library", permission: "tasks" },
   { prefix: "/api/admin/work-templates", permission: "tasks" },
   { prefix: "/api/admin/work-assign", permission: "tasks" },
   { prefix: "/api/admin/work-tasks", permission: "tasks" },
   { prefix: "/api/workflows", permission: "tasks" },
-  { prefix: "/api/future-orders", permission: "tasks" },
+  { prefix: "/api/future-orders", permission: "employee_clock" },
   { prefix: "/api/form-fields", permission: "tasks" },
   { prefix: "/api/staff/attendance/", permission: "tasks" },
   { prefix: "/api/staff/attendance", permission: "tasks" },
@@ -87,10 +94,7 @@ export const API_ACCESS_RULES: { prefix: string; permission: PermissionKey | "SU
   { prefix: "/api/staff/dashboard", permission: "tasks" },
 ];
 
-export function matchRule(
-  pathname: string,
-  rules: typeof PAGE_ACCESS_RULES,
-): PermissionKey | "SUPER_ADMIN_ONLY" | null {
+export function matchRule(pathname: string, rules: typeof PAGE_ACCESS_RULES): PagePermission | null {
   const sorted = [...rules].sort((a, b) => b.prefix.length - a.prefix.length);
   for (const r of sorted) {
     if (pathname === r.prefix || pathname.startsWith(`${r.prefix}/`)) {

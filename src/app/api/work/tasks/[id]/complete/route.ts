@@ -8,6 +8,7 @@ import { assertEmployeeOwnsWorkTask } from "@/lib/work-tasks/access";
 import { logTaskCompleteDenied } from "@/lib/work-tasks/task-security-log";
 import { serializeWorkEmployeeTask } from "@/lib/work-tasks/serialize-work-task";
 import { notifyTaskCompleted } from "@/lib/notifications/task-flow";
+import { clearUserActiveTask } from "@/lib/work-status/active-task";
 
 export const dynamic = "force-dynamic";
 
@@ -78,9 +79,14 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
       data: {
         status: "COMPLETED",
         completedAt,
+        isActive: false,
         delayReason: late ? reason || null : null,
       },
     });
+
+    if (task.assignedToUserId) {
+      await clearUserActiveTask(task.assignedToUserId);
+    }
 
     console.log("[TASK STATUS UPDATED]", {
       taskId: id,

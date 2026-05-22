@@ -21,6 +21,7 @@ import {
   type InventoryMovementKey,
 } from "@/lib/inventory/movement";
 import type { StockFilterTier } from "@/lib/inventory/product-filters";
+import { InventoryCountDashboard } from "@/components/ops/inventory-count-dashboard";
 import { useI18n } from "@/components/i18n-provider";
 import { translateInventoryCategory } from "@/lib/i18n/status-keys";
 import type { TranslateFn } from "@/lib/i18n/translator";
@@ -395,6 +396,7 @@ export default function InventoryPage() {
     category: "כללי",
   });
   const [addInventoryOpen, setAddInventoryOpen] = useState(false);
+  const [countRefreshKey, setCountRefreshKey] = useState(0);
   const [historyDateFrom, setHistoryDateFrom] = useState("");
   const [historyDateTo, setHistoryDateTo] = useState("");
   const [historyTimeFrom, setHistoryTimeFrom] = useState("");
@@ -822,6 +824,7 @@ export default function InventoryPage() {
       setNotice(t("ops.inventory.notice.saved", { count: lines.length }));
       setActualById({});
       setNotesById({});
+      setCountRefreshKey((k) => k + 1);
       await Promise.all([loadStats(), loadCountProducts(), loadCountHistory(), loadShelfSummaries()]);
     } catch {
       setNotice(t("ops.inventory.notice.saveFailed"));
@@ -945,6 +948,7 @@ export default function InventoryPage() {
 
   return (
     <div className="mx-auto max-w-7xl space-y-[14px] pb-6" dir="rtl">
+      {tab !== "monthly" ? (
       <section className="app-panel mb-[14px] px-5 py-6 md:px-7 md:py-7">
         <p className="flex items-center gap-2 text-[12px] font-bold tracking-[0.12em] text-luxury-navy-rich opacity-80">
           <Package className="h-4 w-4 shrink-0 text-luxury-gold" aria-hidden />
@@ -956,18 +960,21 @@ export default function InventoryPage() {
         <p className="mt-1 max-w-3xl text-[15px] leading-snug text-slate-600 opacity-80">
           {t("ops.inventory.pageDescription")}
         </p>
-        {loadError ? (
-          <p className="mt-4 text-sm font-bold text-rose-700" role="alert">
-            {loadError}
-          </p>
-        ) : null}
-        {notice ? (
-          <p className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-bold text-emerald-900">
-            {notice}
-          </p>
-        ) : null}
       </section>
+      ) : null}
+      {loadError ? (
+        <p className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-bold text-rose-700" role="alert">
+          {loadError}
+        </p>
+      ) : null}
+      {notice ? (
+        <p className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-bold text-emerald-900">
+          {notice}
+        </p>
+      ) : null}
 
+      {tab !== "monthly" ? (
+      <div className="space-y-[14px]">
       <div className="grid grid-cols-2 gap-2.5 md:grid-cols-4">
         <div className="app-panel flex min-h-[120px] flex-col justify-between border-luxury-navy-rich/15 p-4 shadow-luxury-sm">
           <div className="flex items-center justify-between gap-2">
@@ -1058,6 +1065,8 @@ export default function InventoryPage() {
           <p className="mt-4 text-sm font-semibold text-slate-600">{t("ops.inventory.byLocation.emptyShelves")}</p>
         )}
       </div>
+      </div>
+      ) : null}
 
       <div className="app-panel px-2 pt-2 md:px-4">
         <div className="flex flex-wrap gap-1 border-b border-slate-200">
@@ -1078,556 +1087,40 @@ export default function InventoryPage() {
           ))}
         </div>
 
-        <div className="p-4 md:p-6">
+        <div className={tab === "monthly" ? "p-2 md:p-3" : "p-4 md:p-6"}>
           {tab === "monthly" ? (
-            <div className="space-y-5">
-              <div className="border-b border-slate-200 pb-3">
-                <h2 className="text-lg font-black text-slate-900 md:text-xl">
-                  {activeShelfLabel
-                    ? t("ops.inventory.count.sheetTitle", { area: activeShelfLabel })
-                    : t("ops.inventory.count.sheetTitlePick")}
-                </h2>
-                {inventoryLocations.length === 0 ? (
-                  <p className="mt-2 text-sm font-semibold text-amber-800">
-                    {t("ops.inventory.count.noLocationsYet")}{" "}
-                    <Link href="/ops/inventory/locations" className="font-black text-luxury-navy-rich underline">
-                      {t("ops.inventory.manageAreasLink")}
-                    </Link>
-                  </p>
-                ) : null}
-              </div>
-
-              <div className="flex flex-col gap-3 rounded-2xl border border-luxury-navy-rich/10 bg-gradient-to-b from-white to-slate-50/90 p-4 shadow-sm">
-                <div className="sticky top-0 z-30 -mx-4 -mt-4 mb-1 rounded-t-2xl border-b border-slate-100 bg-gradient-to-b from-white via-white to-white/92 px-4 py-3 shadow-[0_8px_20px_-12px_rgba(15,23,42,0.45)] backdrop-blur-sm md:-mx-4 md:px-4">
-                  <p className="text-[11px] font-black uppercase tracking-wide text-slate-500">
-                    {t("ops.inventory.count.pickArea")}
-                  </p>
-                  {shelfSummaries.length > 0 ? (
-                    <div className="mt-2 flex gap-2 overflow-x-auto pb-1 [-webkit-overflow-scrolling:touch] md:mt-3 md:grid md:grid-cols-2 md:overflow-visible lg:grid-cols-3 xl:grid-cols-4">
-                      {shelfSummaries.map((shelf) => {
-                        const shelfActive = countLocationName.trim() === shelf.name.trim();
-                        return (
-                          <button
-                            key={shelf.name}
-                            type="button"
-                            onClick={() => setCountLocationName(shelf.name)}
-                            className={`shrink-0 rounded-2xl px-3 py-2.5 text-right transition ${
-                              shelfActive
-                                ? "border-2 border-sky-400 bg-sky-100 font-black text-slate-900 shadow-[0_0_14px_rgba(56,189,248,0.35)] ring-1 ring-sky-200/80"
-                                : "border border-slate-200 bg-white font-bold text-slate-800 shadow-sm hover:border-slate-300 hover:bg-slate-50"
-                            }`}
-                          >
-                            <span className="block text-sm">{shelf.name}</span>
-                            <span className="mt-0.5 block text-[11px] font-bold tabular-nums text-slate-600">
-                              ({shelf.productCount})
-                            </span>
-                            {shelf.shortageCount > 0 ? (
-                              <span className="mt-1 inline-flex items-center gap-1 text-[11px] font-black text-rose-600">
-                                <span className="h-2 w-2 shrink-0 rounded-full bg-rose-500" aria-hidden />
-                                {shelf.shortageCount}
-                              </span>
-                            ) : null}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  ) : (
-                    <p className="mt-3 text-sm font-semibold text-slate-600">{t("ops.inventory.count.noShelvesWithLocation")}</p>
-                  )}
-                  <div className="mt-2 flex flex-wrap items-center justify-between gap-2 border-t border-slate-100/80 pt-2">
-                    <Link
-                      href="/ops/inventory/locations"
-                      className="text-xs font-bold text-luxury-navy-rich underline hover:text-luxury-gold"
-                    >
-                      {t("ops.inventory.manageAreasLink")}
-                    </Link>
-                    <p className="text-[11px] font-semibold text-slate-500">{t("ops.inventory.count.shelfStripHint")}</p>
-                  </div>
-                </div>
-
-                <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-200/80 pt-3">
-                  <p className="text-xs font-black text-slate-600">{t("ops.inventory.filter.moreFilters")}</p>
-                  <div className="flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 md:hidden"
-                      onClick={() => setCountFiltersOpen(true)}
-                    >
-                      <SlidersHorizontal className="h-4 w-4" aria-hidden />
-                      {t("ops.inventory.filter.filtersBtn")}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        resetCountSheetFilters();
-                        setCountFiltersOpen(false);
-                      }}
-                      className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-black text-luxury-navy-rich hover:bg-slate-50"
-                    >
-                      <RotateCcw className="h-4 w-4" aria-hidden />
-                      {t("ops.inventory.filter.reset")}
-                    </button>
-                  </div>
-                </div>
-                <div className="hidden flex-wrap items-end gap-3 md:flex">
-                  <label className="min-w-[9rem]">
-                    <span className={labelClass}>{t("ops.inventory.filter.category")}</span>
-                    <select value={countCategory} onChange={(e) => setCountCategory(e.target.value)} className={inputClass}>
-                      <option value="">{t("ops.inventory.filter.all")}</option>
-                      {INVENTORY_FILTER_CATEGORIES.map((c) => (
-                        <option key={c} value={c}>
-                          {translateInventoryCategory(t, c)}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="min-w-[10rem]">
-                    <span className={labelClass}>{t("ops.inventory.filter.stockState")}</span>
-                    <select
-                      value={countStock}
-                      onChange={(e) => setCountStock(e.target.value as StockFilterTier)}
-                      className={inputClass}
-                    >
-                      <option value="all">{t("ops.inventory.filter.all")}</option>
-                      <option value="short">{t("ops.inventory.filter.tierShort")}</option>
-                      <option value="low">{t("ops.inventory.filter.tierLow")}</option>
-                      <option value="zero">{t("ops.inventory.filter.tierZero")}</option>
-                    </select>
-                  </label>
-                  <label className="min-w-[12rem] flex-[2]">
-                    <span className={labelClass}>{t("ops.inventory.filter.search")}</span>
-                    <div className="relative">
-                      <Search className="pointer-events-none absolute end-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                      <input
-                        type="search"
-                        value={countQ}
-                        onChange={(e) => setCountQ(e.target.value)}
-                        className={`${inputClass} pe-10`}
-                        placeholder={
-                          activeShelfLabel
-                            ? t("ops.inventory.count.searchInShelfPlaceholder")
-                            : t("ops.inventory.filter.searchPlaceholder")
-                        }
-                      />
-                    </div>
-                  </label>
-                </div>
-              </div>
-
-              {countFiltersOpen ? (
-                <div className="fixed inset-0 z-40 md:hidden" role="presentation">
-                  <button
-                    type="button"
-                    className="absolute inset-0 bg-black/40"
-                    aria-label={t("ops.inventory.mobileSheet.closeAria")}
-                    onClick={() => setCountFiltersOpen(false)}
-                  />
-                  <div className="absolute inset-x-0 bottom-0 max-h-[85vh] overflow-auto rounded-t-2xl border border-slate-200 bg-white p-4 pb-8 shadow-2xl">
-                    <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-                      <p className="font-black text-slate-900">{t("ops.inventory.mobileSheet.title")}</p>
-                      <button
-                        type="button"
-                        className="text-sm font-bold text-slate-500"
-                        onClick={() => setCountFiltersOpen(false)}
-                      >
-                        {t("ops.inventory.mobileSheet.close")}
-                      </button>
-                    </div>
-                    <div className="mt-4 grid gap-3">
-                      <label>
-                        <span className={labelClass}>{t("ops.inventory.filter.category")}</span>
-                        <select value={countCategory} onChange={(e) => setCountCategory(e.target.value)} className={inputClass}>
-                          <option value="">{t("ops.inventory.filter.all")}</option>
-                          {INVENTORY_FILTER_CATEGORIES.map((c) => (
-                            <option key={c} value={c}>
-                              {translateInventoryCategory(t, c)}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                      <label>
-                        <span className={labelClass}>{t("ops.inventory.filter.stockState")}</span>
-                        <select
-                          value={countStock}
-                          onChange={(e) => setCountStock(e.target.value as StockFilterTier)}
-                          className={inputClass}
-                        >
-                          <option value="all">{t("ops.inventory.filter.all")}</option>
-                          <option value="short">{t("ops.inventory.filter.tierShort")}</option>
-                          <option value="low">{t("ops.inventory.filter.tierLow")}</option>
-                          <option value="zero">{t("ops.inventory.filter.tierZero")}</option>
-                        </select>
-                      </label>
-                      <label>
-                        <span className={labelClass}>{t("ops.inventory.filter.search")}</span>
-                        <input
-                          type="search"
-                          value={countQ}
-                          onChange={(e) => setCountQ(e.target.value)}
-                          className={inputClass}
-                          placeholder={
-                            activeShelfLabel
-                              ? t("ops.inventory.count.searchInShelfPlaceholder")
-                              : t("ops.inventory.filter.searchPlaceholder")
-                          }
-                        />
-                      </label>
-                    </div>
-                    <button
-                      type="button"
-                      className="mt-4 w-full rounded-xl bg-luxury-navy-rich py-3 text-sm font-black text-white"
-                      onClick={() => setCountFiltersOpen(false)}
-                    >
-                      {t("ops.inventory.mobileSheet.apply")}
-                    </button>
-                  </div>
-                </div>
-              ) : null}
-
-              <div className="flex flex-col gap-4 rounded-2xl border border-slate-200/90 bg-slate-50/50 p-4 md:flex-row md:flex-wrap md:items-end">
-                <label className="min-w-[10rem] flex-1">
-                  <span className={labelClass}>{t("ops.inventory.count.date")}</span>
-                  <input type="date" value={countDate} onChange={(e) => setCountDate(e.target.value)} className={inputClass} />
-                </label>
-                <p className="flex flex-1 items-center gap-2 text-xs font-semibold text-slate-500">
-                  <WarehouseIcon className="h-4 w-4" aria-hidden />
-                  {t("ops.inventory.count.compareLastHint")}
-                </p>
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => {
-                    setNewCountProduct((p) => ({
-                      ...p,
-                      locationId: resolveLocationIdForShelf(countLocationName) || p.locationId,
-                    }));
-                    setAddInventoryOpen(true);
-                  }}
-                  className="inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-4 text-sm font-black text-luxury-navy-rich shadow-sm hover:bg-slate-50 disabled:opacity-50"
-                >
-                  {t("ops.inventory.count.addInventoryItem")}
-                </button>
-                <button
-                  type="button"
-                  disabled={busy || !activeShelfLabel || countSheetEmpty}
-                  onClick={() => void saveMonthly()}
-                  className="inline-flex items-center justify-center gap-2 rounded-xl bg-luxury-gold px-5 py-3 text-sm font-black text-luxury-charcoal shadow-luxury-sm hover:bg-luxury-gold-hover disabled:opacity-50"
-                >
-                  {t("ops.inventory.count.save")}
-                </button>
-              </div>
-
-              {addInventoryOpen ? (
-                <div
-                  className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
-                  role="dialog"
-                  aria-modal="true"
-                  aria-labelledby="add-inv-title"
-                  onMouseDown={(e) => {
-                    if (e.target === e.currentTarget) setAddInventoryOpen(false);
-                  }}
-                >
-                  <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-5 shadow-xl" dir="rtl">
-                    <h3 id="add-inv-title" className="text-lg font-black text-slate-900">
-                      {t("ops.inventory.count.modalTitle")}
-                    </h3>
-                    <div className="mt-4 grid gap-3">
-                      <label>
-                        <span className={labelClass}>{t("ops.inventory.count.fieldItemName")}</span>
-                        <input
-                          value={newCountProduct.name}
-                          onChange={(e) => setNewCountProduct((p) => ({ ...p, name: e.target.value }))}
-                          className={inputClass}
-                          placeholder={t("ops.inventory.count.fieldItemNamePlaceholder")}
-                        />
-                      </label>
-                      <label>
-                        <span className={labelClass}>{t("ops.inventory.count.fieldLocationRequired")}</span>
-                        <select
-                          value={newCountProduct.locationId}
-                          onChange={(e) => setNewCountProduct((p) => ({ ...p, locationId: e.target.value }))}
-                          className={inputClass}
-                        >
-                          <option value="">{t("ops.inventory.count.fieldChooseLocation")}</option>
-                          {inventoryLocations.map((loc) => (
-                            <option key={loc.id} value={loc.id}>
-                              {loc.name}
-                            </option>
-                          ))}
-                        </select>
-                        <datalist id="wego-inv-loc-ac-modal">
-                          {inventoryLocations.map((loc) => (
-                            <option key={loc.id} value={loc.name} />
-                          ))}
-                        </datalist>
-                        <input
-                          className={`${inputClass} mt-1.5 !min-h-9 text-xs`}
-                          list="wego-inv-loc-ac-modal"
-                          placeholder={t("ops.inventory.count.fieldLocationAutocompletePlaceholder")}
-                          aria-label={t("ops.inventory.count.fieldLocationAutocompleteAria")}
-                          onBlur={(e) => {
-                            const v = e.target.value.trim();
-                            if (!v) return;
-                            const hit = inventoryLocations.find((l) => l.name.trim() === v);
-                            if (hit) {
-                              setNewCountProduct((p) => ({ ...p, locationId: hit.id }));
-                              e.target.value = "";
-                            }
-                          }}
-                        />
-                      </label>
-                      <label>
-                        <span className={labelClass}>{t("ops.inventory.count.fieldCategory")}</span>
-                        <select
-                          value={newCountProduct.category}
-                          onChange={(e) => setNewCountProduct((p) => ({ ...p, category: e.target.value }))}
-                          className={inputClass}
-                        >
-                          {INVENTORY_FILTER_CATEGORIES.map((c) => (
-                            <option key={c} value={c}>
-                              {translateInventoryCategory(t, c)}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                      <label>
-                        <span className={labelClass}>{t("ops.inventory.count.fieldUnit")}</span>
-                        <input
-                          value={newCountProduct.unit}
-                          onChange={(e) => setNewCountProduct((p) => ({ ...p, unit: e.target.value }))}
-                          className={inputClass}
-                          placeholder={t("ops.inventory.count.fieldUnitPlaceholder")}
-                        />
-                      </label>
-                    </div>
-                    <div className="mt-5 flex flex-wrap justify-end gap-2">
-                      <button
-                        type="button"
-                        className="rounded-xl px-4 py-2.5 text-sm font-bold text-slate-600 hover:bg-slate-100"
-                        onClick={() => setAddInventoryOpen(false)}
-                      >
-                        {t("ops.inventory.count.cancel")}
-                      </button>
-                      <button
-                        type="button"
-                        disabled={busy}
-                        className="rounded-xl bg-luxury-gold px-5 py-2.5 text-sm font-black text-luxury-charcoal hover:bg-luxury-gold-hover disabled:opacity-50"
-                        onClick={() => void createCountProduct()}
-                      >
-                        {t("ops.inventory.count.saveBtn")}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              ) : null}
-
-              {countSheetEmpty ? (
-                <p className="text-sm font-semibold text-slate-600">
-                  {!activeShelfLabel ? (
-                    t("ops.inventory.count.emptyNoArea")
-                  ) : countCategory || countStock !== "all" || debouncedCountQ ? (
-                    <>
-                      {t("ops.inventory.count.emptyMatchingFilter")}{" "}
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setCountCategory("");
-                          setCountStock("all");
-                          setCountQ("");
-                          setDebouncedCountQ("");
-                          setCountPage(1);
-                        }}
-                        className="font-black text-luxury-navy-rich underline"
-                      >
-                        {t("ops.inventory.count.resetFiltersInline")}
-                      </button>
-                    </>
-                  ) : (
-                    <>
-                      {t("ops.inventory.count.emptyAreaPrefix", { area: activeShelfLabel })}{" "}
-                      <button type="button" onClick={() => setTab("products")} className="font-black text-luxury-navy-rich underline">
-                        {t("ops.inventory.count.noProductsLink")}
-                      </button>{" "}
-                      {t("ops.inventory.count.emptyAreaSuffix")}
-                    </>
-                  )}
-                </p>
-              ) : (
-                <>
-                  <div className="hidden md:block overflow-hidden rounded-2xl border border-slate-200">
-                    <div className="max-h-[min(70vh,720px)] overflow-auto">
-                      <table className="inventory-count-table min-w-full divide-y divide-slate-200 text-right text-xs">
-                        <thead className="sticky top-0 z-10 bg-slate-50 shadow-sm">
-                          <tr>
-                            <th className="px-2 py-2 font-bold text-slate-700">{t("ops.inventory.count.thItem")}</th>
-                            <th className="px-2 py-2 font-bold text-slate-700">{t("ops.inventory.count.thPrevious")}</th>
-                            <th className="px-2 py-2 font-bold text-slate-700">{t("ops.inventory.count.thNew")}</th>
-                            <th className="px-2 py-2 font-bold text-slate-700">{t("ops.inventory.count.thDiff")}</th>
-                            <th className="px-2 py-2 font-bold text-slate-700">{t("ops.inventory.count.thStatus")}</th>
-                            <th className="min-w-[6rem] px-2 py-2 font-bold text-slate-700">{t("ops.inventory.count.thNote")}</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100 bg-white">
-                          {monthlyRows.map((row) => {
-                            const dm = row.diff === null ? null : countDiffMeta(row.diff, t);
-                            const countInputStyle: CSSProperties = {
-                              height: 34,
-                              width: 76,
-                              fontSize: 13,
-                            };
-                            return (
-                              <tr key={row.id} className="transition hover:bg-slate-50/80">
-                                <td className="max-w-[12rem] px-2 py-1.5 align-middle font-bold text-slate-900">
-                                  {row.name}
-                                  {row.unit ? (
-                                    <span className="block text-[10px] font-semibold text-slate-500">{row.unit}</span>
-                                  ) : null}
-                                </td>
-                                <td className="px-2 py-1.5 align-middle tabular-nums text-[13px] font-semibold text-slate-800">
-                                  {row.previousQuantity}
-                                </td>
-                                <td className="px-2 py-1.5 align-middle">
-                                  <input
-                                    type="number"
-                                    inputMode="decimal"
-                                    step="0.01"
-                                    style={countInputStyle}
-                                    value={row.raw}
-                                    onChange={(e) =>
-                                      setActualById((p) => ({ ...p, [row.id]: e.target.value }))
-                                    }
-                                    className="rounded-md border border-slate-300 px-1.5 text-left text-[13px] font-bold tabular-nums outline-none focus:border-luxury-gold focus:ring-1 focus:ring-luxury-gold/25"
-                                    placeholder={t("ops.inventory.count.inputPlaceholder")}
-                                    id={`actual-${row.id}`}
-                                  />
-                                </td>
-                                <td className="px-2 py-1.5 align-middle">
-                                  {row.diff === null ? (
-                                    <span className="text-slate-400">—</span>
-                                  ) : (
-                                    <span className="text-[13px] font-bold tabular-nums" style={dm?.diffStyle}>
-                                      {row.diff > 0 ? "+" : ""}
-                                      {row.diff}
-                                    </span>
-                                  )}
-                                </td>
-                                <td className="px-2 py-1.5 align-middle">
-                                  {dm ? (
-                                    <span
-                                      className={`inline-flex rounded-full px-2 py-0.5 text-[10px] ${dm.badgeClass}`}
-                                      style={dm.badgeStyle}
-                                    >
-                                      {dm.label}
-                                    </span>
-                                  ) : (
-                                    "—"
-                                  )}
-                                </td>
-                                <td className="min-w-[5.5rem] px-2 py-1.5 align-middle">
-                                  <input
-                                    type="text"
-                                    value={notesById[row.id] ?? ""}
-                                    onChange={(e) =>
-                                      setNotesById((p) => ({ ...p, [row.id]: e.target.value }))
-                                    }
-                                    className="h-8 max-w-[9rem] rounded-md border border-slate-200 px-1.5 text-[11px] font-semibold outline-none focus:border-luxury-gold"
-                                    placeholder={t("ops.inventory.count.notePlaceholder")}
-                                  />
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-
-                  <div className="space-y-3 md:hidden">
-                    {monthlyRows.map((row) => {
-                      const dm = row.diff === null ? null : countDiffMeta(row.diff, t);
-                      return (
-                        <div key={row.id} className="app-panel-muted space-y-2 p-3 shadow-none">
-                          <p className="font-black text-slate-950">{row.name}</p>
-                          <p className="text-[11px] font-semibold text-slate-500">
-                            {t("ops.inventory.count.mobilePrevOnly", {
-                              previous: row.previousQuantity,
-                              unit: row.unit ?? "",
-                            })}
-                          </p>
-                          <label className="block text-[11px] font-bold text-slate-600">
-                            {t("ops.inventory.count.mobileNewQuantity")}
-                          </label>
-                          <input
-                            type="number"
-                            inputMode="decimal"
-                            step="0.01"
-                            style={{ height: 36, width: 100, fontSize: 15 }}
-                            value={row.raw}
-                            onChange={(e) =>
-                              setActualById((p) => ({ ...p, [row.id]: e.target.value }))
-                            }
-                            className="rounded-lg border border-slate-300 px-2 text-left font-bold tabular-nums outline-none focus:border-luxury-gold"
-                          />
-                          <div className="flex flex-wrap items-center gap-2">
-                            {dm ? (
-                              <>
-                                <span className="font-bold tabular-nums" style={dm.diffStyle}>
-                                  {t("ops.inventory.count.mobileDiffPrefix", { diff: `${row.diff! > 0 ? "+" : ""}${row.diff}` })}
-                                </span>
-                                <span
-                                  className={`rounded-full px-2 py-0.5 text-xs ${dm.badgeClass}`}
-                                  style={dm.badgeStyle}
-                                >
-                                  {dm.label}
-                                </span>
-                              </>
-                            ) : null}
-                          </div>
-                          <input
-                            type="text"
-                            value={notesById[row.id] ?? ""}
-                            onChange={(e) =>
-                              setNotesById((p) => ({ ...p, [row.id]: e.target.value }))
-                            }
-                            className={inputClass}
-                            placeholder={t("ops.inventory.count.mobileNotePlaceholder")}
-                          />
-                        </div>
-                      );
-                    })}
-                  </div>
-                  {countMeta && countMeta.total > countMeta.pageSize ? (
-                    <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50/80 px-4 py-3">
-                      <p className="text-xs font-bold text-slate-600">
-                        {t("ops.inventory.pagination.summary", {
-                          total: countMeta.total,
-                          page: countMeta.page,
-                          totalPages: Math.max(1, Math.ceil(countMeta.total / countMeta.pageSize)),
-                        })}
-                      </p>
-                      <div className="flex gap-2">
-                        <button
-                          type="button"
-                          disabled={countPage <= 1}
-                          onClick={() => setCountPage((p) => Math.max(1, p - 1))}
-                          className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-black text-slate-800 disabled:opacity-40"
-                        >
-                          {t("ops.inventory.pagination.previous")}
-                        </button>
-                        <button
-                          type="button"
-                          disabled={countPage >= Math.ceil(countMeta.total / countMeta.pageSize)}
-                          onClick={() => setCountPage((p) => p + 1)}
-                          className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-black text-slate-800 disabled:opacity-40"
-                        >
-                          {t("ops.inventory.pagination.next")}
-                        </button>
-                      </div>
-                    </div>
-                  ) : null}
-                </>
-              )}
-            </div>
+            <InventoryCountDashboard
+              shelfSummaries={shelfSummaries}
+              shortageCount={stats?.shortageCount ?? 0}
+              countLocationName={countLocationName}
+              setCountLocationName={setCountLocationName}
+              monthlyRows={monthlyRows}
+              actualById={actualById}
+              setActualById={setActualById}
+              countDate={countDate}
+              setCountDate={setCountDate}
+              countQ={countQ}
+              setCountQ={setCountQ}
+              saveMonthly={saveMonthly}
+              busy={busy}
+              countMeta={countMeta}
+              countPage={countPage}
+              setCountPage={setCountPage}
+              inventoryLocations={inventoryLocations.map((l) => ({
+                id: l.id,
+                name: l.name,
+              }))}
+              onAddProduct={(shelfName) => {
+                setCountLocationName(shelfName);
+                setNewCountProduct((p) => ({
+                  ...p,
+                  locationId: resolveLocationIdForShelf(shelfName) || p.locationId,
+                }));
+                setAddInventoryOpen(true);
+              }}
+              hasLocations={inventoryLocations.length > 0}
+              refreshKey={countRefreshKey}
+            />
           ) : null}
 
           {tab === "history" ? (
@@ -2598,6 +2091,90 @@ export default function InventoryPage() {
           ) : null}
         </div>
       </div>
+
+      {addInventoryOpen ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="add-inv-title"
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget) setAddInventoryOpen(false);
+          }}
+        >
+          <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-5 shadow-xl" dir="rtl">
+            <h3 id="add-inv-title" className="text-lg font-black text-slate-900">
+              {t("ops.inventory.count.modalTitle")}
+            </h3>
+            <div className="mt-4 grid gap-3">
+              <label>
+                <span className={labelClass}>{t("ops.inventory.count.fieldItemName")}</span>
+                <input
+                  value={newCountProduct.name}
+                  onChange={(e) => setNewCountProduct((p) => ({ ...p, name: e.target.value }))}
+                  className={inputClass}
+                  placeholder={t("ops.inventory.count.fieldItemNamePlaceholder")}
+                />
+              </label>
+              <label>
+                <span className={labelClass}>{t("ops.inventory.count.fieldLocationRequired")}</span>
+                <select
+                  value={newCountProduct.locationId}
+                  onChange={(e) => setNewCountProduct((p) => ({ ...p, locationId: e.target.value }))}
+                  className={inputClass}
+                >
+                  <option value="">{t("ops.inventory.count.fieldChooseLocation")}</option>
+                  {inventoryLocations.map((loc) => (
+                    <option key={loc.id} value={loc.id}>
+                      {loc.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span className={labelClass}>{t("ops.inventory.count.fieldCategory")}</span>
+                <select
+                  value={newCountProduct.category}
+                  onChange={(e) => setNewCountProduct((p) => ({ ...p, category: e.target.value }))}
+                  className={inputClass}
+                >
+                  {INVENTORY_FILTER_CATEGORIES.map((c) => (
+                    <option key={c} value={c}>
+                      {translateInventoryCategory(t, c)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span className={labelClass}>{t("ops.inventory.count.fieldUnit")}</span>
+                <input
+                  value={newCountProduct.unit}
+                  onChange={(e) => setNewCountProduct((p) => ({ ...p, unit: e.target.value }))}
+                  className={inputClass}
+                  placeholder={t("ops.inventory.count.fieldUnitPlaceholder")}
+                />
+              </label>
+            </div>
+            <div className="mt-5 flex flex-wrap justify-end gap-2">
+              <button
+                type="button"
+                className="rounded-xl px-4 py-2.5 text-sm font-bold text-slate-600 hover:bg-slate-100"
+                onClick={() => setAddInventoryOpen(false)}
+              >
+                {t("ops.inventory.count.cancel")}
+              </button>
+              <button
+                type="button"
+                disabled={busy}
+                className="rounded-xl bg-luxury-gold px-5 py-2.5 text-sm font-black text-luxury-charcoal hover:bg-luxury-gold-hover disabled:opacity-50"
+                onClick={() => void createCountProduct()}
+              >
+                {t("ops.inventory.count.saveBtn")}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

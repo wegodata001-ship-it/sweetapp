@@ -13,10 +13,14 @@ import {
   insertFinanceDocument,
   updateFinanceDocument,
 } from "@/lib/finance/db";
+import { normalizeExpenseType } from "@/lib/finance/expense-types";
 import {
   emptyIncomeExpensePayload,
   emptyZReportPayload,
   incomeExpenseTotalToPay,
+  isWorkerExpensePayload,
+  normalizeWorkerExpensePayload,
+  workerPayAmountNum,
   newLineId,
   PAYMENT_METHOD_LABELS,
   PAYMENT_INSTRUMENT_OPTIONS,
@@ -28,6 +32,7 @@ import {
 } from "@/lib/finance/document-payload";
 import { IncomeExpenseFields } from "@/app/finance/register/income-expense-fields";
 import { useI18n } from "@/components/i18n-provider";
+import { REGISTER_LABEL_KEYS as LK } from "@/lib/i18n/register-label-keys";
 import { formatShekel, parseNum } from "@/lib/format-shekel";
 
 type TabId = "income" | "zreport" | "expenses";
@@ -53,7 +58,7 @@ function freshIncomeExpensePayload(kind: "income" | "expense"): IncomeExpensePay
 }
 
 function FinanceRegisterPageInner() {
-  const { t, bcp47 } = useI18n();
+  const { t, bcp47, locale } = useI18n();
   void bcp47;
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -63,11 +68,26 @@ function FinanceRegisterPageInner() {
   const tabParam = searchParams.get("tab");
   const scanParam = searchParams.get("scan");
 
-  const tabs: { id: TabId; label: string }[] = [
-    { id: "income", label: t("register.tabs.event") },
-    { id: "zreport", label: t("register.tabs.zreport") },
-    { id: "expenses", label: t("register.tabs.expenses") },
-  ];
+  const tabs = useMemo(
+    () =>
+      [
+        { id: "income" as const, label: t(LK.tabEvent) },
+        { id: "zreport" as const, label: t(LK.tabZreport) },
+        { id: "expenses" as const, label: t(LK.tabExpenses) },
+      ],
+    [t, locale],
+  );
+
+  useEffect(() => {
+    if (process.env.NODE_ENV !== "development") return;
+    console.log("[register labels]", locale, {
+      title: t(LK.title),
+      tabEvent: t(LK.tabEvent),
+      clientGeneral: t(LK.clientGeneral),
+      clientEvent: t(LK.clientEvent),
+      expenseHeading: t(LK.expenseHeading),
+    });
+  }, [locale, t]);
 
   const [activeTab, setActiveTab] = useState<TabId>("income");
   const [editingDocId, setEditingDocId] = useState<string | null>(null);
@@ -175,7 +195,12 @@ function FinanceRegisterPageInner() {
     return {
       ...p,
       kind: p.kind,
+      ...(p.kind === "expense" ? { expenseType: normalizeExpenseType(p.expenseType) } : {}),
       supplierId: p.supplierId ?? null,
+      employeeId: p.employeeId ?? null,
+      employeePayType: p.employeePayType ?? "salary",
+      employeePayAmount: p.employeePayAmount ?? p.lines[0]?.price ?? "",
+      employeePayNotes: p.employeePayNotes ?? p.lines[0]?.lineNote ?? "",
       paymentPaidAmount: p.paymentPaidAmount ?? "",
       paymentInstrument: p.paymentInstrument ?? PAYMENT_INSTRUMENT_OPTIONS[0],
       paymentNotes: p.paymentNotes ?? "",
@@ -193,6 +218,7 @@ function FinanceRegisterPageInner() {
       lines: p.lines.map((l) => ({
         ...l,
         supplierProductId: l.supplierProductId ?? null,
+        lineNote: l.lineNote ?? "",
         vatMode: l.vatMode === "before_vat" || l.vatMode === "exempt" ? l.vatMode : "includes_vat",
       })),
     };
@@ -386,7 +412,8 @@ function FinanceRegisterPageInner() {
     }, 80);
   };
 
-  const resetFormForNewDocument = (tab: TabId = "income") => {
+  const resetFormForNewDocument = (tab: TabId = "income", opts?: { keepRoute?: boolean }) => {
+    const scrollY = typeof window !== "undefined" ? window.scrollY : 0;
     setEditingDocId(null);
     setEditingKind(null);
     setPaymentDoc(null);
@@ -398,7 +425,17 @@ function FinanceRegisterPageInner() {
     setIncomeForm(freshIncomeExpensePayload("income"));
     setExpenseForm(freshIncomeExpensePayload("expense"));
     setActiveTab(tab);
-    router.replace("/finance/register");
+    if (!opts?.keepRoute) {
+      router.replace("/finance/register");
+    }
+    try {
+      localStorage.removeItem("wego-register-expense-draft");
+    } catch {
+      /* ignore */
+    }
+    if (typeof window !== "undefined") {
+      requestAnimationFrame(() => window.scrollTo(0, scrollY));
+    }
     if (tab === "income") focusCounterparty("income");
     if (tab === "expenses") focusCounterparty("expense");
   };
@@ -664,21 +701,35 @@ function FinanceRegisterPageInner() {
     setPublishing(true);
     setArchiveFeedback(null);
     try {
-      const paymentError = validatePaymentMethodsTotal(expenseForm);
+      const prepared = normalizeWorkerExpensePayload({
+        ...expenseForm,
+        kind: "expense",
+      });
+      if (isWorkerExpensePayload(prepared)) {
+        if (!prepared.employeeId?.trim()) {
+          showErrorModal(t("register.employeePay.validationEmployee"), "expense");
+          return;
+        }
+        if (workerPayAmountNum(prepared) < 1e-6) {
+          showErrorModal(t("register.employeePay.validationAmount"), "expense");
+          return;
+        }
+      }
+
+      const paymentError = validatePaymentMethodsTotal(prepared);
       if (paymentError) {
         showErrorModal(paymentError, "expense");
         return;
       }
 
       const payload: IncomeExpensePayload = {
-        ...expenseForm,
-        kind: "expense",
+        ...prepared,
         includeDeposit: false,
         depositAmount: "",
         depositNote: "",
-        paymentMethods: expenseForm.payments,
+        paymentMethods: prepared.payments,
       };
-      const title = `${expenseForm.documentType}${expenseForm.counterpartyName ? ` — ${expenseForm.counterpartyName}` : ""}`;
+      const title = `${payload.documentType}${payload.counterpartyName ? ` — ${payload.counterpartyName}` : ""}`;
 
       if (editingDocId) {
         if (editingKind !== "expense") {
@@ -688,7 +739,7 @@ function FinanceRegisterPageInner() {
         const res = await updateFinanceDocument(editingDocId, {
           title,
           category: "הוצאה",
-          doc_date: expenseForm.docDate || null,
+          doc_date: payload.docDate || null,
           payload,
         });
         if (!res.ok) {
@@ -717,7 +768,7 @@ function FinanceRegisterPageInner() {
       const res = await insertFinanceDocument({
         title,
         category: "הוצאה",
-        docDate: expenseForm.docDate || null,
+        docDate: payload.docDate || null,
         payload,
       });
       if (!res.ok || !res.id) {
@@ -739,13 +790,39 @@ function FinanceRegisterPageInner() {
         viewUrl: pdf.pdfUrl,
         nextTab: "expenses",
       });
-      resetFormForNewDocument("expenses");
+      resetFormForNewDocument("expenses", { keepRoute: true });
     } catch (e) {
       showErrorModal(e instanceof Error ? e.message : t("register.errors.saveFailed"), "expense");
     } finally {
       setPublishing(false);
     }
   };
+
+  useEffect(() => {
+    if (activeTab !== "expenses" || editingDocId) return;
+    const tmr = window.setTimeout(() => {
+      try {
+        localStorage.setItem("wego-register-expense-draft", JSON.stringify(expenseForm));
+      } catch {
+        /* ignore */
+      }
+    }, 400);
+    return () => window.clearTimeout(tmr);
+  }, [expenseForm, activeTab, editingDocId]);
+
+  useEffect(() => {
+    if (editId) return;
+    try {
+      const raw = localStorage.getItem("wego-register-expense-draft");
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as IncomeExpensePayload;
+      if (parsed?.kind === "expense") {
+        setExpenseForm(fixIncomeExpense(parsed));
+      }
+    } catch {
+      /* ignore */
+    }
+  }, [editId, fixIncomeExpense]);
 
   const submitCustomerOnlyPayment = async () => {
     if (!paymentCustomer) {
@@ -921,10 +998,10 @@ function FinanceRegisterPageInner() {
           <div className="min-w-0">
             <p className="flex items-center gap-2 text-[13px] font-bold tracking-[0.1em] text-cyan-700 opacity-90">
               <FileSpreadsheet className="h-3.5 w-3.5 shrink-0" aria-hidden />
-              {t("register.title")}
+              {t(LK.title)}
             </p>
             <h1 className="mt-2 text-[38px] font-black leading-tight tracking-tight text-slate-950">
-              {t("register.heading")}
+              {t(LK.heading)}
             </h1>
             <p className="mt-1.5 max-w-2xl text-[15px] leading-snug text-slate-600 opacity-75">
               {t("register.intro")}
@@ -1191,7 +1268,9 @@ function FinanceRegisterPageInner() {
                 key={tab.id}
                 type="button"
                 onClick={() => setActiveTab(tab.id)}
-                className={`h-[52px] rounded-2xl border px-[22px] text-[15px] font-bold transition ${
+                className={`finance-register-tab h-[52px] rounded-2xl border px-[22px] text-[15px] font-bold transition ${
+                  locale === "ar" ? "text-[13px] leading-snug px-3 sm:px-4" : ""
+                } ${
                   isActive
                     ? "border-luxury-gold bg-luxury-gold text-luxury-charcoal shadow-sm"
                     : "border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100"
@@ -1207,8 +1286,8 @@ function FinanceRegisterPageInner() {
       {activeTab === "income" && (
         <>
           <IncomeExpenseFields
-            heading={t("register.tabs.event")}
-            intro={t("register.income.intro")}
+            heading={t(LK.tabEvent)}
+            intro={t(LK.incomeIntro)}
             value={incomeForm}
             onChange={(next) => setIncomeForm(next.kind === "income" ? next : { ...next, kind: "income" })}
             disabled={publishing}
@@ -1438,14 +1517,15 @@ function FinanceRegisterPageInner() {
             </div>
           ) : null}
           <IncomeExpenseFields
-            heading={t("register.tabs.expenses")}
+            heading={t(LK.expenseHeading)}
             headingClass="text-slate-950"
             iconClass="text-rose-600"
-            intro={t("register.expense.intro")}
+            intro={t(LK.expenseIntro)}
             value={expenseForm}
             onChange={(next) => setExpenseForm(next.kind === "expense" ? next : { ...next, kind: "expense" })}
             disabled={publishing}
             counterpartyInputId="expense-counterparty-name"
+            onWorkerPaySubmit={() => void publishExpenseDoc()}
           />
 
           <div className="flex flex-wrap gap-3 px-0">

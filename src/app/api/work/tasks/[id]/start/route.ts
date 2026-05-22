@@ -7,6 +7,8 @@ import { strictUserId } from "@/lib/auth/strict-user-isolation";
 import { assertEmployeeOwnsWorkTask } from "@/lib/work-tasks/access";
 import { logTaskStartDenied } from "@/lib/work-tasks/task-security-log";
 import { serializeWorkEmployeeTask } from "@/lib/work-tasks/serialize-work-task";
+import { assertEmployeeCanStartTask } from "@/lib/work-tasks/employee-work-lock";
+import { activateEmployeeTask } from "@/lib/work-status/active-task";
 
 export const dynamic = "force-dynamic";
 
@@ -50,6 +52,18 @@ export async function POST(_req: NextRequest, ctx: { params: Promise<{ id: strin
     }
 
     if (!canManageAllTasks(session)) {
+      const seq = await assertEmployeeCanStartTask({
+        taskId: task.id,
+        taskGroupId: task.taskGroupId,
+        orderIndex: task.orderIndex,
+        employeeId: task.employeeId,
+        sessionId: task.sessionId,
+        status: task.status,
+      });
+      if (!seq.ok) {
+        return NextResponse.json({ ok: false, error: seq.error, code: "SEQUENCE_LOCKED" }, { status: 400 });
+      }
+
       const other = await prisma.employeeTask.findFirst({
         where: {
           assignedToUserId: strictUserId(session),
@@ -65,13 +79,12 @@ export async function POST(_req: NextRequest, ctx: { params: Promise<{ id: strin
       }
     }
 
-    const updated = await prisma.employeeTask.update({
-      where: { id },
-      data: {
-        status: "IN_PROGRESS",
-        startedAt: new Date(),
-      },
-    });
+    const uid = strictUserId(session);
+    await activateEmployeeTask(uid, id);
+    const updated = await prisma.employeeTask.findUnique({ where: { id } });
+    if (!updated) {
+      return NextResponse.json({ ok: false, error: "משימה לא נמצאה" }, { status: 404 });
+    }
 
     return NextResponse.json({ ok: true, data: serializeWorkEmployeeTask(updated) });
   } catch (e) {

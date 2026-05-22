@@ -3,10 +3,12 @@ import { prisma } from "@/lib/prisma";
 import { requireDb } from "@/lib/api-route";
 import { getSessionFromCookie } from "@/lib/auth/get-session";
 import { logActivity } from "@/lib/activity-log";
+import { canManageOrderCategory } from "@/lib/future-orders/access";
 import {
   computeRemainingAmount,
-  isValidEventType,
+  eventTypeForCategory,
   isValidStatus,
+  resolveOrderCategory,
 } from "@/lib/future-orders/helpers";
 
 export const dynamic = "force-dynamic";
@@ -22,6 +24,9 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
   const block = await requireDb();
   if (block) return block;
   const session = await getSessionFromCookie();
+  if (!session) {
+    return NextResponse.json({ ok: false, error: "לא מחובר" }, { status: 401 });
+  }
   const { id } = await ctx.params;
 
   try {
@@ -30,12 +35,18 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
       return NextResponse.json({ ok: false, error: "לא נמצא" }, { status: 404 });
     }
 
+    const category = resolveOrderCategory(existing);
+    if (!canManageOrderCategory(session, category)) {
+      return NextResponse.json({ ok: false, error: "אין הרשאה" }, { status: 403 });
+    }
+
     const body = (await req.json()) as {
       customerName?: string;
       phone?: string | null;
-      eventType?: string;
       eventDate?: string;
       eventTime?: string | null;
+      address?: string | null;
+      guestCount?: number | null;
       itemsDescription?: string | null;
       totalAmount?: number;
       depositAmount?: number;
@@ -43,7 +54,6 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
       status?: string;
       isCompleted?: boolean;
       notes?: string | null;
-      /** כשמסיימים הזמנה מהממשק */
       complete?: boolean;
     };
 
@@ -60,7 +70,7 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
     if (body.eventDate !== undefined) {
       const parsed = parseDateOnly(body.eventDate);
       if (!parsed) {
-        return NextResponse.json({ ok: false, error: "תאריך אירוע לא תקין" }, { status: 400 });
+        return NextResponse.json({ ok: false, error: "תאריך לא תקין" }, { status: 400 });
       }
       eventDate = parsed;
     }
@@ -91,20 +101,26 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
       }
     }
 
-    if (body.eventType !== undefined && !isValidEventType(body.eventType)) {
-      return NextResponse.json({ ok: false, error: "סוג אירוע לא תקין" }, { status: 400 });
-    }
-
     const remainingAmount = computeRemainingAmount(nextTotal, nextDeposit);
 
     const row = await prisma.futureOrder.update({
       where: { id },
       data: {
+        orderCategory: category,
+        eventType: eventTypeForCategory(category),
         ...(body.customerName !== undefined ? { customerName: body.customerName.trim() } : {}),
         ...(body.phone !== undefined ? { phone: body.phone?.trim() || null } : {}),
-        ...(body.eventType !== undefined ? { eventType: body.eventType } : {}),
         eventDate,
         ...(body.eventTime !== undefined ? { eventTime: body.eventTime?.trim() || null } : {}),
+        ...(body.address !== undefined ? { address: body.address?.trim() || null } : {}),
+        ...(body.guestCount !== undefined
+          ? {
+              guestCount:
+                body.guestCount != null && Number.isFinite(Number(body.guestCount))
+                  ? Math.max(0, Math.floor(Number(body.guestCount)))
+                  : null,
+            }
+          : {}),
         ...(body.itemsDescription !== undefined ? { itemsDescription: body.itemsDescription?.trim() || null } : {}),
         totalAmount: nextTotal,
         depositAmount: nextDeposit,
@@ -117,7 +133,7 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
       },
     });
 
-    if (session) await logActivity(session.sub, "future_order_edit");
+    await logActivity(session.sub, "future_order_edit");
     return NextResponse.json({ ok: true, data: row });
   } catch (e) {
     return NextResponse.json(
@@ -131,14 +147,21 @@ export async function DELETE(_req: NextRequest, ctx: { params: Promise<{ id: str
   const block = await requireDb();
   if (block) return block;
   const session = await getSessionFromCookie();
+  if (!session) {
+    return NextResponse.json({ ok: false, error: "לא מחובר" }, { status: 401 });
+  }
   const { id } = await ctx.params;
   try {
     const existing = await prisma.futureOrder.findUnique({ where: { id } });
     if (!existing) {
       return NextResponse.json({ ok: false, error: "לא נמצא" }, { status: 404 });
     }
+    const category = resolveOrderCategory(existing);
+    if (!canManageOrderCategory(session, category)) {
+      return NextResponse.json({ ok: false, error: "אין הרשאה" }, { status: 403 });
+    }
     await prisma.futureOrder.delete({ where: { id } });
-    if (session) await logActivity(session.sub, "future_order_delete");
+    await logActivity(session.sub, "future_order_delete");
     return NextResponse.json({ ok: true });
   } catch (e) {
     return NextResponse.json(

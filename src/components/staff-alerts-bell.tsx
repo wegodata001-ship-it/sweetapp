@@ -37,7 +37,8 @@ const SECTION_ORDER = ["employees", "tasks", "finance", "inventory", "orders", "
 
 type SectionKey = (typeof SECTION_ORDER)[number];
 
-const POLL_MS = 25_000;
+const POLL_MS = 60_000;
+const REFRESH_DEBOUNCE_MS = 4_000;
 const API_LIST = "/api/me/notifications";
 const API_READ = "/api/me/notifications";
 
@@ -237,13 +238,19 @@ export function StaffAlertsBell() {
     }
   }, [applyPayload]);
 
+  const refreshDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   useEffect(() => {
     void load();
     const timer = setInterval(() => void load(), POLL_MS);
-    const onRefresh = () => void load();
+    const onRefresh = () => {
+      if (refreshDebounceRef.current) clearTimeout(refreshDebounceRef.current);
+      refreshDebounceRef.current = setTimeout(() => void load(), REFRESH_DEBOUNCE_MS);
+    };
     window.addEventListener(NOTIFICATIONS_REFRESH_EVENT, onRefresh);
     return () => {
       clearInterval(timer);
+      if (refreshDebounceRef.current) clearTimeout(refreshDebounceRef.current);
       window.removeEventListener(NOTIFICATIONS_REFRESH_EVENT, onRefresh);
     };
   }, [load]);

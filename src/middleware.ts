@@ -122,8 +122,20 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(new URL("/employee", request.url));
   }
 
+  const isDailyOrdersPath =
+    pathname === "/admin/daily-orders" ||
+    pathname.startsWith("/admin/daily-orders/") ||
+    pathname === "/admin/future-orders" ||
+    pathname.startsWith("/admin/future-orders/");
+
+  const isWeddingOrdersPath =
+    pathname === "/admin/wedding-orders" || pathname.startsWith("/admin/wedding-orders/");
+
   if (isPureEmployeeRole(role)) {
-    if (pathname.startsWith("/admin") || pathname.startsWith("/manager")) {
+    if (
+      (pathname.startsWith("/admin") || pathname.startsWith("/manager")) &&
+      !isDailyOrdersPath
+    ) {
       return NextResponse.redirect(new URL("/employee", request.url));
     }
   }
@@ -177,7 +189,8 @@ export async function middleware(request: NextRequest) {
     if (
       apiPath === "/api/employees" &&
       request.method === "GET" &&
-      apiUrl.searchParams.get("forTasks") === "1" &&
+      (apiUrl.searchParams.get("forTasks") === "1" ||
+        apiUrl.searchParams.get("forWorkOrder") === "1") &&
       (role === "SUPER_ADMIN" || permSet.has("tasks"))
     ) {
       return NextResponse.next();
@@ -222,6 +235,27 @@ export async function middleware(request: NextRequest) {
     if (apiPath === "/api/me/language" && request.method === "PATCH") {
       return NextResponse.next();
     }
+    if (apiPath === "/api/work-status/heartbeat" && request.method === "POST") {
+      if (!canAccessMyTasksPage) {
+        return NextResponse.json({ ok: false, error: t("toasts.noPermission") }, { status: 403 });
+      }
+      return NextResponse.next();
+    }
+    if (apiPath === "/api/work-status/me") {
+      if (!canAccessMyTasksPage) {
+        return NextResponse.json({ ok: false, error: t("toasts.noPermission") }, { status: 403 });
+      }
+      return NextResponse.next();
+    }
+    if (apiPath === "/api/work-status/board") {
+      if (role === "SUPER_ADMIN" || permSet.has("tasks")) {
+        return NextResponse.next();
+      }
+      return NextResponse.json({ ok: false, error: t("toasts.noPermission") }, { status: 403 });
+    }
+    if (apiPath === "/api/future-orders" || apiPath.startsWith("/api/future-orders/")) {
+      return NextResponse.next();
+    }
     const rule = matchRule(apiPath, API_ACCESS_RULES);
     if (rule === null && role !== "SUPER_ADMIN") {
       return NextResponse.json({ ok: false, error: t("toasts.noPermission") }, { status: 403 });
@@ -236,6 +270,13 @@ export async function middleware(request: NextRequest) {
   }
 
   if (pathname === "/employee/tasks" || pathname.startsWith("/employee/tasks/")) {
+    if (!canAccessMyTasksPage) {
+      return NextResponse.redirect(new URL("/", request.url));
+    }
+    return NextResponse.next();
+  }
+
+  if (pathname === "/employee/work-status" || pathname.startsWith("/employee/work-status/")) {
     if (!canAccessMyTasksPage) {
       return NextResponse.redirect(new URL("/", request.url));
     }
@@ -259,6 +300,17 @@ export async function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
+  if (isWeddingOrdersPath) {
+    if (role === "SUPER_ADMIN" || role === "ADMIN") {
+      return NextResponse.next();
+    }
+    return NextResponse.redirect(new URL("/", request.url));
+  }
+
+  if (isDailyOrdersPath) {
+    return NextResponse.next();
+  }
+
   const pageRule = matchRule(pathname, PAGE_ACCESS_RULES);
   if (pageRule === "SUPER_ADMIN_ONLY" && role !== "SUPER_ADMIN") {
     return NextResponse.redirect(new URL("/", request.url));
@@ -271,7 +323,13 @@ export async function middleware(request: NextRequest) {
   ) {
     return NextResponse.next();
   }
-  if (pageRule && pageRule !== "SUPER_ADMIN_ONLY" && role !== "SUPER_ADMIN" && !permSet.has(pageRule)) {
+  if (
+    pageRule &&
+    pageRule !== "SUPER_ADMIN_ONLY" &&
+    pageRule !== "ADMIN_ONLY" &&
+    role !== "SUPER_ADMIN" &&
+    !permSet.has(pageRule)
+  ) {
     return NextResponse.redirect(new URL("/", request.url));
   }
 

@@ -17,8 +17,18 @@ import {
   User,
 } from "lucide-react";
 import { useEffect, useState } from "react";
+import { ExpenseEmployeePayForm } from "@/components/finance/expense-employee-pay-form";
+import { ExpenseSupplierLines } from "@/components/finance/expense-supplier-lines";
+import { ProductPickerCatalogProvider } from "@/components/finance/product-picker-catalog-context";
+import { ProductLinePicker } from "@/components/finance/product-line-picker";
+import { SupplierCatalogPanel } from "@/components/finance/supplier-catalog-panel";
+import { FloatingSelect } from "@/components/ui/floating-select";
+import { getDocumentTypeOptions } from "@/lib/finance/document-type-labels";
+import { documentTypeForEmployeePay } from "@/lib/finance/employee-pay-types";
+import { EXPENSE_TYPE_I18N, EXPENSE_TYPE_VALUES, type ExpenseType } from "@/lib/finance/expense-types";
+import { REGISTER_LABEL_KEYS as LK } from "@/lib/i18n/register-label-keys";
+import type { ProductPickerRow } from "@/lib/finance/product-picker-catalog";
 import {
-  DOCUMENT_TYPE_OPTIONS,
   DEPOSIT_TYPE_LABELS,
   DEPOSIT_TYPE_OPTIONS,
   emptyCheckDetails,
@@ -47,10 +57,6 @@ const inputClass =
 
 const labelClass = "block text-[13px] font-bold text-slate-700";
 
-/** שם פריט בטבלה — מעט נמוך יותר מברירת המחדל */
-const lineItemNameClass =
-  "h-11 min-h-[44px] w-full rounded-[16px] border border-slate-200 px-2 text-right text-sm outline-none focus:border-luxury-gold focus:ring-1 focus:ring-luxury-gold/25";
-
 const lineQtyClass =
   "h-11 min-h-[44px] w-[90px] rounded-[16px] border border-slate-200 px-2 text-right text-sm outline-none focus:border-luxury-gold focus:ring-1 focus:ring-luxury-gold/25";
 
@@ -69,6 +75,8 @@ type Props = {
   onChange: (next: IncomeExpensePayload) => void;
   disabled?: boolean;
   counterpartyInputId?: string;
+  /** Enter בשדה האחרון בתשלום עובד — שמירה */
+  onWorkerPaySubmit?: () => void;
 };
 
 export function IncomeExpenseFields({
@@ -80,17 +88,31 @@ export function IncomeExpenseFields({
   onChange,
   disabled = false,
   counterpartyInputId,
+  onWorkerPaySubmit,
 }: Props) {
   const { t, bcp47 } = useI18n();
   void bcp47;
-  const showEventFields = value.clientMode === "event";
-  const [productSuggestions, setProductSuggestions] = useState<string[]>([]);
+  const isExpense = value.kind === "expense";
+  const showEventFields = !isExpense && value.clientMode === "event";
+  const activeExpenseType = value.expenseType ?? "SUPPLIER_PAYMENTS";
+  const isSupplierExpense = isExpense && activeExpenseType === "SUPPLIER_PAYMENTS";
+  const isWorkerExpense = isExpense && activeExpenseType === "WORKER_PAYMENTS";
+  const isPartyOnlyExpense =
+    isExpense &&
+    (activeExpenseType === "DAILY_PAYMENTS" ||
+      activeExpenseType === "EXTERNAL_PAYMENTS" ||
+      activeExpenseType === "INVESTMENTS");
+  const [focusLineId, setFocusLineId] = useState<string | null>(null);
   const [customerSuggestions, setCustomerSuggestions] = useState<string[]>([]);
   const [procurementSuppliers, setProcurementSuppliers] = useState<{ id: string; name: string }[]>([]);
-  const [procurementCatalog, setProcurementCatalog] = useState<
-    { id: string; productName: string; regularPrice: number }[]
-  >([]);
-  const isExpense = value.kind === "expense";
+  const [employees, setEmployees] = useState<{ id: string; name: string }[]>([]);
+  const documentTypeOptions = getDocumentTypeOptions(t);
+  const supplierOptions = [
+    { value: "", label: t("register.procurement.noSupplier") },
+    ...procurementSuppliers.map((s) => ({ value: s.id, label: s.name })),
+  ];
+  const selectedSupplier = procurementSuppliers.find((s) => s.id === value.supplierId);
+  const catalogTargetLineId = focusLineId ?? value.lines[0]?.id ?? null;
 
   const lineTotals = value.lines.map((row) => lineGrossTotal(row.quantity, row.price, row.vatMode));
   const netLineTotals = value.lines.map((row) => lineNetTotal(row.quantity, row.price, row.vatMode));
@@ -103,21 +125,68 @@ export function IncomeExpenseFields({
 
   const setPatch = (patch: Partial<IncomeExpensePayload>) => onChange({ ...value, ...patch });
 
+  const setExpenseType = (type: ExpenseType) => {
+    const patch: Partial<IncomeExpensePayload> = { expenseType: type };
+    if (type !== "SUPPLIER_PAYMENTS") patch.supplierId = null;
+    if (type !== "WORKER_PAYMENTS") {
+      patch.employeeId = null;
+    } else if (type === "WORKER_PAYMENTS") {
+      patch.supplierId = null;
+      patch.employeePayType = value.employeePayType ?? "salary";
+      patch.documentType = documentTypeForEmployeePay(patch.employeePayType ?? "salary");
+      patch.employeePayAmount = value.employeePayAmount ?? "";
+      patch.employeePayNotes = value.employeePayNotes ?? "";
+    }
+    if (type === "DAILY_PAYMENTS" || type === "EXTERNAL_PAYMENTS" || type === "INVESTMENTS") {
+      patch.supplierId = null;
+      patch.employeeId = null;
+    }
+    onChange({ ...value, ...patch });
+  };
+
   const addLine = () => {
+    const newId = `line-${Math.random().toString(36).slice(2, 10)}`;
     onChange({
       ...value,
       lines: [
         ...value.lines,
         {
-          id: `line-${Math.random().toString(36).slice(2, 10)}`,
+          id: newId,
           itemName: "",
           quantity: "1",
           price: "",
           vatMode: "includes_vat" as VatMode,
           supplierProductId: null,
+          lineNote: "",
         },
       ],
     });
+    setFocusLineId(newId);
+  };
+
+  const applyProductPick = (lineId: string, picked: ProductPickerRow) => {
+    const regular = picked.lastPrice;
+    const patch: Partial<(typeof value.lines)[number]> = {
+      itemName: picked.name,
+      supplierProductId: picked.supplierProductId,
+      vatMode: picked.vatMode,
+    };
+    if (regular > 0) {
+      patch.price = String(regular);
+      if (picked.supplierProductId) {
+        patch.priceFlag = { regularPrice: regular, samples: 0, flag: "match" };
+      } else {
+        patch.priceFlag = null;
+      }
+    }
+    updateLine(lineId, patch);
+
+    if (isExpense && picked.supplierId && !value.supplierId && picked.supplierName) {
+      setPatch({
+        supplierId: picked.supplierId,
+        counterpartyName: picked.supplierName,
+      });
+    }
   };
 
   const removeLine = (id: string) => {
@@ -209,23 +278,6 @@ export function IncomeExpenseFields({
     onChange({ ...value, payments: value.payments.filter((row) => row.id !== id) });
   };
 
-  const fetchSuggestions = async (query: string) => {
-    const q = query.trim();
-    if (q.length < 1) {
-      setProductSuggestions([]);
-      return;
-    }
-    try {
-      const res = await fetch(`/api/product-history?q=${encodeURIComponent(q)}`, {
-        credentials: "same-origin",
-      });
-      const j = (await res.json()) as { ok?: boolean; data?: string[] };
-      setProductSuggestions(j.ok ? j.data ?? [] : []);
-    } catch {
-      setProductSuggestions([]);
-    }
-  };
-
   const fetchCustomerSuggestions = async (query: string) => {
     const q = query.trim();
     if (q.length < 1) {
@@ -257,30 +309,17 @@ export function IncomeExpenseFields({
   }, [isExpense]);
 
   useEffect(() => {
-    const sid = value.supplierId;
-    if (!isExpense || !sid) {
-      setProcurementCatalog([]);
-      return;
-    }
+    if (!isWorkerExpense) return;
     void (async () => {
       try {
-        const res = await fetch(`/api/procurement/suppliers/${encodeURIComponent(sid)}/products`, {
-          credentials: "same-origin",
-        });
-        const j = (await res.json()) as {
-          ok?: boolean;
-          data?: { id: string; productName: string; regularPrice: number }[];
-        };
-        if (j.ok && j.data) {
-          setProcurementCatalog(
-            j.data.map((r) => ({ id: r.id, productName: r.productName, regularPrice: r.regularPrice })),
-          );
-        }
+        const res = await fetch("/api/employees", { credentials: "same-origin" });
+        const j = (await res.json()) as { ok?: boolean; data?: { id: string; name: string }[] };
+        if (j.ok && j.data) setEmployees(j.data.map((r) => ({ id: r.id, name: r.name })));
       } catch {
-        setProcurementCatalog([]);
+        setEmployees([]);
       }
     })();
-  }, [isExpense, value.supplierId]);
+  }, [isWorkerExpense]);
 
   useEffect(() => {
     if (value.payments.length > 0) return;
@@ -317,6 +356,7 @@ export function IncomeExpenseFields({
   const remainingShow = Math.max(0, totalToPay - paidInput);
 
   return (
+    <ProductPickerCatalogProvider supplierId={isSupplierExpense ? value.supplierId : null}>
     <section className="app-panel mb-[14px] p-[18px]">
       <fieldset disabled={disabled} className={disabled ? "pointer-events-none opacity-60" : ""}>
       <div className="flex flex-wrap items-center gap-2">
@@ -325,58 +365,107 @@ export function IncomeExpenseFields({
       </div>
       <p className="mt-1 text-[13px] leading-snug text-slate-600 opacity-70">{intro}</p>
 
-      <div className="mt-3">
-        <p className="text-[13px] font-black text-slate-800">{t("register.fields.clientType")}</p>
-        <div className="mt-2 grid gap-3 sm:grid-cols-2">
-          <button
-            type="button"
-            onClick={() => setPatch({ clientMode: "general" })}
-            className={`h-11 rounded-[16px] border px-[18px] text-[15px] font-bold transition ${
-              value.clientMode === "general"
-                ? "border-luxury-gold bg-luxury-gold text-luxury-charcoal shadow-sm"
-                : "border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100"
-            }`}
-          >
-            {t("register.fields.clientGeneral")}
-          </button>
-          <button
-            type="button"
-            onClick={() => setPatch({ clientMode: "event" })}
-            className={`h-11 rounded-[16px] border px-[18px] text-[15px] font-bold transition ${
-              value.clientMode === "event"
-                ? "border-amber-700 bg-amber-700 text-white shadow-sm"
-                : "border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100"
-            }`}
-          >
-            {t("register.fields.clientEvent")}
-          </button>
+      {isExpense ? (
+        <div className="mt-3" role="group" aria-labelledby="expense-type-label">
+          <p id="expense-type-label" className="text-[13px] font-black text-slate-800">
+            {t("register.expenseTypes.label")}
+          </p>
+          <div className="mt-2 flex flex-wrap gap-2" role="radiogroup" aria-labelledby="expense-type-label">
+            {EXPENSE_TYPE_VALUES.map((type) => {
+              const active = activeExpenseType === type;
+              return (
+                <button
+                  key={type}
+                  type="button"
+                  role="radio"
+                  aria-checked={active}
+                  onClick={() => setExpenseType(type as ExpenseType)}
+                  className={`min-h-[44px] shrink-0 rounded-[16px] border px-3 py-2 text-[12px] font-bold leading-snug transition sm:px-4 sm:text-[13px] ${
+                    active
+                      ? "border-cyan-800 bg-cyan-800 text-white shadow-md ring-2 ring-cyan-800/25"
+                      : "border-slate-200 bg-white text-slate-800 hover:border-cyan-300 hover:bg-cyan-50/60"
+                  }`}
+                >
+                  {t(EXPENSE_TYPE_I18N[type])}
+                </button>
+              );
+            })}
+          </div>
         </div>
-      </div>
+      ) : (
+        <div className="mt-3">
+          <p className="text-[13px] font-black text-slate-800">{t(LK.clientType)}</p>
+          <div className="mt-2 grid gap-3 sm:grid-cols-2">
+            <button
+              type="button"
+              onClick={() => setPatch({ clientMode: "general" })}
+              className={`h-11 rounded-[16px] border px-[18px] text-[14px] font-bold transition sm:text-[15px] ${
+                value.clientMode === "general"
+                  ? "border-luxury-gold bg-luxury-gold text-luxury-charcoal shadow-sm"
+                  : "border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100"
+              }`}
+            >
+              {t(LK.clientGeneral)}
+            </button>
+            <button
+              type="button"
+              onClick={() => setPatch({ clientMode: "event" })}
+              className={`h-11 rounded-[16px] border px-[18px] text-[14px] font-bold transition sm:text-[15px] ${
+                value.clientMode === "event"
+                  ? "border-amber-700 bg-amber-700 text-white shadow-sm"
+                  : "border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100"
+              }`}
+            >
+              {t(LK.clientEvent)}
+            </button>
+          </div>
+        </div>
+      )}
 
+      {!isWorkerExpense ? (
       <div className="mt-3 grid gap-3 md:grid-cols-2">
-        <label className={labelClass}>
-          <span className="flex items-center gap-2">
-            <User className="h-4 w-4 text-slate-500" aria-hidden />
-            {isExpense ? t("register.fields.supplierOrParty") : t("register.fields.customerName")}
-          </span>
-          <input
-            id={counterpartyInputId}
-            type="text"
-            value={value.counterpartyName}
-            list="customer-suggestions"
-            onChange={(e) => {
-              setPatch({ counterpartyName: e.target.value });
-              void fetchCustomerSuggestions(e.target.value);
-            }}
-            className={inputClass}
-            placeholder={isExpense ? t("register.fields.supplierExample") : t("register.fields.customerExample")}
-          />
-          <datalist id="customer-suggestions">
-            {customerSuggestions.map((name) => (
-              <option key={name} value={name} />
-            ))}
-          </datalist>
-        </label>
+        {isPartyOnlyExpense ? (
+          <label className={labelClass}>
+            <span className="flex items-center gap-2">
+              <User className="h-4 w-4 text-slate-500" aria-hidden />
+              {t("register.fields.partyName")}
+            </span>
+            <input
+              id={counterpartyInputId}
+              type="text"
+              value={value.counterpartyName}
+              onChange={(e) => setPatch({ counterpartyName: e.target.value })}
+              className={inputClass}
+              placeholder={t("register.fields.partyPlaceholder")}
+            />
+          </label>
+        ) : (
+          <label className={labelClass}>
+            <span className="flex items-center gap-2">
+              <User className="h-4 w-4 text-slate-500" aria-hidden />
+              {isExpense ? t("register.fields.supplierOrParty") : t("register.fields.customerName")}
+            </span>
+            <input
+              id={counterpartyInputId}
+              type="text"
+              value={value.counterpartyName}
+              list={isExpense ? undefined : "customer-suggestions"}
+              onChange={(e) => {
+                setPatch({ counterpartyName: e.target.value });
+                if (!isExpense) void fetchCustomerSuggestions(e.target.value);
+              }}
+              className={inputClass}
+              placeholder={isExpense ? t("register.fields.supplierExample") : t("register.fields.customerExample")}
+            />
+            {!isExpense ? (
+              <datalist id="customer-suggestions">
+                {customerSuggestions.map((name) => (
+                  <option key={name} value={name} />
+                ))}
+              </datalist>
+            ) : null}
+          </label>
+        )}
         <label className={labelClass}>
           <span className="flex items-center gap-2">
             <Calendar className="h-4 w-4 text-slate-500" aria-hidden />
@@ -385,26 +474,23 @@ export function IncomeExpenseFields({
           <input type="date" value={value.docDate} onChange={(e) => setPatch({ docDate: e.target.value })} className={inputClass} />
         </label>
         <label className={`md:col-span-2 ${labelClass}`}>
-          <span className="flex items-center gap-2">
-            <FileText className="h-4 w-4 text-slate-500" aria-hidden />
-            {t("register.fields.documentType")}
-          </span>
-          <select
-            value={value.documentType || DOCUMENT_TYPE_OPTIONS[0]}
-            onChange={(e) => setPatch({ documentType: e.target.value })}
-            className={inputClass}
-          >
-            {DOCUMENT_TYPE_OPTIONS.map((opt) => (
-              <option key={opt} value={opt}>
-                {opt}
-              </option>
-            ))}
-          </select>
-        </label>
+            <span className="flex items-center gap-2">
+              <FileText className="h-4 w-4 text-slate-500" aria-hidden />
+              {t("register.fields.documentType")}
+            </span>
+            <FloatingSelect
+              value={value.documentType || documentTypeOptions[0]?.value || ""}
+              onChange={(v) => setPatch({ documentType: v })}
+              options={documentTypeOptions}
+              disabled={disabled}
+              className="mt-1"
+            />
+          </label>
       </div>
+      ) : null}
 
-      {isExpense ? (
-        <div className="mt-3 rounded-[18px] border border-slate-200 bg-slate-50/90 p-[18px]">
+      {isSupplierExpense ? (
+        <div className="mt-3 rounded-[18px] border border-slate-200 bg-gradient-to-b from-slate-50/90 to-white p-[18px] shadow-sm">
           <p className="flex items-center gap-2 text-[13px] font-black text-slate-800">
             <Truck className="h-4 w-4 shrink-0 text-slate-600" aria-hidden />
             {t("register.procurement.title")}
@@ -412,11 +498,9 @@ export function IncomeExpenseFields({
           <p className="mt-1 text-[12px] leading-snug text-slate-600">{t("register.procurement.hint")}</p>
           <label className={`mt-3 block ${labelClass}`}>
             {t("register.procurement.supplierSelect")}
-            <select
-              className={inputClass}
+            <FloatingSelect
               value={value.supplierId ?? ""}
-              onChange={(e) => {
-                const id = e.target.value;
+              onChange={(id) => {
                 const hit = procurementSuppliers.find((s) => s.id === id);
                 if (!id) {
                   setPatch({
@@ -428,19 +512,51 @@ export function IncomeExpenseFields({
                 setPatch({
                   supplierId: id,
                   counterpartyName: hit?.name ?? value.counterpartyName,
-                  lines: value.lines.map((l) => ({ ...l, supplierProductId: null, priceFlag: null })),
+                  lines: value.lines.map((l) => ({
+                    ...l,
+                    supplierProductId: null,
+                    priceFlag: null,
+                  })),
                 });
               }}
-            >
-              <option value="">{t("register.procurement.noSupplier")}</option>
-              {procurementSuppliers.map((s) => (
-                <option key={s.id} value={s.id}>
-                  {s.name}
-                </option>
-              ))}
-            </select>
+              options={supplierOptions}
+              searchable
+              disabled={disabled}
+              className="mt-1"
+            />
           </label>
+          {value.supplierId && selectedSupplier ? (
+            <SupplierCatalogPanel
+              supplierId={value.supplierId}
+              supplierName={selectedSupplier.name}
+              targetLineId={catalogTargetLineId}
+              disabled={disabled}
+              onApplyToLine={(lineId, picked) => applyProductPick(lineId, picked)}
+            />
+          ) : null}
         </div>
+      ) : null}
+
+      {isSupplierExpense ? (
+        <ExpenseSupplierLines
+          value={value}
+          onChange={onChange}
+          disabled={disabled}
+          supplierId={value.supplierId ?? null}
+          focusLineId={focusLineId}
+          setFocusLineId={setFocusLineId}
+          onApplyProductPick={applyProductPick}
+        />
+      ) : null}
+
+      {isWorkerExpense ? (
+        <ExpenseEmployeePayForm
+          value={value}
+          onChange={onChange}
+          disabled={disabled}
+          employees={employees}
+          onSubmit={onWorkerPaySubmit}
+        />
       ) : null}
 
       {showEventFields && (
@@ -466,6 +582,7 @@ export function IncomeExpenseFields({
         </div>
       )}
 
+      {!isSupplierExpense && !isWorkerExpense ? (
       <div className="mt-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <p className="text-[15px] font-black text-slate-900">{t("register.lines.title")}</p>
@@ -479,19 +596,16 @@ export function IncomeExpenseFields({
           </button>
         </div>
 
-        <datalist id="product-history-suggestions">
-          {productSuggestions.map((name) => (
-            <option key={name} value={name} />
-          ))}
-        </datalist>
-
-        <datalist id="procurement-catalog-suggestions">
-          {procurementCatalog.map((p) => (
-            <option key={p.id} value={p.productName} />
-          ))}
-        </datalist>
-
-        <div className="mt-3 overflow-x-auto rounded-[18px] border border-slate-200">
+        <div
+          className="mt-3 overflow-x-auto rounded-[18px] border border-slate-200"
+          onKeyDown={(e) => {
+            if (e.key !== "Enter" || e.shiftKey) return;
+            const tag = (e.target as HTMLElement).tagName;
+            if (tag === "TEXTAREA" || tag === "BUTTON") return;
+            e.preventDefault();
+            addLine();
+          }}
+        >
           <table className="min-w-[980px] w-full divide-y divide-slate-200 text-right text-[13px]">
             <thead className="bg-slate-50">
               <tr>
@@ -509,45 +623,22 @@ export function IncomeExpenseFields({
               {value.lines.map((row, index) => (
                 <tr key={row.id} className="h-[68px]">
                   <td className="px-2 py-[10px] align-middle">
-                    <input
-                      type="text"
+                    <ProductLinePicker
                       value={row.itemName}
-                      list={
-                        isExpense && value.supplierId
-                          ? "procurement-catalog-suggestions"
-                          : "product-history-suggestions"
-                      }
-                      onChange={(e) => {
-                        updateLine(row.id, { itemName: e.target.value });
-                        void fetchSuggestions(e.target.value);
-                      }}
-                      onBlur={() => {
-                        if (!isExpense || !value.supplierId) return;
-                        const hit = procurementCatalog.find(
-                          (p) => p.productName.trim() === row.itemName.trim(),
-                        );
-                        if (!hit) {
-                          if (row.supplierProductId) {
-                            updateLine(row.id, { supplierProductId: null, priceFlag: null });
-                          }
-                          return;
-                        }
-                        const regular = hit.regularPrice;
-                        const entered = parseNum(row.price);
-                        const priceStr = entered <= 0 ? String(regular) : row.price;
-                        const finalEnter = parseNum(priceStr);
-                        const ratio = regular > 1e-9 ? (finalEnter - regular) / regular : 0;
-                        const threshold = 0.15;
-                        const flag =
-                          ratio >= threshold ? "higher" : ratio <= -threshold ? "lower" : "match";
-                        updateLine(row.id, {
-                          supplierProductId: hit.id,
-                          price: priceStr,
-                          priceFlag: { regularPrice: regular, samples: 0, flag },
-                        });
-                      }}
-                      className={lineItemNameClass}
+                      supplierId={isExpense ? value.supplierId : null}
+                      disabled={disabled}
+                      autoOpen={focusLineId === row.id}
+                      onAutoOpenDone={() => setFocusLineId(null)}
                       placeholder={t("register.lines.itemPlaceholder", { n: index + 1 })}
+                      onFocusLine={() => setFocusLineId(row.id)}
+                      onChange={(name) => {
+                        setFocusLineId(row.id);
+                        updateLine(row.id, { itemName: name });
+                        if (!name.trim() && row.supplierProductId) {
+                          updateLine(row.id, { supplierProductId: null, priceFlag: null });
+                        }
+                      }}
+                      onSelect={(picked) => applyProductPick(row.id, picked)}
                     />
                   </td>
                   <td className="px-2 py-[10px] align-middle">
@@ -657,27 +748,31 @@ export function IncomeExpenseFields({
             </tbody>
           </table>
         </div>
+      </div>
+      ) : null}
 
-        <div className="mt-3 flex min-h-[70px] flex-wrap items-center justify-between gap-4 rounded-[18px] border border-cyan-200 bg-cyan-50/70 px-[18px] py-3">
-          <span className="flex items-center gap-2 text-[13px] font-bold text-cyan-900">
-            <Calculator className="h-4 w-4 shrink-0" aria-hidden />
-            {t("register.summary.title")}
-          </span>
-          <div className="flex flex-1 flex-wrap items-end justify-end gap-6 sm:gap-10">
-            <div className="text-center sm:text-right">
-              <p className="text-[13px] font-bold text-slate-600 opacity-70">{t("common.total")}</p>
-              <p className="text-[28px] font-black tabular-nums leading-none text-slate-950">{formatShekel(grandTotal)}</p>
-            </div>
-            <div className="text-center sm:text-right">
-              <p className="text-[13px] font-bold text-slate-600 opacity-70">{t("register.lines.vat")}</p>
-              <p className="text-[28px] font-black tabular-nums leading-none text-slate-950">{formatShekel(vatTotal)}</p>
-            </div>
-            <div className="text-center sm:text-right">
-              <p className="text-[13px] font-bold text-slate-600 opacity-70">{t("register.summary.toPay")}</p>
-              <p className="text-[28px] font-black tabular-nums leading-none text-cyan-900">{formatShekel(totalToPay)}</p>
-            </div>
+      {!isWorkerExpense ? (
+      <div className="mt-3 flex min-h-[70px] flex-wrap items-center justify-between gap-4 rounded-[18px] border border-cyan-200 bg-cyan-50/70 px-[18px] py-3">
+        <span className="flex items-center gap-2 text-[13px] font-bold text-cyan-900">
+          <Calculator className="h-4 w-4 shrink-0" aria-hidden />
+          {t("register.summary.title")}
+        </span>
+        <div className="flex flex-1 flex-wrap items-end justify-end gap-6 sm:gap-10">
+          <div className="text-center sm:text-right">
+            <p className="text-[13px] font-bold text-slate-600 opacity-70">{t("common.total")}</p>
+            <p className="text-[28px] font-black tabular-nums leading-none text-slate-950">{formatShekel(grandTotal)}</p>
+          </div>
+          <div className="text-center sm:text-right">
+            <p className="text-[13px] font-bold text-slate-600 opacity-70">{t("register.lines.vat")}</p>
+            <p className="text-[28px] font-black tabular-nums leading-none text-slate-950">{formatShekel(vatTotal)}</p>
+          </div>
+          <div className="text-center sm:text-right">
+            <p className="text-[13px] font-bold text-slate-600 opacity-70">{t("register.summary.toPay")}</p>
+            <p className="text-[28px] font-black tabular-nums leading-none text-cyan-900">{formatShekel(totalToPay)}</p>
           </div>
         </div>
+      </div>
+      ) : null}
 
         {showDepositBox && (
           <details className="mt-3 rounded-[18px] border border-amber-200 bg-amber-50/75 p-[18px] shadow-sm">
@@ -943,8 +1038,8 @@ export function IncomeExpenseFields({
               </div>
             </div>
         </div>
-      </div>
       </fieldset>
     </section>
+    </ProductPickerCatalogProvider>
   );
 }

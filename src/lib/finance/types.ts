@@ -58,6 +58,8 @@ export type CashFlowRow = {
   inflow: number;
   outflow: number;
   is_direct: boolean;
+  /** סוג הוצאה — ממסמך הרשמה (SUPPLIER_PAYMENTS וכו׳) */
+  expense_type?: string | null;
 };
 
 export type FinanceDocumentRow = {

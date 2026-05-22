@@ -4,19 +4,20 @@ import {
   Archive,
   Banknote,
   BookMarked,
-  CalendarClock,
+  Activity,
   CheckSquare,
   ChefHat,
   ClipboardList,
   Clock3,
+  Gem,
   LayoutDashboard,
+  Package,
   PackageCheck,
   ReceiptText,
   TrendingUp,
   Truck,
   UserCircle2,
   Users,
-  RotateCcw,
   Workflow,
   type LucideIcon,
 } from "lucide-react";
@@ -25,13 +26,15 @@ import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
 import { useAuth } from "@/components/auth-provider";
 import { useI18n } from "@/components/i18n-provider";
-import type { PermissionKey } from "@/lib/auth/permissions";
+import type { PagePermission, PermissionKey } from "@/lib/auth/permissions";
 
 export type NavItem = {
   labelKey: string;
   href: string;
-  permission: PermissionKey | "SUPER_ADMIN_ONLY";
+  permission: PermissionKey | PagePermission;
   icon: LucideIcon;
+  /** מוצג לכל משתמש מחובר (לא רק לפי הרשאה) */
+  showForAllAuthenticated?: boolean;
 };
 
 export const financeNav: NavItem[] = [
@@ -81,10 +84,22 @@ export const managementNav: NavItem[] = [
     icon: ClipboardList,
   },
   {
-    labelKey: "nav.futureOrders",
-    href: "/admin/future-orders",
+    labelKey: "nav.workStatus",
+    href: "/admin/work-status",
     permission: "tasks",
-    icon: CalendarClock,
+    icon: Activity,
+  },
+  {
+    labelKey: "nav.dailyOrders",
+    href: "/admin/daily-orders",
+    permission: "tasks",
+    icon: Package,
+  },
+  {
+    labelKey: "nav.weddingOrders",
+    href: "/admin/wedding-orders",
+    permission: "ADMIN_ONLY",
+    icon: Gem,
   },
   {
     labelKey: "nav.staff",
@@ -113,9 +128,8 @@ export const managementNav: NavItem[] = [
  */
 type TaskSubItem = { labelKey: string; href: string; anchorId: string };
 const tasksSubMenu: TaskSubItem[] = [
-  { labelKey: "nav.tasksSub.groups", href: "/admin/workflows#workflow-groups", anchorId: "workflow-groups" },
-  { labelKey: "nav.tasksSub.runs", href: "/admin/workflows#workflow-runs", anchorId: "workflow-runs" },
-  { labelKey: "nav.tasksSub.history", href: "/admin/workflows#workflow-history", anchorId: "workflow-history" },
+  { labelKey: "nav.tasksSub.workOrder", href: "/admin/workflows#ew-hub", anchorId: "ew-hub" },
+  { labelKey: "nav.tasksSub.templates", href: "/admin/workflows#ew-templates", anchorId: "ew-templates" },
 ];
 
 export const adminOnlyNav: NavItem[] = [
@@ -125,12 +139,6 @@ export const adminOnlyNav: NavItem[] = [
     permission: "SUPER_ADMIN_ONLY",
     icon: Users,
   },
-  {
-    labelKey: "nav.systemReset",
-    href: "/admin/system",
-    permission: "SUPER_ADMIN_ONLY",
-    icon: RotateCcw,
-  },
 ];
 
 function canShowNavItem(
@@ -138,6 +146,10 @@ function canShowNavItem(
   role: "SUPER_ADMIN" | "ADMIN" | "EMPLOYEE",
   permissions: Set<string>,
 ): boolean {
+  if (item.showForAllAuthenticated) return true;
+  if (item.permission === "ADMIN_ONLY") {
+    return role === "SUPER_ADMIN" || role === "ADMIN";
+  }
   if (role === "SUPER_ADMIN") return true;
   if (item.permission === "SUPER_ADMIN_ONLY") return false;
   return permissions.has(item.permission);
@@ -169,15 +181,15 @@ function NavLink({
         compact ? "min-h-[52px] w-full justify-start px-4 py-3" : ""
       } ${
         active
-          ? "border-r-[3px] border-[#c9a227] bg-[linear-gradient(90deg,rgba(201,162,39,.12),transparent)] text-white shadow-sm"
+          ? "border-r-[3px] border-[#c9a227] bg-[linear-gradient(90deg,rgba(201,162,39,.18),transparent)] text-white shadow-[0_0_20px_rgba(201,162,39,0.15)]"
           : "text-slate-300 hover:translate-x-[-3px] hover:bg-white/[0.06] hover:text-white"
       }`}
     >
       <span
         className={`flex h-[42px] w-[42px] shrink-0 items-center justify-center rounded-[14px] border transition duration-300 ease-out group-hover/sidebar-item:scale-[1.08] ${
           active
-            ? "border-[#c9a227]/35 bg-[linear-gradient(135deg,#c9a227,#d4bc5c)] text-[#081224] shadow-sm"
-            : "border-white/10 bg-white/[0.04] text-slate-400 group-hover/sidebar-item:border-[#c9a227]/40 group-hover/sidebar-item:text-[#c9a227]"
+            ? "border-[#c9a227]/50 bg-[linear-gradient(135deg,#c9a227,#e8d48a)] text-[#081224] shadow-[0_0_16px_rgba(201,162,39,0.45)]"
+            : "border-white/10 bg-white/[0.04] text-slate-400 group-hover/sidebar-item:border-[#c9a227]/40 group-hover/sidebar-item:text-[#c9a227] group-hover/sidebar-item:shadow-[0_0_10px_rgba(201,162,39,0.12)]"
         }`}
       >
         <Icon className="h-5 w-5" aria-hidden />
@@ -283,7 +295,14 @@ export function AppNavContent({ onNavigate, variant = "sidebar" }: AppNavContent
     // Focused employee portal sidebar — only the 4 items the spec calls for.
     const items: NavItem[] = [
       { labelKey: "nav.employeeHome", href: "/employee", permission: "employee_clock", icon: LayoutDashboard },
-      { labelKey: "nav.myWorkflows", href: "/employee/workflows", permission: "employee_clock", icon: Workflow },
+      { labelKey: "nav.workStatus", href: "/employee/work-status", permission: "employee_clock", icon: Activity },
+      {
+        labelKey: "nav.dailyOrders",
+        href: "/admin/daily-orders",
+        permission: "employee_clock",
+        icon: Package,
+        showForAllAuthenticated: true,
+      },
       { labelKey: "nav.myHours", href: "/employee/hours", permission: "employee_clock", icon: Clock3 },
       { labelKey: "nav.profile", href: "/employee/profile", permission: "employee_clock", icon: UserCircle2 },
     ];
@@ -379,27 +398,27 @@ export function AppNavContent({ onNavigate, variant = "sidebar" }: AppNavContent
               <span className={`min-w-0 truncate ${compact ? "block" : "hidden lg:block"}`}>{t("nav.myTasks")}</span>
             </Link>
             <Link
-              href="/employee/workflows"
-              title={t("nav.myWorkflows")}
+              href="/employee/work-status"
+              title={t("nav.workStatus")}
               onClick={onNavigate}
               className={`group/sidebar-item relative flex min-h-[54px] items-center justify-center gap-3 rounded-2xl px-2 py-2 text-[15px] font-bold transition duration-300 ease-out ${
                 compact ? "w-full justify-start px-4 py-3" : "lg:justify-start lg:px-3"
               } ${
-                pathname === "/employee/workflows" || pathname.startsWith("/employee/workflows/")
+                pathname === "/employee/work-status" || pathname.startsWith("/employee/work-status/")
                   ? "border-r-[3px] border-[#c9a227] bg-[linear-gradient(90deg,rgba(201,162,39,.12),transparent)] text-white shadow-sm"
                   : "text-slate-300 hover:translate-x-[-3px] hover:bg-white/[0.06] hover:text-white"
               }`}
             >
               <span
                 className={`flex h-[42px] w-[42px] shrink-0 items-center justify-center rounded-[14px] border transition duration-300 ease-out group-hover/sidebar-item:scale-[1.08] ${
-                  pathname === "/employee/workflows" || pathname.startsWith("/employee/workflows/")
+                  pathname === "/employee/work-status" || pathname.startsWith("/employee/work-status/")
                     ? "border-[#c9a227]/35 bg-[linear-gradient(135deg,#c9a227,#d4bc5c)] text-[#081224] shadow-sm"
                     : "border-white/10 bg-white/[0.04] text-slate-400 group-hover/sidebar-item:border-[#c9a227]/40 group-hover/sidebar-item:text-[#c9a227]"
                 }`}
               >
-                <Workflow className="h-5 w-5" aria-hidden />
+                <Activity className="h-5 w-5" aria-hidden />
               </span>
-              <span className={`min-w-0 truncate ${compact ? "block" : "hidden lg:block"}`}>{t("nav.myWorkflows")}</span>
+              <span className={`min-w-0 truncate ${compact ? "block" : "hidden lg:block"}`}>{t("nav.workStatus")}</span>
             </Link>
             <Link
               href="/employee/attendance"

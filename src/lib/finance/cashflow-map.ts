@@ -31,5 +31,6 @@ export function prismaCashFlowToRow(entry: PrismaCf): CashFlowRow {
     inflow,
     outflow,
     is_direct: entry.isDirect,
+    expense_type: entry.expenseType ?? null,
   };
 }

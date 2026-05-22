@@ -1,13 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
+  buildItemsFromIncomeExpense,
   combineIncomeNotes,
   incomeExpenseDepositAmount,
   incomeExpenseGrandTotal,
-  lineGrossTotal,
+  isWorkerExpensePayload,
   paymentLinesTotal,
+  workerPayAmountNum,
   type FinanceDocumentPayload,
   type IncomeExpensePayload,
-  type VatMode,
   type ZReportPayload,
 } from "@/lib/finance/document-payload";
 import { prismaDocToFinanceRow } from "@/lib/finance/map-document";
@@ -19,6 +20,12 @@ import {
   saveProductHistoryFromItems,
   syncCheckPaymentsForDocument,
 } from "@/lib/finance/document-side-effects";
+import { documentTypeForEmployeePay, normalizeEmployeePayType } from "@/lib/finance/employee-pay-types";
+import {
+  resolveExpenseDocumentLinks,
+  syncExpenseDocumentLedgerEntry,
+} from "@/lib/finance/expense-ledger-sync";
+import { normalizeExpenseType } from "@/lib/finance/expense-types";
 import { recordSupplierPriceHistoryFromExpense } from "@/lib/procurement/record-expense-prices";
 import { prisma, prismaAny } from "@/lib/prisma";
 import { requireDb } from "@/lib/api-route";
@@ -84,24 +91,6 @@ async function ensureCustomerByName(name: string): Promise<string | null> {
   return c.id;
 }
 
-function buildItemsFromIncomeExpense(payload: IncomeExpensePayload) {
-  return payload.lines
-    .filter((l) => l.itemName.trim() || parseNum(l.price) > 0)
-    .map((l) => {
-      const qty = Math.max(0, parseNum(l.quantity));
-      const price = Math.max(0, parseNum(l.price));
-      const vat = l.vatMode as VatMode;
-      const lineTotal = lineGrossTotal(l.quantity, l.price, vat);
-      return {
-        itemName: l.itemName || "שורה",
-        quantity: qty || 1,
-        unitPrice: price,
-        vatType: l.vatMode,
-        total: lineTotal,
-      };
-    });
-}
-
 export async function POST(req: NextRequest) {
   const block = await requireDb();
   if (block) return block;
@@ -149,6 +138,14 @@ export async function POST(req: NextRequest) {
     }
 
     const ie = meta as IncomeExpensePayload;
+    if (isWorkerExpensePayload(ie)) {
+      if (!ie.employeeId?.trim()) {
+        return NextResponse.json({ ok: false, error: "יש לבחור עובד" }, { status: 400 });
+      }
+      if (workerPayAmountNum(ie) < 1e-6) {
+        return NextResponse.json({ ok: false, error: "יש להזין סכום לתשלום" }, { status: 400 });
+      }
+    }
     const items = buildItemsFromIncomeExpense(ie);
     const productTotal =
       items.reduce((s, r) => s + r.total, 0) || incomeExpenseGrandTotal(ie);
@@ -184,13 +181,20 @@ export async function POST(req: NextRequest) {
     }
 
     const itemsWithProducts = await attachProductsToItems(items);
+    const expenseLinks = ie.kind === "expense" ? resolveExpenseDocumentLinks(ie) : { supplierId: null, employeeId: null };
+    const docType =
+      ie.kind === "expense" && normalizeExpenseType(ie.expenseType) === "WORKER_PAYMENTS"
+        ? documentTypeForEmployeePay(normalizeEmployeePayType(ie.employeePayType))
+        : ie.documentType;
 
     const doc = await prisma.financialDocument.create({
       data: {
         title: body.title.trim(),
         category: body.category,
-        documentType: ie.documentType,
+        documentType: docType,
         customerId,
+        supplierId: expenseLinks.supplierId,
+        employeeId: expenseLinks.employeeId,
         totalAmount: calculatedTotal,
         paidAmount: 0,
         remainingAmount: calculatedTotal,
@@ -245,6 +249,9 @@ export async function POST(req: NextRequest) {
     await syncFinancialDocumentPaymentTotals(doc.id);
     await replaceCashFlowForDocument(doc.id);
     await syncCheckPaymentsForDocument(doc.id);
+    if (body.category === "הוצאה" && ie.kind === "expense") {
+      await syncExpenseDocumentLedgerEntry(doc.id);
+    }
     if (session) await logActivity(session.sub, "document_create");
     return NextResponse.json({ ok: true, id: doc.id });
   } catch (e) {

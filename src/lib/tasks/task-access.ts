@@ -19,6 +19,10 @@ export function canManageAllTasks(session: SessionJwtPayload): boolean {
   return isTaskManager(session);
 }
 
+export function isSuperAdmin(session: SessionJwtPayload): boolean {
+  return session.role === UserRole.SUPER_ADMIN;
+}
+
 /** @deprecated השתמשו ב־isTaskManager */
 export function isPlatformAdmin(session: SessionJwtPayload): boolean {
   return isTaskManager(session);

@@ -4,14 +4,32 @@ import { prisma } from "@/lib/prisma";
 import { requireDb } from "@/lib/api-route";
 import { getSessionFromCookie } from "@/lib/auth/get-session";
 import { canManageAllTasks } from "@/lib/tasks/task-access";
+import { listEmployeesForWorkOrder } from "@/lib/work-tasks/list-work-employees";
 
 /**
  * ברירת מחדל: רשומות Employee (כרטסות).
- * ?forTasks=1 — משתמשי EMPLOYEE / ADMIN פעילים להקצאת משימות ומשמרות (User).
+ * ?forTasks=1 — משתמשי EMPLOYEE / ADMIN (User id) — workflow runs ישנים.
+ * ?forWorkOrder=1 — כרטיס Employee + מנהלים לסדר עבודה יומי.
  */
 export async function GET(req: NextRequest) {
   const block = await requireDb();
   if (block) return block;
+  const forWorkOrder = req.nextUrl.searchParams.get("forWorkOrder") === "1";
+  if (forWorkOrder) {
+    const session = await getSessionFromCookie();
+    if (!session || !canManageAllTasks(session)) {
+      return NextResponse.json({ ok: false, error: "אין הרשאה" }, { status: 403 });
+    }
+    try {
+      const rows = await listEmployeesForWorkOrder();
+      return NextResponse.json({ ok: true, data: rows });
+    } catch (e) {
+      return NextResponse.json(
+        { ok: false, error: e instanceof Error ? e.message : "שגיאה" },
+        { status: 500 },
+      );
+    }
+  }
   const forTasks = req.nextUrl.searchParams.get("forTasks") === "1";
   if (forTasks) {
     const session = await getSessionFromCookie();
@@ -21,7 +39,7 @@ export async function GET(req: NextRequest) {
     try {
       const rows = await prisma.user.findMany({
         where: {
-          role: { in: [UserRole.EMPLOYEE, UserRole.ADMIN] },
+          role: { in: [UserRole.EMPLOYEE, UserRole.ADMIN, UserRole.SUPER_ADMIN] },
           isActive: true,
         },
         orderBy: { fullName: "asc" },

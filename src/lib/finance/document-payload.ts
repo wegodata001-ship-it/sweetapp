@@ -1,3 +1,12 @@
+import {
+  documentTypeForEmployeePay,
+  normalizeEmployeePayType,
+  type EmployeePayType,
+} from "@/lib/finance/employee-pay-types";
+import { DEFAULT_EXPENSE_TYPE, normalizeExpenseType, type ExpenseType } from "@/lib/finance/expense-types";
+
+export type { ExpenseType };
+
 /** Israeli VAT rate for line calculations (decimal). */
 export const VAT_RATE = 0.18;
 
@@ -77,6 +86,8 @@ export type FinanceLineItemPayload = {
     samples: number;
     flag: "higher" | "lower" | "match";
   } | null;
+  /** הערה לשורה — תשלומי ספק */
+  lineNote?: string;
 };
 
 export type PaymentCheckDetailsPayload = {
@@ -113,6 +124,8 @@ export function hasCheckDetails(check: PaymentCheckDetailsPayload | undefined): 
 export type IncomeExpensePayload = {
   kind: "income" | "expense";
   clientMode: ClientMode;
+  /** סוג הוצאה — רק kind === "expense" */
+  expenseType?: ExpenseType;
   counterpartyName: string;
   docDate: string;
   documentType: string;
@@ -137,6 +150,14 @@ export type IncomeExpensePayload = {
   lines: FinanceLineItemPayload[];
   /** מזהה ספק ממחירון — רק הוצאות; מסנכרן עם שם הספק בכותרת המסמך */
   supplierId?: string | null;
+  /** מזהה עובד — תשלום לעובדים */
+  employeeId?: string | null;
+  /** שכר | מפרעה | מתנה | אחר */
+  employeePayType?: EmployeePayType;
+  /** סכום תשלום עובד — ללא טבלת פריטים */
+  employeePayAmount?: string;
+  /** הערות למסמך תשלום עובד */
+  employeePayNotes?: string;
   /** When the form was filled via the OCR scanner: link to the uploaded file. */
   receiptFileUrl?: string | null;
   receiptFileName?: string | null;
@@ -167,6 +188,7 @@ export function emptyIncomeExpensePayload(kind: "income" | "expense"): IncomeExp
   return {
     kind,
     clientMode: "general",
+    ...(kind === "expense" ? { expenseType: DEFAULT_EXPENSE_TYPE } : {}),
     counterpartyName: "",
     docDate: "",
     documentType: DOCUMENT_TYPE_OPTIONS[0],
@@ -191,8 +213,99 @@ export function emptyIncomeExpensePayload(kind: "income" | "expense"): IncomeExp
     trayQty: "",
     returnDate: "",
     supplierId: null,
-    lines: [{ id: newLineId(), itemName: "", quantity: "1", price: "", vatMode: "includes_vat" }],
+    employeeId: null,
+    employeePayType: "salary",
+    employeePayAmount: "",
+    employeePayNotes: "",
+    lines: [{ id: newLineId(), itemName: "", quantity: "1", price: "", vatMode: "includes_vat", lineNote: "" }],
   };
+}
+
+export function isWorkerExpensePayload(payload: IncomeExpensePayload): boolean {
+  return payload.kind === "expense" && normalizeExpenseType(payload.expenseType) === "WORKER_PAYMENTS";
+}
+
+function parseAmountStr(s: string | undefined): number {
+  return Math.max(0, Number.parseFloat((s ?? "").replace(/,/g, "")) || 0);
+}
+
+export function workerPayAmountNum(payload: IncomeExpensePayload): number {
+  const direct = parseAmountStr(payload.employeePayAmount);
+  if (direct > 0) return direct;
+  if (!isWorkerExpensePayload(payload)) return 0;
+  return payload.lines.reduce(
+    (sum, row) => sum + lineGrossTotal(row.quantity, row.price, row.vatMode),
+    0,
+  );
+}
+
+/** שורה יחידה לשמירה במסמך / API */
+export function workerExpenseLines(payload: IncomeExpensePayload): FinanceLineItemPayload[] {
+  const amountStr =
+    payload.employeePayAmount?.trim() ||
+    (workerPayAmountNum(payload) > 0 ? String(workerPayAmountNum(payload)) : "");
+  const label = documentTypeForEmployeePay(payload.employeePayType);
+  return [
+    {
+      id: payload.lines[0]?.id ?? newLineId(),
+      itemName: label,
+      quantity: "1",
+      price: amountStr,
+      vatMode: "exempt",
+      lineNote: payload.employeePayNotes?.trim() ?? "",
+      supplierProductId: null,
+    },
+  ];
+}
+
+export function normalizeWorkerExpensePayload(payload: IncomeExpensePayload): IncomeExpensePayload {
+  if (!isWorkerExpensePayload(payload)) return payload;
+  const lines = workerExpenseLines(payload);
+  const amount = payload.employeePayAmount?.trim() || lines[0]?.price || "";
+  const payments = payload.payments.map((p, i) =>
+    i === 0 && !p.amount.trim() && amount ? { ...p, amount } : p,
+  );
+  return {
+    ...payload,
+    employeePayAmount: amount,
+    employeePayNotes: payload.employeePayNotes ?? "",
+    lines,
+    payments,
+  };
+}
+
+export function buildItemsFromIncomeExpense(payload: IncomeExpensePayload) {
+  if (isWorkerExpensePayload(payload)) {
+    const amount = workerPayAmountNum(payload);
+    if (amount < 1e-6) return [];
+    const label = documentTypeForEmployeePay(payload.employeePayType);
+    return [
+      {
+        itemName: label,
+        quantity: 1,
+        unitPrice: amount,
+        vatType: "exempt" as VatMode,
+        total: amount,
+        lineNote: payload.employeePayNotes?.trim() || null,
+      },
+    ];
+  }
+  return payload.lines
+    .filter((l) => l.itemName.trim() || parseAmountStr(l.price) > 0)
+    .map((l) => {
+      const qty = Math.max(0, parseAmountStr(l.quantity));
+      const price = Math.max(0, parseAmountStr(l.price));
+      const vat = l.vatMode as VatMode;
+      const lineTotal = lineGrossTotal(l.quantity, l.price, vat);
+      return {
+        itemName: l.itemName || "שורה",
+        quantity: qty || 1,
+        unitPrice: price,
+        vatType: l.vatMode,
+        total: lineTotal,
+        lineNote: l.lineNote?.trim() || null,
+      };
+    });
 }
 
 export function emptyZReportPayload(): ZReportPayload {
@@ -248,6 +361,7 @@ export function parsePayload(raw: unknown): FinanceDocumentPayload | null {
         price: String(r.price ?? ""),
         vatMode,
         supplierProductId: typeof r.supplierProductId === "string" ? r.supplierProductId : null,
+        lineNote: typeof r.lineNote === "string" ? r.lineNote : "",
         ...(priceFlag ? { priceFlag } : {}),
       };
     });
@@ -286,9 +400,11 @@ export function parsePayload(raw: unknown): FinanceDocumentPayload | null {
         notes: String(o.paymentNotes ?? ""),
       });
     }
+    const kind = o.kind === "expense" ? "expense" : "income";
     return {
-      kind: o.kind,
+      kind,
       clientMode: o.clientMode === "event" ? "event" : "general",
+      ...(kind === "expense" ? { expenseType: normalizeExpenseType(o.expenseType) } : {}),
       counterpartyName: String(o.counterpartyName ?? ""),
       docDate: String(o.docDate ?? ""),
       documentType: docTypeRaw || DOCUMENT_TYPE_OPTIONS[0],
@@ -309,6 +425,14 @@ export function parsePayload(raw: unknown): FinanceDocumentPayload | null {
       trayQty: String(o.trayQty ?? ""),
       returnDate: String(o.returnDate ?? ""),
       supplierId: typeof o.supplierId === "string" && o.supplierId.trim() ? o.supplierId.trim() : null,
+      employeeId: typeof o.employeeId === "string" && o.employeeId.trim() ? o.employeeId.trim() : null,
+      ...(kind === "expense"
+        ? {
+            employeePayType: normalizeEmployeePayType(o.employeePayType),
+            employeePayAmount: String(o.employeePayAmount ?? ""),
+            employeePayNotes: String(o.employeePayNotes ?? ""),
+          }
+        : {}),
       lines: lines.length ? lines : emptyIncomeExpensePayload(o.kind).lines,
       receiptFileUrl:
         typeof o.receiptFileUrl === "string" ? o.receiptFileUrl : null,
@@ -342,6 +466,7 @@ export function lineVatTotal(qtyStr: string, priceStr: string, vatMode: VatMode)
 }
 
 export function incomeExpenseGrandTotal(payload: IncomeExpensePayload): number {
+  if (isWorkerExpensePayload(payload)) return workerPayAmountNum(payload);
   return payload.lines.reduce((sum, row) => sum + lineGrossTotal(row.quantity, row.price, row.vatMode), 0);
 }
 
@@ -373,6 +498,10 @@ export function paymentLinesTotal(payload: IncomeExpensePayload): number {
   /** שורת notes במסמך — שדות ישנים + הערות תשלום מהכרטיס המשותף */
 export function combineIncomeNotes(ie: IncomeExpensePayload): string | null {
   const chunks: string[] = [];
+  if (isWorkerExpensePayload(ie)) {
+    const note = ie.employeePayNotes?.trim();
+    if (note) chunks.push(note);
+  }
   if (ie.paymentMethod.trim()) chunks.push(`תקבול: ${ie.paymentMethod.trim()}`);
   if (ie.paymentNotes.trim()) chunks.push(`הערות תשלום: ${ie.paymentNotes.trim()}`);
   const rows = ie.payments?.length ? ie.payments : ie.paymentMethods ?? [];

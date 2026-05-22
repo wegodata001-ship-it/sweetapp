@@ -52,7 +52,7 @@ export async function checkFutureOrders(): Promise<number> {
       title: "יש הזמנה עתידית שמתקרבת",
       message: `${o.customerName} · ${when} · ${amount} · ${o.status}`,
       priority: h <= 24 ? "HIGH" : "MEDIUM",
-      actionUrl: "/admin/future-orders",
+      actionUrl: "/admin/daily-orders",
       metadata: { futureOrderId: o.id, orderNumber: o.orderNumber, source: "check_future_orders" },
     });
     sent += 1;

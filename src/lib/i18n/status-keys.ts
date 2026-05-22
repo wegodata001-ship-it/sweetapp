@@ -73,8 +73,10 @@ const FUTURE_ORDER_EVENT_TYPE_ID: Record<string, string> = {
   "אחר": "other",
 };
 
-/** Translate a future-order event type stored in the database (Hebrew enum) */
+/** Translate a future-order event type stored in the database */
 export function translateFutureOrderEventType(t: TranslateFn, value: string): string {
+  if (value === "PRIVATE") return pick(t, "admin.futureOrders.kindPrivate", value);
+  if (value === "WEDDING") return pick(t, "admin.futureOrders.kindWedding", value);
   const id = FUTURE_ORDER_EVENT_TYPE_ID[value];
   if (id) return pick(t, `admin.futureOrders.eventTypes.${id}`, value);
   return value;

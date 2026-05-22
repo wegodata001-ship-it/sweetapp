@@ -23,8 +23,8 @@ async function assertAccess(
   | { ok: false; status: number; error: string; code?: string }
 > {
   if (!session) return { ok: false, status: 401, error: "נדרשת התחברות" };
-  const run = await prismaAny.workflowRun.findUnique({
-    where: { id },
+  const run = await prismaAny.workflowRun.findFirst({
+    where: { id, deletedAt: null },
     include: RUN_INCLUDE,
   });
   if (!run) return { ok: false, status: 404, error: "ריצה לא נמצאה" };

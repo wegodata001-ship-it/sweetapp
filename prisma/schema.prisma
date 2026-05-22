@@ -47,10 +47,11 @@ model Supplier {
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
-  ledgerEntries    LedgerEntry[]
-  products         Product[]
+  ledgerEntries       LedgerEntry[]
+  products            Product[]
   /// מחירון ספק (נפרד ממוצרי מלאי Product) — לרישום הוצאות ו־OCR עתידי
-  supplierProducts SupplierProduct[]
+  supplierProducts    SupplierProduct[]
+  expenseDocuments    FinancialDocument[] @relation("SupplierExpenseDocuments")
 }
 
 /// שורת מחירון ספק — מקור אמת למילוי הוצאות והיסטוריית מחירים
@@ -100,10 +101,12 @@ model Employee {
   isActive       Boolean  @default(true)
   createdAt      DateTime @default(now())
 
-  linkedUsers    User[]
-  ledgerEntries  LedgerEntry[]
-  workSessions   EmployeeWorkSession[]
+  linkedUsers       User[]
+  ledgerEntries     LedgerEntry[]
+  expenseDocuments  FinancialDocument[] @relation("EmployeeExpenseDocuments")
+  workSessions      EmployeeWorkSession[]
   assignedTasks  EmployeeTask[]
+  taskGroups     EmployeeTaskGroup[]
 }
 
 /// Manual ledger lines for ספק / עובד (לא כרטסת לקוח — היא מחושבת ממסמכים ותשלומים)
@@ -120,6 +123,9 @@ model LedgerEntry {
   supplier   Supplier? @relation(fields: [supplierId], references: [id], onDelete: Cascade)
   employeeId String?
   employee   Employee? @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  /// קישור אוטומטי למסמך הוצאה — שורה אחת למסמך (בנוסף לרישום ידני)
+  financialDocumentId String?            @unique
+  financialDocument   FinancialDocument? @relation("ExpenseDocLedger", fields: [financialDocumentId], references: [id], onDelete: Cascade)
 
   @@index([supplierId])
   @@index([employeeId])
@@ -132,6 +138,12 @@ model FinancialDocument {
   documentType String
   customerId   String?
   customer     Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  /// תשלום ספק — קישור לכרטסת ספק
+  supplierId String?
+  supplier   Supplier? @relation("SupplierExpenseDocuments", fields: [supplierId], references: [id], onDelete: SetNull)
+  /// תשלום עובד — קישור לכרטסת עובד
+  employeeId String?
+  employee   Employee? @relation("EmployeeExpenseDocuments", fields: [employeeId], references: [id], onDelete: SetNull)
 
   totalAmount     Float
   paidAmount      Float   @default(0)
@@ -164,8 +176,11 @@ model FinancialDocument {
   /// תנועות תזרים שמקושרות כדוח Z (אותו מסמך כ־FinancialDocument)
   zReportCashFlowEntries CashFlowEntry[]         @relation("CashFlowZReportFinancialDocument")
   accountantTransferLogs AccountantTransferLog[]
+  expenseLedgerEntry   LedgerEntry?            @relation("ExpenseDocLedger")
 
   @@index([customerId])
+  @@index([supplierId])
+  @@index([employeeId])
   @@index([createdAt])
   @@index([sentToCpa])
   @@index([sentToCpaAt])
@@ -200,6 +215,7 @@ model FinancialDocumentItem {
   unitPrice   Float
   vatType     String?
   total       Float
+  lineNote    String?
 
   @@index([documentId])
   @@index([productId])
@@ -307,9 +323,12 @@ model CashFlowEntry {
   zReport           FinancialDocument? @relation("CashFlowZReportFinancialDocument", fields: [zReportId], references: [id], onDelete: Cascade)
   entryDate         DateTime           @db.Date
   isDirect          Boolean            @default(false)
+  /// סוג הוצאה ממסמך (SUPPLIER_PAYMENTS וכו׳) — רק לתנועות expense
+  expenseType       String?
   createdAt         DateTime           @default(now())
 
   @@index([entryDate])
+  @@index([expenseType])
   @@index([customerId])
   @@index([paymentId])
   @@index([documentId])
@@ -502,16 +521,44 @@ model EmployeeWorkSession {
   id         String    @id @default(cuid())
   employeeId String
   employee   Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  /// תאריך סדר העבודה (יום לוח — לא תלוי רק ב-startedAt)
+  workDate   DateTime  @default(now()) @db.Date
   startedAt  DateTime  @default(now())
   endedAt    DateTime?
   /// ACTIVE | ENDED
   status     String    @default("ACTIVE")
   createdAt  DateTime  @default(now())
 
-  tasks EmployeeTask[]
+  tasks      EmployeeTask[]
+  taskGroups EmployeeTaskGroup[]
 
   @@index([employeeId, status])
+  @@index([employeeId, workDate])
   @@index([startedAt])
+}
+
+/// עותק קבוצת משימות לעובד ביום מסוים — לא משנה את התבנית המקורית
+model EmployeeTaskGroup {
+  id                       String    @id @default(cuid())
+  employeeId               String
+  employee                 Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  assignedToUserId         String
+  assignedToUser           User      @relation("EmployeeTaskGroupAssignee", fields: [assignedToUserId], references: [id], onDelete: Cascade)
+  sessionId                String
+  session                  EmployeeWorkSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  workDate                 DateTime  @db.Date
+  title                    String
+  color                    String?
+  orderIndex               Int       @default(0)
+  sourceWorkTemplateId     String?
+  sourceWorkflowTemplateId String?
+  createdAt                DateTime  @default(now())
+
+  tasks EmployeeTask[]
+
+  @@index([employeeId, workDate])
+  @@index([assignedToUserId, workDate])
+  @@index([sessionId])
 }
 
 /// משימה בפועל — בעלות לפי assignedToUserId (מקור אמת) + employeeId (כרטיס)
@@ -524,16 +571,25 @@ model EmployeeTask {
   assignedToUser   User?               @relation("EmployeeTaskAssignee", fields: [assignedToUserId], references: [id], onDelete: SetNull)
   sessionId        String
   session          EmployeeWorkSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  taskGroupId      String?
+  taskGroup        EmployeeTaskGroup?  @relation(fields: [taskGroupId], references: [id], onDelete: SetNull)
   taskTemplateId   String?
   taskTemplate     TaskTemplate?       @relation(fields: [taskTemplateId], references: [id], onDelete: SetNull)
   title            String
   description      String?
+  /// חומרים / הערות תפעוליות
+  materials        String?
+  targetDueAt      DateTime?
   estimatedMinutes Int                 @default(15)
   startedAt        DateTime?
   completedAt      DateTime?
   /// PENDING | IN_PROGRESS | COMPLETED
   status           String              @default("PENDING")
+  /// משימה פעילה כרגע (רק אחת לעובד)
+  isActive         Boolean             @default(false)
   delayReason      String?
+  /// HEX (#RRGGBB) — תצוגה בכרטיס משימה
+  color            String?
   orderIndex       Int                 @default(0)
   createdAt        DateTime            @default(now())
 
@@ -541,7 +597,11 @@ model EmployeeTask {
   @@index([assignedToUserId, status])
   @@index([assignedToUserId])
   @@index([sessionId, orderIndex])
+  @@index([taskGroupId])
   @@index([startedAt])
+  @@index([assignedToUserId, isActive])
+
+  activeForUser User? @relation("UserActiveEmployeeTask")
 }
 
 /// קבוצת משימה אד-הוק (workspace) — אגד של משימות + קבצים + עובדים.
@@ -614,10 +674,16 @@ model FutureOrder {
   orderNumber      Int       @unique
   customerName     String
   phone            String?
-  /// חתונה | בר מצווה | בת מצווה | יום הולדת | עסקי | אחר
+  /// DAILY_ORDER | WEDDING_ORDER
+  orderCategory    String    @default("DAILY_ORDER")
+  /// חתונה | בר מצווה | בת מצווה | יום הולדת | עסקי | אחר | PRIVATE | WEDDING
   eventType        String
   eventDate        DateTime  @db.Date
   eventTime        String?
+  /// כתובת אירוע / משלוח
+  address          String?
+  /// מספר אורחים משוער
+  guestCount       Int?
   itemsDescription String?   @db.Text
   totalAmount      Float
   depositAmount    Float     @default(0)
@@ -631,6 +697,7 @@ model FutureOrder {
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
 
+  @@index([orderCategory])
   @@index([eventDate])
   @@index([status])
   @@index([isCompleted])
@@ -677,6 +744,8 @@ model WorkflowTemplate {
   /// צבע ברירת מחדל לתבנית — מועתק ל־run אם רוצים בעתיד
   color       String?
   archivedAt  DateTime?
+  /// מחיקה רכה — תבנית מוסתרת מהממשק, ניתן לשחזור בעתיד
+  deletedAt   DateTime?
   createdById String?
   createdBy   User?    @relation("WorkflowTemplateCreator", fields: [createdById], references: [id], onDelete: SetNull)
   createdAt   DateTime @default(now())
@@ -686,6 +755,7 @@ model WorkflowTemplate {
   runs  WorkflowRun[]
 
   @@index([archivedAt])
+  @@index([deletedAt])
 }
 
 /// פריט בתוך תבנית — כל שורה היא משימה ממאגר ה־WorkflowTask, עם
@@ -701,6 +771,8 @@ model WorkflowTemplateItem {
   minutesOverride Int?
   /// דריסת כותרת אופציונלית — מאפשרת "בדיקת מלאי קירור" במקום סתם "בדיקת מלאי"
   titleOverride   String?
+  /// דריסת צבע לפריט בתבנית (null = מ־WorkflowTask)
+  color           String?
   createdAt    DateTime         @default(now())
 
   @@index([templateId, orderIndex])
@@ -740,6 +812,8 @@ model WorkflowRun {
   /// אינדקס הפריט הפעיל כעת (לקריאה מהירה ב־UI / mobile)
   currentIndex Int               @default(0)
   notes        String?
+  /// מחיקה רכה כשמוחקת קבוצת משימות (תבנית)
+  deletedAt    DateTime?
   createdById  String?
   createdBy    User?             @relation("WorkflowRunCreator", fields: [createdById], references: [id], onDelete: SetNull)
   createdAt    DateTime          @default(now())
@@ -750,6 +824,7 @@ model WorkflowRun {
   @@index([assigneeId])
   @@index([status])
   @@index([startedAt])
+  @@index([deletedAt])
 }
 
 /// פריט בתוך ריצה חיה — snapshot של ה־TemplateItem בעת התחלת הריצה.
@@ -863,6 +938,12 @@ model User {
   employeeId         String?
   employee           Employee? @relation(fields: [employeeId], references: [id], onDelete: SetNull)
 
+  /// נוכחות LIVE — מצב עבודה
+  lastSeenAt          DateTime?
+  activeTaskId        String?       @unique
+  activeTask          EmployeeTask? @relation("UserActiveEmployeeTask", fields: [activeTaskId], references: [id], onDelete: SetNull)
+  activeTaskStartedAt DateTime?
+
   permissions   UserPermission[]
   activityLogs  ActivityLog[]
 
@@ -905,7 +986,8 @@ model User {
   workflowTemplatesCreated WorkflowTemplate[] @relation("WorkflowTemplateCreator")
   workflowRunsAssigned    WorkflowRun[]      @relation("WorkflowRunAssignee")
   workflowRunsCreated     WorkflowRun[]      @relation("WorkflowRunCreator")
-  employeeTasksAssigned   EmployeeTask[]     @relation("EmployeeTaskAssignee")
+  employeeTasksAssigned      EmployeeTask[]      @relation("EmployeeTaskAssignee")
+  employeeTaskGroupsAssigned EmployeeTaskGroup[] @relation("EmployeeTaskGroupAssignee")
 
   /// Multi-cycle clock-in/out sessions (יום עבודה אמיתי - יכול לכלול מספר כניסות)
   workSessions WorkSession[] @relation("WorkSessionUser")

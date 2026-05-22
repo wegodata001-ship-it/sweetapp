@@ -71,7 +71,7 @@ export async function GET(req: NextRequest) {
     const managerView =
       searchParams.get("managerView") === "1" && canViewAllWorkflowRuns(session);
 
-    const where: Record<string, unknown> = {};
+    const where: Record<string, unknown> = { deletedAt: null };
 
     if (!managerView) {
       where.assigneeId = uid;
@@ -161,8 +161,8 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const template = await prismaAny.workflowTemplate.findUnique({
-      where: { id: templateId },
+    const template = await prismaAny.workflowTemplate.findFirst({
+      where: { id: templateId, deletedAt: null },
       include: {
         items: {
           include: {
