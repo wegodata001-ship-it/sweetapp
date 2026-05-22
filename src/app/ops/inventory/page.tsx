@@ -1088,44 +1088,7 @@ export default function InventoryPage() {
         </div>
 
         <div className={tab === "monthly" ? "p-2 md:p-3" : "p-4 md:p-6"}>
-          {tab === "monthly" ? (
-            <InventoryCountDashboard
-              shelfSummaries={shelfSummaries}
-              shortageCount={stats?.shortageCount ?? 0}
-              countLocationName={countLocationName}
-              setCountLocationName={setCountLocationName}
-              monthlyRows={monthlyRows}
-              actualById={actualById}
-              setActualById={setActualById}
-              countDate={countDate}
-              setCountDate={setCountDate}
-              countQ={countQ}
-              setCountQ={setCountQ}
-              saveMonthly={saveMonthly}
-              busy={busy}
-              countMeta={countMeta}
-              countPage={countPage}
-              setCountPage={setCountPage}
-              inventoryLocations={inventoryLocations.map((l) => ({
-                id: l.id,
-                name: l.name,
-              }))}
-              onAddProduct={(shelfName) => {
-                setCountLocationName(shelfName);
-                setNewCountProduct((p) => ({
-                  ...p,
-                  locationId: resolveLocationIdForShelf(shelfName) || p.locationId,
-                }));
-                setAddInventoryOpen(true);
-              }}
-              hasLocations={inventoryLocations.length > 0}
-              refreshKey={countRefreshKey}
-              onShelfActivity={() => {
-                setCountRefreshKey((k) => k + 1);
-                void loadShelfSummaries();
-              }}
-            />
-          ) : null}
+          {tab === "monthly" ? <InventoryCountDashboard /> : null}
 
           {tab === "history" ? (
             <div className="space-y-4">

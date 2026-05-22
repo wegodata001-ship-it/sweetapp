@@ -42,15 +42,15 @@ export function countStatusStyles(status: CountLineStatus) {
   }
 }
 
-export function countStatusLabel(status: CountLineStatus, t: TranslateFn): string {
+export function countStatusLabel(status: CountLineStatus, t: (key: string) => string): string {
   switch (status) {
     case "match":
-      return t("ops.inventory.workspace.statusMatch");
+      return t("statusMatch");
     case "short":
-      return t("ops.inventory.workspace.statusShort");
+      return t("statusShort");
     case "surplus":
-      return t("ops.inventory.workspace.statusSurplus");
+      return t("statusSurplus");
     default:
-      return t("ops.inventory.workspace.statusUncounted");
+      return t("statusUncounted");
   }
 }
