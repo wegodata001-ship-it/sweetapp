@@ -1357,10 +1357,13 @@
         "inactive": "לא פעיל",
         "mustChangeBadge": "חייב להחליף סיסמה",
         "nationalIdLabel": "ת.ז",
+        "permissionsLabel": "הרשאות",
+        "noPermissions": "אין הרשאות למסכים",
         "noUsers": "אין משתמשים בטבלה.",
         "edit": "עריכה",
         "delete": "מחיקה"
       },
+      "modalPermissionsSelected": "נבחרו: {{count}}",
       "errors": {
         "loadForbidden": "אין הרשאה לצפות בעמוד זה.",
         "loadFailed": "שגיאת טעינה",

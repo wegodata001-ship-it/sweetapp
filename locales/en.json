@@ -1357,10 +1357,13 @@
         "inactive": "Inactive",
         "mustChangeBadge": "Must change password",
         "nationalIdLabel": "ID",
+        "permissionsLabel": "Permissions",
+        "noPermissions": "No screen permissions",
         "noUsers": "No users to display.",
         "edit": "Edit",
         "delete": "Delete"
       },
+      "modalPermissionsSelected": "Selected: {{count}}",
       "errors": {
         "loadForbidden": "You don't have permission to view this page.",
         "loadFailed": "Load error",

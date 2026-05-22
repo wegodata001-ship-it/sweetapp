@@ -21,6 +21,46 @@ type RowUser = {
 
 type ModalMode = "create" | "edit" | null;
 
+const DEFAULT_EMPLOYEE_PERMISSIONS: PermissionKey[] = ["employee_clock"];
+
+function toValidPermissions(perms: string[]): PermissionKey[] {
+  return perms.filter((p): p is PermissionKey =>
+    (PERMISSION_KEYS as readonly string[]).includes(p),
+  );
+}
+
+function UserPermissionsBadges({
+  user,
+  t,
+}: {
+  user: RowUser;
+  t: (key: string, vars?: Record<string, string | number>) => string;
+}) {
+  if (user.role === "SUPER_ADMIN") return null;
+  const keys = toValidPermissions(user.permissions);
+  return (
+    <div className="w-full border-t border-slate-100 pt-2">
+      <p className="mb-1.5 text-[10px] font-bold uppercase tracking-wide text-slate-500">
+        {t("admin.users.list.permissionsLabel")}
+      </p>
+      {keys.length === 0 ? (
+        <p className="text-[12px] font-semibold text-amber-800">{t("admin.users.list.noPermissions")}</p>
+      ) : (
+        <div className="flex flex-wrap gap-1.5">
+          {keys.map((key) => (
+            <span
+              key={key}
+              className="inline-flex rounded-full bg-violet-50 px-2.5 py-0.5 text-[11px] font-bold text-violet-900 ring-1 ring-violet-100"
+            >
+              {translatePermission(t, key)}
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 const emptyForm = {
   fullName: "",
   email: "",
@@ -70,11 +110,16 @@ export default function AdminUsersPage() {
 
   function openCreate() {
     setEditingId(null);
-    setForm({ ...emptyForm });
+    setForm({
+      ...emptyForm,
+      permissions: [...DEFAULT_EMPLOYEE_PERMISSIONS],
+    });
     setModal("create");
   }
 
-  function openEdit(u: RowUser) {
+  function openEdit(userId: string) {
+    const u = users.find((x) => x.id === userId);
+    if (!u) return;
     setEditingId(u.id);
     setForm({
       fullName: u.fullName,
@@ -86,9 +131,7 @@ export default function AdminUsersPage() {
       hourlyRate: u.hourlyRate ?? 0,
       isActive: u.isActive,
       mustChangePassword: u.mustChangePassword ?? false,
-      permissions: u.permissions.filter((p): p is PermissionKey =>
-        (PERMISSION_KEYS as readonly string[]).includes(p),
-      ),
+      permissions: toValidPermissions(u.permissions),
     });
     setModal("edit");
   }
@@ -142,11 +185,14 @@ export default function AdminUsersPage() {
               form.role === "EMPLOYEE" || form.role === "ADMIN" ? form.permissions : [],
           }),
         });
-        const j = (await res.json()) as { ok?: boolean; error?: string };
+        const j = (await res.json()) as { ok?: boolean; error?: string; data?: RowUser };
         if (!res.ok || !j.ok) {
           setLoadError(j.error || t("admin.users.errors.saveFailed"));
           setSaving(false);
           return;
+        }
+        if (j.data) {
+          setUsers((prev) => [j.data!, ...prev]);
         }
       } else if (modal === "edit" && editingId) {
         const body: Record<string, unknown> = {
@@ -170,14 +216,18 @@ export default function AdminUsersPage() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(body),
         });
-        const j = (await res.json()) as { ok?: boolean; error?: string };
+        const j = (await res.json()) as { ok?: boolean; error?: string; data?: RowUser };
         if (!res.ok || !j.ok) {
           setLoadError(j.error || t("admin.users.errors.updateFailed"));
           setSaving(false);
           return;
         }
+        if (j.data) {
+          setUsers((prev) => prev.map((u) => (u.id === editingId ? { ...u, ...j.data! } : u)));
+        }
       }
       setModal(null);
+      setLoadError(null);
       await load();
     } finally {
       setSaving(false);
@@ -228,8 +278,9 @@ export default function AdminUsersPage() {
           {users.map((u) => (
             <div
               key={u.id}
-              className="flex min-h-[72px] flex-wrap items-center justify-between gap-3 rounded-[18px] border border-slate-200 bg-white px-3 py-2 shadow-sm"
+              className="flex min-h-[72px] flex-col gap-2 rounded-[18px] border border-slate-200 bg-white px-3 py-2 shadow-sm"
             >
+              <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-0.5 md:gap-x-5">
                 <p className="truncate font-bold text-slate-950">{u.fullName}</p>
                 {u.nationalId ? (
@@ -265,7 +316,7 @@ export default function AdminUsersPage() {
               <div className="flex flex-wrap gap-2">
                 <button
                   type="button"
-                  onClick={() => openEdit(u)}
+                  onClick={() => openEdit(u.id)}
                   className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-bold text-slate-800 hover:bg-slate-50"
                 >
                   {t("admin.users.list.edit")}
@@ -278,6 +329,8 @@ export default function AdminUsersPage() {
                   {t("admin.users.list.delete")}
                 </button>
               </div>
+              </div>
+              <UserPermissionsBadges user={u} t={t} />
             </div>
           ))}
           {users.length === 0 && !loadError ? (
@@ -375,12 +428,20 @@ export default function AdminUsersPage() {
                 <select
                   className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
                   value={form.role}
-                  onChange={(e) =>
-                    setForm((f) => ({
-                      ...f,
-                      role: e.target.value as "SUPER_ADMIN" | "ADMIN" | "EMPLOYEE",
-                    }))
-                  }
+                  onChange={(e) => {
+                    const role = e.target.value as "SUPER_ADMIN" | "ADMIN" | "EMPLOYEE";
+                    setForm((f) => {
+                      const next = { ...f, role };
+                      if (
+                        modal === "create" &&
+                        role === "EMPLOYEE" &&
+                        next.permissions.length === 0
+                      ) {
+                        next.permissions = [...DEFAULT_EMPLOYEE_PERMISSIONS];
+                      }
+                      return next;
+                    });
+                  }}
                 >
                   <option value="EMPLOYEE">{t("roles.EMPLOYEE")}</option>
                   <option value="ADMIN">{t("roles.ADMIN")}</option>
@@ -413,7 +474,24 @@ export default function AdminUsersPage() {
 
               {form.role === "EMPLOYEE" || form.role === "ADMIN" ? (
                 <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
-                  <p className="mb-3 text-xs font-bold text-slate-600">{t("permissions.title")}</p>
+                  <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-xs font-bold text-slate-600">{t("permissions.title")}</p>
+                    <p className="text-[11px] font-semibold text-slate-500">
+                      {t("admin.users.modalPermissionsSelected", { count: form.permissions.length })}
+                    </p>
+                  </div>
+                  {form.permissions.length > 0 ? (
+                    <div className="mb-3 flex flex-wrap gap-1.5">
+                      {form.permissions.map((key) => (
+                        <span
+                          key={key}
+                          className="inline-flex rounded-full bg-white px-2 py-0.5 text-[11px] font-bold text-violet-900 ring-1 ring-violet-200"
+                        >
+                          {translatePermission(t, key)}
+                        </span>
+                      ))}
+                    </div>
+                  ) : null}
                   <div className="grid gap-2">
                     {PERMISSION_KEYS.map((key) => (
                       <label key={key} className="flex items-center gap-2 text-sm text-slate-800">
