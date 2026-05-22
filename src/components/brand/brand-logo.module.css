@@ -1,0 +1,66 @@
+/* Mini circle — sidebar, navbar, mobile */
+.mini {
+  position: relative;
+  flex-shrink: 0;
+  overflow: hidden;
+  border-radius: 50%;
+  background: #0b1320;
+  border: 2px solid rgba(212, 175, 55, 0.3);
+  box-shadow: 0 0 18px rgba(212, 175, 55, 0.12);
+}
+
+.miniImage {
+  object-fit: cover;
+  object-position: center 32%;
+  transform: scale(1.42);
+}
+
+/* Full display — login, marketing */
+.fullWrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.fullGlow {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  max-width: 360px;
+  max-height: 360px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(212, 175, 55, 0.22), transparent 68%);
+  filter: blur(28px);
+  animation: brandGlowFloat 6s ease-in-out infinite;
+}
+
+.fullImage {
+  position: relative;
+  z-index: 1;
+  width: auto !important;
+  height: auto !important;
+  max-width: 220px;
+  max-height: min(42vh, 280px);
+  object-fit: contain;
+  filter: drop-shadow(0 12px 32px rgba(0, 0, 0, 0.45));
+}
+
+@media (min-width: 900px) {
+  .fullImage {
+    max-width: 340px;
+    max-height: min(48vh, 340px);
+  }
+}
+
+@keyframes brandGlowFloat {
+  0%,
+  100% {
+    transform: translateY(0) scale(1);
+    opacity: 0.85;
+  }
+  50% {
+    transform: translateY(-6px) scale(1.03);
+    opacity: 1;
+  }
+}

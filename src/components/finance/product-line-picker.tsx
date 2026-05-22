@@ -5,7 +5,7 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react"
 import { createPortal } from "react-dom";
 import { useI18n } from "@/components/i18n-provider";
 import { useProductPickerCatalogContext } from "@/components/finance/product-picker-catalog-context";
-import { useProductPickerCatalog } from "@/components/finance/use-product-picker-catalog";
+import { useProductPickerSearch } from "@/components/finance/use-product-picker-catalog";
 import type { ProductPickerRow } from "@/lib/finance/product-picker-catalog";
 import { formatShekel } from "@/lib/format-shekel";
 
@@ -67,9 +67,10 @@ export function ProductLinePicker({
 }: Props) {
   const { t, dir } = useI18n();
   const listboxId = useId();
-  const shared = useProductPickerCatalogContext();
-  const local = useProductPickerCatalog(shared ? undefined : supplierId);
-  const { catalog, loading, appendToCache } = shared ?? local;
+  const sharedCtx = useProductPickerCatalogContext();
+  const local = useProductPickerSearch(supplierId);
+  const { rows, loading, hasMore, search, loadMore, appendToCache: localAppend } = local;
+  const appendToCache = sharedCtx?.appendToCache ?? localAppend;
   const [open, setOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [menuRect, setMenuRect] = useState<MenuRect | null>(null);
@@ -83,15 +84,16 @@ export function ProductLinePicker({
     setMounted(true);
   }, []);
 
-  const filtered = useMemo(() => {
-    const q = value.trim().toLowerCase();
-    if (!q) return catalog.slice(0, 200);
-    return catalog.filter((p) => p.name.toLowerCase().includes(q)).slice(0, 120);
-  }, [catalog, value]);
+  useEffect(() => {
+    if (!open || disabled) return;
+    search(value, !value.trim());
+  }, [value, open, disabled, search]);
+
+  const filtered = rows;
 
   const exactMatch = useMemo(
-    () => catalog.some((p) => p.name.trim().toLowerCase() === value.trim().toLowerCase()),
-    [catalog, value],
+    () => rows.some((p) => p.name.trim().toLowerCase() === value.trim().toLowerCase()),
+    [rows, value],
   );
 
   const showAddNew = value.trim().length > 0 && !exactMatch;
@@ -234,6 +236,12 @@ export function ProductLinePicker({
               left: menuRect.left,
               width: menuRect.width,
               maxHeight: menuRect.maxHeight,
+            }}
+            onScroll={(e) => {
+              const el = e.currentTarget;
+              if (el.scrollTop + el.clientHeight >= el.scrollHeight - 48) {
+                loadMore(value);
+              }
             }}
           >
             {loading ? (

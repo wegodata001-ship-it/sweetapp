@@ -6,9 +6,10 @@ type CountUpProps = {
   value: number;
   currency?: boolean;
   className?: string;
+  duration?: number;
 };
 
-export function CountUp({ value, currency = false, className }: CountUpProps) {
+export function CountUp({ value, currency = false, className, duration = 900 }: CountUpProps) {
   const [display, setDisplay] = useState(0);
   const formatter = useMemo(
     () =>
@@ -21,7 +22,6 @@ export function CountUp({ value, currency = false, className }: CountUpProps) {
 
   useEffect(() => {
     const target = Number.isFinite(value) ? value : 0;
-    const duration = 900;
     const startTime = performance.now();
     let frame = 0;
 
@@ -34,7 +34,7 @@ export function CountUp({ value, currency = false, className }: CountUpProps) {
 
     frame = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(frame);
-  }, [value]);
+  }, [value, duration]);
 
   return (
     <span className={className}>

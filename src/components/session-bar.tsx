@@ -6,6 +6,7 @@ import { KeyRound } from "lucide-react";
 import { useAuth } from "@/components/auth-provider";
 import { useI18n } from "@/components/i18n-provider";
 import { LanguageSwitcher } from "@/components/language-switcher";
+import { NavbarBrand } from "@/components/brand/sidebar-brand";
 import { StaffAlertsBell } from "@/components/staff-alerts-bell";
 import { ChangePasswordDialog } from "@/components/auth/change-password-dialog";
 
@@ -41,7 +42,8 @@ export function SessionBar({ className }: SessionBarProps) {
     <div
       className={`flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-slate-50 px-5 py-2.5 text-sm text-slate-700 ${className ?? ""}`}
     >
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="flex flex-wrap items-center gap-3">
+        <NavbarBrand className="hidden md:inline-flex" />
         <span>
           {t("session.hello")} <strong className="font-bold text-slate-900">{user.fullName}</strong>
         </span>

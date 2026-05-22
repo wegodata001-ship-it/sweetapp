@@ -1,0 +1,161 @@
+.panel {
+  display: flex;
+  max-height: 520px;
+  min-height: 280px;
+  flex-direction: column;
+  border-radius: 24px;
+  border: 1px solid rgba(255, 255, 255, 0.65);
+  background: linear-gradient(145deg, rgba(255, 255, 255, 0.94), rgba(248, 250, 252, 0.9));
+  padding: 0.75rem;
+  box-shadow: 0 4px 24px rgba(7, 24, 38, 0.06);
+}
+
+@media (min-width: 1280px) {
+  .panel {
+    max-height: none;
+  }
+}
+
+.title {
+  font-size: 13px;
+  font-weight: 900;
+  color: #0f172a;
+}
+
+.list {
+  margin-top: 0.5rem;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 0.4rem;
+  overflow-y: auto;
+  padding-inline-end: 2px;
+}
+
+.empty {
+  border-radius: 16px;
+  border: 1px dashed rgba(148, 163, 184, 0.35);
+  background: rgba(248, 250, 252, 0.8);
+  padding: 1.5rem 0.75rem;
+  text-align: center;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #64748b;
+}
+
+.alert {
+  display: block;
+  border-radius: 14px;
+  border-width: 1px;
+  border-style: solid;
+  padding: 0.55rem 0.65rem;
+  transition:
+    transform 0.2s ease,
+    box-shadow 0.2s ease;
+}
+
+.alert:hover {
+  transform: translateX(-2px);
+}
+
+.alertTitle {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.75rem;
+  font-weight: 800;
+}
+
+.alertIcon {
+  flex-shrink: 0;
+  height: 0.9rem;
+  width: 0.9rem;
+}
+
+.alertDetail {
+  margin-top: 0.25rem;
+  font-size: 0.68rem;
+  font-weight: 600;
+  line-height: 1.4;
+  opacity: 0.88;
+}
+
+.critical {
+  border-color: rgba(244, 63, 94, 0.45);
+  background: linear-gradient(135deg, rgba(254, 226, 226, 0.95), rgba(255, 255, 255, 0.9));
+  color: #9f1239;
+  box-shadow: 0 0 16px rgba(244, 63, 94, 0.12);
+}
+
+.critical .alertIcon {
+  color: #e11d48;
+  filter: drop-shadow(0 0 6px rgba(244, 63, 94, 0.5));
+}
+
+.critical:hover {
+  box-shadow: 0 4px 20px rgba(244, 63, 94, 0.2);
+}
+
+.warning {
+  border-color: rgba(249, 115, 22, 0.45);
+  background: linear-gradient(135deg, rgba(255, 237, 213, 0.95), rgba(255, 255, 255, 0.9));
+  color: #9a3412;
+  box-shadow: 0 0 14px rgba(249, 115, 22, 0.1);
+}
+
+.warning .alertIcon {
+  color: #ea580c;
+  filter: drop-shadow(0 0 6px rgba(249, 115, 22, 0.45));
+}
+
+.warning:hover {
+  box-shadow: 0 4px 18px rgba(249, 115, 22, 0.18);
+}
+
+.success {
+  border-color: rgba(16, 185, 129, 0.45);
+  background: linear-gradient(135deg, rgba(209, 250, 229, 0.95), rgba(255, 255, 255, 0.9));
+  color: #065f46;
+  box-shadow: 0 0 14px rgba(16, 185, 129, 0.1);
+}
+
+.success .alertIcon {
+  color: #059669;
+  filter: drop-shadow(0 0 6px rgba(16, 185, 129, 0.45));
+}
+
+.success:hover {
+  box-shadow: 0 4px 18px rgba(16, 185, 129, 0.18);
+}
+
+.wedding {
+  border-color: rgba(168, 85, 247, 0.4);
+  background: linear-gradient(135deg, rgba(243, 232, 255, 0.95), rgba(255, 255, 255, 0.9));
+  color: #6b21a8;
+  box-shadow: 0 0 14px rgba(168, 85, 247, 0.12);
+}
+
+.wedding .alertIcon {
+  color: #a855f7;
+  filter: drop-shadow(0 0 6px rgba(168, 85, 247, 0.45));
+}
+
+.wedding:hover {
+  box-shadow: 0 4px 18px rgba(168, 85, 247, 0.2);
+}
+
+.info {
+  border-color: rgba(59, 130, 246, 0.4);
+  background: linear-gradient(135deg, rgba(219, 234, 254, 0.95), rgba(255, 255, 255, 0.9));
+  color: #1e40af;
+  box-shadow: 0 0 14px rgba(59, 130, 246, 0.1);
+}
+
+.info .alertIcon {
+  color: #3b82f6;
+  filter: drop-shadow(0 0 6px rgba(59, 130, 246, 0.45));
+}
+
+.info:hover {
+  box-shadow: 0 4px 18px rgba(59, 130, 246, 0.18);
+}

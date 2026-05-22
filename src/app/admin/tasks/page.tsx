@@ -185,7 +185,6 @@ export default function AdminWorkTasksPage() {
           role: "EMPLOYEE",
         }))}
         canManage
-        onGroupsChanged={() => void refresh()}
       />
 
       <section className="grid gap-6 lg:grid-cols-2">

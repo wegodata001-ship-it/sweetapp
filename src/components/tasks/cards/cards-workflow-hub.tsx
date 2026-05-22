@@ -14,7 +14,7 @@ import {
   Sparkles,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { fetchJsonCached, setCached } from "@/lib/client/fetch-cache";
+import { fetchJsonCached, invalidateCacheKey, setCached } from "@/lib/client/fetch-cache";
 import { useAuth } from "@/components/auth-provider";
 import { useI18n } from "@/components/i18n-provider";
 import { useToast } from "@/components/toast-provider";
@@ -267,13 +267,52 @@ export function CardsWorkflowHub({
     setExpanded(cardKey("run", runId));
   };
 
+  const createGroupLockRef = useRef(false);
+
+  const summaryFromDetail = (d: WorkflowTemplateDetailDto): WorkflowTemplateSummaryDto => ({
+    id: d.id,
+    title: d.title,
+    description: d.description,
+    color: d.color,
+    item_count: d.items?.length ?? 0,
+    total_minutes: d.items?.reduce((s, it) => s + it.effective_minutes, 0) ?? 0,
+    archived_at: d.archived_at,
+    created_at: d.created_at,
+    updated_at: d.updated_at,
+  });
+
   const createGroup = async () => {
     const title = newGroupTitle.trim();
     if (!title) {
       showToast({ tone: "warning", title: t("workflows.templates.errEmptyTitle") });
       return;
     }
+    if (createGroupLockRef.current || creatingGroup) return;
+
+    const tempId = `temp-tpl-${Date.now()}`;
+    const optimisticSummary: WorkflowTemplateSummaryDto = {
+      id: tempId,
+      title,
+      description: null,
+      color: newGroupColor,
+      item_count: 0,
+      total_minutes: 0,
+      archived_at: null,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+
+    createGroupLockRef.current = true;
     setCreatingGroup(true);
+    setTemplates((prev) => [optimisticSummary, ...prev]);
+    setTplDetails((prev) => ({
+      ...prev,
+      [tempId]: { ...optimisticSummary, items: [] },
+    }));
+    setHighlightTplId(tempId);
+    setNewGroupTitle("");
+    setCreateGroupOpen(false);
+
     try {
       const res = await fetch("/api/workflows/templates", {
         method: "POST",
@@ -286,16 +325,39 @@ export function CardsWorkflowHub({
         | { ok: false; error?: string }
         | null;
       if (!json?.ok) {
+        setTemplates((prev) => prev.filter((tt) => tt.id !== tempId));
+        setTplDetails((prev) => {
+          const next = { ...prev };
+          delete next[tempId];
+          return next;
+        });
         showToast({ tone: "error", title: json?.error ?? t("common.error") });
         return;
       }
-      showToast({ tone: "success", title: t("workflows.templates.toastCreated") });
-      setNewGroupTitle("");
-      setCreateGroupOpen(false);
+
+      const summary = summaryFromDetail(json.data);
+      setTemplates((prev) => prev.map((tt) => (tt.id === tempId ? summary : tt)));
+      setTplDetails((prev) => {
+        const next = { ...prev };
+        delete next[tempId];
+        next[json.data.id] = json.data;
+        return next;
+      });
+      setHighlightTplId(json.data.id);
       setExpanded(cardKey("tpl", json.data.id));
-      await refreshAll();
-      await loadTemplateDetail(json.data.id);
+      invalidateCacheKey("wf-hub:templates");
+      showToast({ tone: "success", title: t("workflows.templates.toastCreated") });
+      scrollToCard(json.data.id);
+    } catch {
+      setTemplates((prev) => prev.filter((tt) => tt.id !== tempId));
+      setTplDetails((prev) => {
+        const next = { ...prev };
+        delete next[tempId];
+        return next;
+      });
+      showToast({ tone: "error", title: t("common.error") });
     } finally {
+      createGroupLockRef.current = false;
       setCreatingGroup(false);
     }
   };
@@ -676,7 +738,7 @@ export function CardsWorkflowHub({
             className="mt-2 flex h-10 w-full items-center justify-center gap-2 rounded-xl bg-slate-900 text-sm font-black text-white"
           >
             {creatingGroup ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Plus className="h-4 w-4" aria-hidden />}
-            {t("taskGroups.section.createButton")}
+            {creatingGroup ? t("taskGroups.section.saving") : t("taskGroups.section.createButton")}
           </button>
         </div>
       ) : null}

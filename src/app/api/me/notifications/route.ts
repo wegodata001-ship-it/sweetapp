@@ -4,7 +4,6 @@ import {
   listMeNotifications,
   markMeNotificationsRead,
   sectionForNotificationType,
-  isManagerRole,
 } from "@/lib/notifications/me-inbox";
 import { resolveNotificationColor } from "@/lib/notifications/priority";
 
@@ -23,7 +22,7 @@ export async function GET(req: NextRequest) {
       userId: session.sub,
       role: session.role,
       onlyUnread,
-      take: isManagerRole(session.role) ? 80 : 40,
+      take: 10,
     });
     rows = listed.rows;
     unreadCount = listed.unreadCount;

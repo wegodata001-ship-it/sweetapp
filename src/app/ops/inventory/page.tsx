@@ -1120,6 +1120,10 @@ export default function InventoryPage() {
               }}
               hasLocations={inventoryLocations.length > 0}
               refreshKey={countRefreshKey}
+              onShelfActivity={() => {
+                setCountRefreshKey((k) => k + 1);
+                void loadShelfSummaries();
+              }}
             />
           ) : null}
 

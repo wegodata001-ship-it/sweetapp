@@ -3,6 +3,7 @@
 import { X } from "lucide-react";
 import { usePathname } from "next/navigation";
 import { useEffect } from "react";
+import { SidebarBrand } from "@/components/brand/sidebar-brand";
 import { AppNavContent } from "@/components/app-nav-content";
 import { useI18n } from "@/components/i18n-provider";
 import { useMobileNav } from "@/components/mobile-nav-context";
@@ -40,10 +41,7 @@ export function MobileNavDrawer() {
         style={{ paddingBottom: "max(12px, env(safe-area-inset-bottom))" }}
       >
         <div className="flex shrink-0 items-center justify-between gap-2 border-b border-white/10 px-3 py-3 pe-[max(12px,env(safe-area-inset-end))] ps-[max(12px,env(safe-area-inset-start))] pt-[max(12px,env(safe-area-inset-top))]">
-          <div className="min-w-0">
-            <p className="truncate text-sm font-black tracking-[0.12em] text-white">{t("meta.appTitle")}</p>
-            <p className="font-arabic-brand truncate text-sm font-bold text-luxury-gold">{t("meta.brandSubtitle")}</p>
-          </div>
+          <SidebarBrand variant="drawer" className="items-start text-start" />
           <button
             type="button"
             onClick={closeNav}

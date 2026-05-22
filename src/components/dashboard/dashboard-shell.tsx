@@ -3,22 +3,18 @@
 import { useCallback, useEffect, useState } from "react";
 import { useI18n } from "@/components/i18n-provider";
 import type { DashboardSummary } from "@/lib/dashboard/summary";
-import { DashboardHeader } from "@/components/dashboard/dashboard-header";
+import { DashboardHero } from "@/components/dashboard/dashboard-hero";
 import { ExpenseCategoryCards } from "@/components/dashboard/expense-category-cards";
-import { ZCashCards } from "@/components/dashboard/z-cash-cards";
-import { WeddingOrderCards } from "@/components/dashboard/wedding-order-cards";
+import { ZReportCards } from "@/components/dashboard/z-report-cards";
+import { WeddingOverviewCards } from "@/components/dashboard/wedding-overview-cards";
 import { AlertsPanel } from "@/components/dashboard/alerts-panel";
-import { ProfitAnalyticsChart } from "@/components/dashboard/profit-analytics-chart";
+import { FinancialAnalyticsChart } from "@/components/dashboard/financial-analytics-chart";
 import { TasksPerformanceChart } from "@/components/dashboard/tasks-performance-chart";
 import { SupplierPaymentsChart } from "@/components/dashboard/supplier-payments-chart";
-import { DashboardSummaryStrip } from "@/components/dashboard/dashboard-summary-strip";
+import pageStyles from "./dashboard-premium.module.css";
 
-function ShimmerBlock({ className }: { className?: string }) {
-  return (
-    <div
-      className={`animate-pulse rounded-2xl bg-gradient-to-r from-slate-100 via-slate-200/80 to-slate-100 ${className ?? ""}`}
-    />
-  );
+function Shimmer({ className }: { className?: string }) {
+  return <div className={`animate-pulse rounded-2xl bg-slate-300/50 ${className ?? ""}`} />;
 }
 
 export function DashboardShell() {
@@ -51,14 +47,14 @@ export function DashboardShell() {
 
   if (loading && !data) {
     return (
-      <div className="flex flex-col gap-4 p-1">
-        <ShimmerBlock className="h-24" />
-        <div className="grid gap-3 lg:grid-cols-4">
-          <ShimmerBlock className="h-64 lg:col-span-2" />
-          <ShimmerBlock className="h-64" />
-          <ShimmerBlock className="h-64" />
+      <div className={`${pageStyles.pageBg} flex flex-col gap-2 p-0.5`}>
+        <Shimmer className="h-52 rounded-3xl" />
+        <div className="grid gap-2 lg:grid-cols-4">
+          <Shimmer className="h-36 lg:col-span-2" />
+          <Shimmer className="h-36" />
+          <Shimmer className="h-36" />
         </div>
-        <ShimmerBlock className="h-48" />
+        <Shimmer className="h-72 rounded-3xl" />
       </div>
     );
   }
@@ -70,7 +66,7 @@ export function DashboardShell() {
         <button
           type="button"
           onClick={() => void load()}
-          className="mt-4 rounded-xl bg-rose-600 px-4 py-2 text-sm font-bold text-white"
+          className="mt-3 rounded-lg bg-rose-600 px-4 py-2 text-sm font-bold text-white"
         >
           {t("dashboard.redesign.refresh")}
         </button>
@@ -81,33 +77,39 @@ export function DashboardShell() {
   if (!data) return null;
 
   return (
-    <div className="tcg-fade-in flex flex-col gap-4">
+    <div className={`${pageStyles.pageBg} tcg-fade-in flex flex-col gap-2`}>
       {data.dbUnavailable ? (
-        <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-950">
-          {t("dashboard.dbUnavailableTitle")} — {t("dashboard.dbUnavailableHint")}
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-950">
+          {t("dashboard.dbUnavailableTitle")}
         </div>
       ) : null}
 
-      <DashboardHeader updatedAt={data.updatedAt} loading={loading} onRefresh={() => void load()} />
+      <DashboardHero
+        todayPnl={data.todayPnl}
+        monthPnl={data.monthPnl}
+        updatedAt={data.updatedAt}
+        loading={loading}
+        onRefresh={() => void load()}
+      />
 
-      <section className="grid grid-cols-1 gap-3 lg:grid-cols-4">
-        <ExpenseCategoryCards cards={data.expensesByType} />
-        <ZCashCards data={data.zCash} />
-        <WeddingOrderCards data={data.weddings} />
+      <section className="grid grid-cols-1 gap-2 lg:grid-cols-4 lg:items-stretch">
+        <div className="lg:col-span-2">
+          <ExpenseCategoryCards cards={data.expensesByType} />
+        </div>
+        <ZReportCards data={data.zPos} />
+        <WeddingOverviewCards data={data.weddings} />
       </section>
 
-      <section className="grid grid-cols-1 gap-3 xl:grid-cols-2">
+      <section className="grid grid-cols-1 gap-2 xl:grid-cols-[minmax(260px,300px)_1fr]">
         <AlertsPanel alerts={data.alerts} />
-        <div className="flex flex-col gap-3">
-          <ProfitAnalyticsChart data={data.dailyChart} />
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+        <div className="flex min-w-0 flex-col gap-2">
+          <FinancialAnalyticsChart data={data.dailyChart} />
+          <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
             <TasksPerformanceChart data={data.tasksChart} />
-            <SupplierPaymentsChart data={data.supplierChart} />
+            <SupplierPaymentsChart data={data.supplierPayments} />
           </div>
         </div>
       </section>
-
-      <DashboardSummaryStrip strip={data.strip} />
     </div>
   );
 }

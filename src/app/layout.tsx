@@ -43,8 +43,27 @@ export async function generateMetadata(): Promise<Metadata> {
   const locale = normalizeLocale(cookieStore.get(WEGO_LOCALE_COOKIE)?.value);
   const t = createTranslator(locale);
   return {
-    title: t("meta.appTitle"),
+    title: {
+      default: `${t("meta.appTitle")} · ${t("meta.erpShort")}`,
+      template: `%s · ${t("meta.erpShort")}`,
+    },
     description: t("meta.appDescription"),
+    icons: {
+      icon: [
+        { url: "/icon-192.png", sizes: "192x192", type: "image/png" },
+        { url: "/icon-512.png", sizes: "512x512", type: "image/png" },
+      ],
+      apple: [{ url: "/apple-icon.png", sizes: "180x180", type: "image/png" }],
+    },
+    themeColor: [
+      { media: "(prefers-color-scheme: light)", color: "#071826" },
+      { media: "(prefers-color-scheme: dark)", color: "#071826" },
+    ],
+    appleWebApp: {
+      capable: true,
+      title: t("meta.erpShort"),
+      statusBarStyle: "black-translucent",
+    },
   };
 }
 

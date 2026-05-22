@@ -1,0 +1,33 @@
+.cardEnter {
+  animation: groupCardIn 0.45s cubic-bezier(0.22, 1, 0.36, 1) backwards;
+}
+
+.cardEnterOptimistic {
+  animation: groupCardIn 0.45s cubic-bezier(0.22, 1, 0.36, 1) backwards;
+  box-shadow: 0 0 0 1px rgba(16, 185, 129, 0.25), 0 0 20px rgba(16, 185, 129, 0.12);
+}
+
+.cardBtn {
+  transition:
+    transform 0.2s ease,
+    box-shadow 0.2s ease,
+    border-color 0.2s ease;
+}
+
+.cardBtn:hover {
+  transform: translateY(-2px);
+  box-shadow:
+    0 8px 24px rgba(15, 23, 42, 0.08),
+    0 0 16px rgba(212, 175, 55, 0.08);
+}
+
+@keyframes groupCardIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}

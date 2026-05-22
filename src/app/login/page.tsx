@@ -1,12 +1,14 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { FormEvent, Suspense, useEffect, useState } from "react";
-import { IdCard, KeyRound, ShieldCheck } from "lucide-react";
+import { Lock, ShieldCheck, User } from "lucide-react";
 import { useAuth } from "@/components/auth-provider";
 import { useI18n } from "@/components/i18n-provider";
 import { LanguageSwitcher } from "@/components/language-switcher";
+import styles from "./login.module.css";
 
 function LoginContent() {
   const router = useRouter();
@@ -59,104 +61,125 @@ function LoginContent() {
   }
 
   return (
-    <div
-      className="relative flex min-h-screen items-center justify-center bg-gradient-to-br from-luxury-navy-rich via-luxury-navy-rich to-luxury-charcoal px-4 py-10"
-      dir={dir}
-    >
-      <div className="absolute end-4 top-4">
+    <div className={styles.page} dir={dir}>
+      <div className={styles.bgMesh} aria-hidden>
+        <span className={styles.particle} />
+        <span className={styles.particle} />
+        <span className={styles.particle} />
+        <span className={styles.particle} />
+        <span className={styles.particle} />
+      </div>
+
+      <div className={styles.lang}>
         <LanguageSwitcher guest />
       </div>
 
-      <div className="app-panel w-full max-w-md p-6 shadow-luxury-sm sm:p-8">
-        <div className="flex items-center justify-center">
-          <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-luxury-gold/15 ring-1 ring-luxury-gold/30">
-            <ShieldCheck className="h-7 w-7 text-luxury-gold" aria-hidden />
+      <div className={styles.grid}>
+        <div className={styles.cardWrap}>
+          <div className={styles.card}>
+            <div className={styles.cardIcon}>
+              <ShieldCheck className="h-6 w-6" strokeWidth={2} aria-hidden />
+            </div>
+            <p className={styles.cardTitle}>WEGO BUSINESS</p>
+            <p className={styles.cardSubtitle}>{t("auth.loginControlPanel")}</p>
+
+            <div className={styles.welcome}>
+              <p className={styles.welcomeTitle}>{t("auth.loginWelcomeTitle")}</p>
+              <p className={styles.welcomeText}>{t("auth.loginWelcomeText")}</p>
+            </div>
+
+            <form onSubmit={(e) => void onSubmit(e)} className={styles.form}>
+              <div>
+                <label htmlFor="identifier" className={styles.label}>
+                  {t("auth.identifier")}
+                </label>
+                <div className={styles.inputWrap}>
+                  <span className={styles.inputIcon}>
+                    <User className="h-4 w-4" aria-hidden />
+                  </span>
+                  <input
+                    id="identifier"
+                    type="text"
+                    inputMode="text"
+                    autoComplete="username"
+                    value={identifier}
+                    onChange={(e) => setIdentifier(e.target.value)}
+                    placeholder={t("auth.identifierPlaceholder")}
+                    dir="auto"
+                    className={styles.input}
+                    required
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label htmlFor="password" className={styles.label}>
+                  {t("auth.password")}
+                </label>
+                <div className={styles.inputWrap}>
+                  <span className={styles.inputIcon}>
+                    <Lock className="h-4 w-4" aria-hidden />
+                  </span>
+                  <input
+                    id="password"
+                    type={showPassword ? "text" : "password"}
+                    autoComplete="current-password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    className={styles.input}
+                    required
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((v) => !v)}
+                  className={styles.togglePass}
+                >
+                  {showPassword ? t("auth.hidePassword") : t("auth.showPassword")}
+                </button>
+              </div>
+
+              {error ? (
+                <p className={styles.error} role="alert">
+                  {error}
+                </p>
+              ) : null}
+
+              <button
+                type="submit"
+                disabled={submitting || !identifier.trim() || !password}
+                className={styles.submitBtn}
+              >
+                {submitting ? t("auth.submitting") : t("auth.loginSubmit")}
+              </button>
+            </form>
+
+            <p className={styles.footerLinks}>
+              {t("auth.needHelp")}
+              <br />
+              <Link href="/">{t("auth.backHome")}</Link>
+            </p>
           </div>
         </div>
-        <p className="mt-4 text-center text-xs font-bold tracking-[0.18em] text-luxury-gold">
-          {t("meta.appTitle")}
-        </p>
-        <h1 className="mt-2 text-center text-2xl font-black text-slate-950 sm:text-3xl">
-          {t("auth.loginTitle")}
-        </h1>
-        <p className="mt-2 text-center text-sm text-slate-600">{t("auth.loginSubtitle")}</p>
 
-        <form onSubmit={(e) => void onSubmit(e)} className="mt-7 space-y-4">
-          <div>
-            <label htmlFor="identifier" className="mb-1 block text-xs font-black text-slate-700">
-              {t("auth.identifier")}
-            </label>
-            <div className="relative">
-              <span className="pointer-events-none absolute inset-y-0 end-3 flex items-center text-slate-400">
-                <IdCard className="h-5 w-5" aria-hidden />
-              </span>
-              <input
-                id="identifier"
-                type="text"
-                inputMode="text"
-                autoComplete="username"
-                value={identifier}
-                onChange={(e) => setIdentifier(e.target.value)}
-                placeholder={t("auth.identifierPlaceholder")}
-                dir="auto"
-                className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 pe-11 text-base font-bold text-slate-900 outline-none ring-luxury-gold/30 focus:ring-2"
-                required
+        <section className={styles.brand} aria-label={t("auth.loginBrandArea")}>
+          <div className={styles.brandCard}>
+            <div className={styles.logoStage}>
+              <span className={styles.logoGlow} aria-hidden />
+              <Image
+                src="/logo.png"
+                alt="WEGO BUSINESS"
+                width={380}
+                height={380}
+                priority
+                className={styles.logoImage}
               />
             </div>
+            <p className={styles.brandTitle}>WEGO BUSINESS</p>
+            <p className={styles.brandSubtitle}>{t("auth.loginControlPanel")}</p>
+            <p className={styles.brandTagline}>{t("auth.loginTagline")}</p>
           </div>
-
-          <div>
-            <label htmlFor="password" className="mb-1 block text-xs font-black text-slate-700">
-              {t("auth.password")}
-            </label>
-            <div className="relative">
-              <span className="pointer-events-none absolute inset-y-0 end-3 flex items-center text-slate-400">
-                <KeyRound className="h-5 w-5" aria-hidden />
-              </span>
-              <input
-                id="password"
-                type={showPassword ? "text" : "password"}
-                autoComplete="current-password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 pe-11 text-base font-bold text-slate-900 outline-none ring-luxury-gold/30 focus:ring-2"
-                required
-              />
-            </div>
-            <button
-              type="button"
-              onClick={() => setShowPassword((v) => !v)}
-              className="mt-1 text-[11px] font-bold text-luxury-gold hover:underline"
-            >
-              {showPassword ? t("auth.hidePassword") : t("auth.showPassword")}
-            </button>
-          </div>
-
-          {error ? (
-            <p
-              className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm font-bold text-red-700"
-              role="alert"
-            >
-              {error}
-            </p>
-          ) : null}
-
-          <button
-            type="submit"
-            disabled={submitting || !identifier.trim() || !password}
-            className="w-full rounded-2xl bg-luxury-gold px-5 py-3.5 text-base font-black text-luxury-charcoal shadow-luxury-sm transition hover:bg-luxury-gold-hover disabled:opacity-60"
-          >
-            {submitting ? t("auth.submitting") : t("auth.submit")}
-          </button>
-        </form>
-
-        <p className="mt-5 text-center text-[11px] text-slate-500">{t("auth.needHelp")}</p>
-
-        <p className="mt-4 text-center text-xs text-slate-500">
-          <Link href="/" className="font-semibold text-luxury-gold hover:underline">
-            {t("auth.backHome")}
-          </Link>
-        </p>
+        </section>
       </div>
     </div>
   );
@@ -165,8 +188,8 @@ function LoginContent() {
 function LoginFallback() {
   const { t } = useI18n();
   return (
-    <div className="flex min-h-screen items-center justify-center bg-luxury-navy-rich px-4 py-12">
-      <p className="text-sm font-semibold text-slate-300">{t("common.loading")}</p>
+    <div className={styles.loadingFallback}>
+      <p>{t("common.loading")}</p>
     </div>
   );
 }

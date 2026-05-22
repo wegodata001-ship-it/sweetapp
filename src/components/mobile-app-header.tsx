@@ -6,6 +6,7 @@ import { useAuth } from "@/components/auth-provider";
 import { useI18n } from "@/components/i18n-provider";
 import { LanguageSwitcher } from "@/components/language-switcher";
 import { useMobileNav } from "@/components/mobile-nav-context";
+import { BrandLogoMini } from "@/components/brand/brand-logo";
 import { StaffAlertsBell } from "@/components/staff-alerts-bell";
 
 function initials(name: string) {
@@ -51,10 +52,9 @@ export function MobileAppHeader() {
       </button>
 
       <div className="flex min-w-0 flex-1 items-center gap-2">
-        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-luxury-gold text-sm font-black text-luxury-charcoal">
-          W
-        </div>
+        <BrandLogoMini size={36} />
         <div className="min-w-0 flex-1">
+          <p className="truncate text-[10px] font-black tracking-wide text-slate-500">{t("meta.erpShort")}</p>
           <p className="truncate text-sm font-bold text-slate-900">{user.fullName}</p>
         </div>
       </div>

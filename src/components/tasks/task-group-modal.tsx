@@ -23,6 +23,10 @@ import {
 } from "react";
 import { useI18n } from "@/components/i18n-provider";
 import { useToast } from "@/components/toast-provider";
+import {
+  detailToSummary,
+  type TaskGroupChangeEvent,
+} from "@/components/tasks/task-group-types";
 export type TaskGroupMemberDto = {
   id: string;
   user_id: string;
@@ -78,7 +82,7 @@ type Props = {
   canManage: boolean;
   onClose: () => void;
   /** Called after any mutation that should refresh the parent list */
-  onChanged?: () => void;
+  onChanged?: (event?: TaskGroupChangeEvent) => void;
 };
 
 type TabId = "tasks" | "files" | "members" | "notes";
@@ -126,7 +130,7 @@ type ContentProps = {
   employees: EmployeeOption[];
   canManage: boolean;
   onClose: () => void;
-  onChanged?: () => void;
+  onChanged?: (event?: TaskGroupChangeEvent) => void;
 };
 
 function TaskGroupModalContent({
@@ -228,15 +232,16 @@ function TaskGroupModalContent({
             description: json.error ?? f.name,
           });
         } else {
-          setData((prev) =>
-            prev
-              ? {
-                  ...prev,
-                  files: [json.data, ...prev.files],
-                  file_count: prev.file_count + 1,
-                }
-              : prev,
-          );
+          setData((prev) => {
+            if (!prev) return prev;
+            const next = {
+              ...prev,
+              files: [json.data, ...prev.files],
+              file_count: prev.file_count + 1,
+            };
+            onChanged?.({ type: "updated", summary: detailToSummary(next) });
+            return next;
+          });
           showToast({
             tone: "success",
             title: t("taskGroups.toast.uploadOkTitle"),
@@ -253,7 +258,6 @@ function TaskGroupModalContent({
         setUploadingCount((c) => Math.max(0, c - 1));
       }
     }
-    onChanged?.();
   };
 
   const handleDrop = (e: DragEvent<HTMLDivElement>) => {
@@ -269,17 +273,17 @@ function TaskGroupModalContent({
       credentials: "same-origin",
     });
     if (res.ok) {
-      setData((prev) =>
-        prev
-          ? {
-              ...prev,
-              files: prev.files.filter((f) => f.id !== file.id),
-              file_count: Math.max(0, prev.file_count - 1),
-            }
-          : prev,
-      );
+      setData((prev) => {
+        if (!prev) return prev;
+        const next = {
+          ...prev,
+          files: prev.files.filter((f) => f.id !== file.id),
+          file_count: Math.max(0, prev.file_count - 1),
+        };
+        onChanged?.({ type: "updated", summary: detailToSummary(next) });
+        return next;
+      });
       showToast({ tone: "info", title: t("taskGroups.toast.fileRemoved") });
-      onChanged?.();
     } else {
       const j = (await res.json().catch(() => null)) as { error?: string } | null;
       showToast({
@@ -319,10 +323,15 @@ function TaskGroupModalContent({
         });
         return;
       }
-      setData((prev) => (prev ? { ...prev, ...json.data, tasks: prev.tasks, files: prev.files } : prev));
+      setData((prev) => {
+        const next = prev
+          ? { ...prev, ...json.data, tasks: prev.tasks, files: prev.files }
+          : json.data;
+        onChanged?.({ type: "updated", summary: detailToSummary(next) });
+        return next;
+      });
       setEditing(false);
       showToast({ tone: "success", title: t("taskGroups.toast.groupSaved") });
-      onChanged?.();
     } finally {
       setSaving(false);
     }
@@ -351,7 +360,7 @@ function TaskGroupModalContent({
       }
       showToast({ tone: "success", title: t("taskGroups.toast.membersUpdated") });
       await load();
-      onChanged?.();
+      onChanged?.({ type: "refresh" });
     } finally {
       setSavingMembers(false);
     }
@@ -377,7 +386,7 @@ function TaskGroupModalContent({
       tone: "info",
       title: json.archived ? t("taskGroups.toast.groupArchived") : t("taskGroups.toast.groupDeleted"),
     });
-    onChanged?.();
+    onChanged?.({ type: "deleted", id: groupId });
     onClose();
   };
 

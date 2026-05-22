@@ -1,0 +1,163 @@
+.section {
+  display: flex;
+  height: 100%;
+  flex-direction: column;
+  border-radius: 24px;
+  border: 1px solid rgba(192, 132, 252, 0.2);
+  background: linear-gradient(155deg, #120a1c 0%, #1a0f28 45%, #0f0818 100%);
+  padding: 0.65rem;
+  box-shadow: 0 0 28px rgba(168, 85, 247, 0.1);
+}
+
+.title {
+  margin-bottom: 0.5rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  padding-bottom: 0.5rem;
+  font-size: 13px;
+  font-weight: 900;
+  color: rgba(233, 213, 255, 0.95);
+}
+
+.list {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.card {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 0.65rem;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  padding: 0.55rem 0.65rem;
+  transition:
+    transform 0.25s ease,
+    box-shadow 0.25s ease;
+}
+
+.card:hover {
+  transform: translateY(-2px);
+}
+
+.iconRing {
+  display: flex;
+  height: 2.5rem;
+  width: 2.5rem;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.25);
+}
+
+.iconRing svg {
+  animation: iconPulse 3.5s ease-in-out infinite;
+}
+
+.body {
+  min-width: 0;
+  flex: 1;
+}
+
+.label {
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.value {
+  font-size: 1.25rem;
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+  color: #fff;
+}
+
+.spark {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 1.25rem;
+  margin-top: 0.25rem;
+}
+
+.sparkBar {
+  width: 4px;
+  border-radius: 2px 2px 0 0;
+  transform-origin: bottom;
+  animation: sparkGrow 0.8s ease-out backwards;
+}
+
+.weddings {
+  background: linear-gradient(135deg, rgba(168, 85, 247, 0.35), rgba(236, 72, 153, 0.2));
+  box-shadow: 0 0 22px rgba(236, 72, 153, 0.18);
+}
+
+.weddings .iconRing {
+  color: #f9a8d4;
+  box-shadow: 0 0 14px rgba(236, 72, 153, 0.4);
+}
+
+.weddings .label {
+  color: rgba(251, 207, 232, 0.85);
+}
+
+.weddings .sparkBar {
+  background: linear-gradient(180deg, #f472b6, #a855f7);
+}
+
+.orders {
+  background: linear-gradient(135deg, rgba(37, 99, 235, 0.35), rgba(6, 182, 212, 0.2));
+  box-shadow: 0 0 22px rgba(56, 189, 248, 0.16);
+}
+
+.orders .iconRing {
+  color: #67e8f9;
+  box-shadow: 0 0 14px rgba(56, 189, 248, 0.4);
+}
+
+.orders .label {
+  color: rgba(186, 230, 253, 0.9);
+}
+
+.orders .sparkBar {
+  background: linear-gradient(180deg, #38bdf8, #2563eb);
+}
+
+.documented {
+  background: linear-gradient(135deg, rgba(5, 150, 105, 0.38), rgba(16, 185, 129, 0.22));
+  box-shadow: 0 0 22px rgba(16, 185, 129, 0.18);
+}
+
+.documented .iconRing {
+  color: #6ee7b7;
+  box-shadow: 0 0 14px rgba(16, 185, 129, 0.4);
+}
+
+.documented .label {
+  color: rgba(167, 243, 208, 0.9);
+}
+
+.documented .sparkBar {
+  background: linear-gradient(180deg, #34d399, #059669);
+}
+
+@keyframes iconPulse {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.08);
+  }
+}
+
+@keyframes sparkGrow {
+  from {
+    transform: scaleY(0);
+  }
+  to {
+    transform: scaleY(1);
+  }
+}

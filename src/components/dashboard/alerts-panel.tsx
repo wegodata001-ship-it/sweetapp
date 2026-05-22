@@ -6,15 +6,17 @@ import {
   CalendarHeart,
   CheckCircle2,
   ClipboardList,
+  Info,
 } from "lucide-react";
 import { useI18n } from "@/components/i18n-provider";
 import type { DashboardAlert } from "@/lib/dashboard/summary";
+import styles from "./alerts-panel.module.css";
 
-const SEVERITY_STYLES = {
-  critical: "border-rose-200/90 bg-gradient-to-l from-rose-50 to-white text-rose-950",
-  warning: "border-amber-200/90 bg-gradient-to-l from-amber-50 to-white text-amber-950",
-  success: "border-emerald-200/90 bg-gradient-to-l from-emerald-50 to-white text-emerald-950",
-  wedding: "border-fuchsia-200/90 bg-gradient-to-l from-pink-50 via-fuchsia-50/40 to-white text-fuchsia-950",
+const SEVERITY_CLASS = {
+  critical: styles.critical,
+  warning: styles.warning,
+  success: styles.success,
+  wedding: styles.wedding,
 } as const;
 
 function detailForAlert(alert: DashboardAlert, t: (k: string, p?: Record<string, string | number>) => string) {
@@ -28,43 +30,44 @@ function detailForAlert(alert: DashboardAlert, t: (k: string, p?: Record<string,
   if (alert.id === "inventory-shortage") {
     return t("dashboard.redesign.shortageCount", { count: alert.detail });
   }
+  if (alert.id.startsWith("wedding-") || alert.id.startsWith("order-soon")) {
+    return alert.detail;
+  }
   return alert.detail;
+}
+
+function alertIcon(alert: DashboardAlert) {
+  if (alert.severity === "success") return CheckCircle2;
+  if (alert.severity === "wedding") return CalendarHeart;
+  if (alert.severity === "critical") return AlertTriangle;
+  if (alert.id === "inventory-ok") return Info;
+  return ClipboardList;
 }
 
 export function AlertsPanel({ alerts }: { alerts: DashboardAlert[] }) {
   const { t } = useI18n();
 
   return (
-    <section className="flex h-full min-h-[320px] flex-col rounded-2xl border border-slate-200/80 bg-white p-4 shadow-sm">
-      <h2 className="erp-section-title">{t("dashboard.alertsTitle")}</h2>
-      <div className="mt-3 flex flex-1 flex-col gap-2 overflow-y-auto pr-1">
+    <section className={styles.panel}>
+      <h2 className={styles.title}>{t("dashboard.alertsTitle")}</h2>
+      <div className={styles.list}>
         {alerts.length === 0 ? (
-          <p className="rounded-2xl border border-slate-100 bg-slate-50 px-3 py-6 text-center text-sm font-semibold text-slate-500">
-            {t("dashboard.redesign.noAlerts")}
-          </p>
+          <p className={styles.empty}>{t("dashboard.redesign.noAlerts")}</p>
         ) : (
           alerts.map((alert) => {
-            const style = SEVERITY_STYLES[alert.severity];
-            const Icon =
-              alert.severity === "success"
-                ? CheckCircle2
-                : alert.severity === "wedding"
-                  ? CalendarHeart
-                  : alert.severity === "critical"
-                    ? AlertTriangle
-                    : ClipboardList;
+            const tone = SEVERITY_CLASS[alert.severity];
+            const extra = alert.id === "inventory-ok" ? ` ${styles.info}` : "";
+            const Icon = alertIcon(alert);
             const inner = (
               <>
-                <p className="flex items-center gap-2 text-sm font-extrabold">
-                  <Icon className="h-4 w-4 shrink-0 opacity-80" aria-hidden />
+                <p className={styles.alertTitle}>
+                  <Icon className={styles.alertIcon} aria-hidden />
                   {t(alert.titleKey, alert.titleParams)}
                 </p>
-                <p className="mt-1 text-[13px] font-semibold leading-snug opacity-90">
-                  {detailForAlert(alert, t)}
-                </p>
+                <p className={styles.alertDetail}>{detailForAlert(alert, t)}</p>
               </>
             );
-            const className = `block rounded-2xl border px-3 py-2.5 transition hover:shadow-md ${style}`;
+            const className = `${styles.alert} ${tone}${extra}`;
             return alert.href ? (
               <Link key={alert.id} href={alert.href} className={className}>
                 {inner}

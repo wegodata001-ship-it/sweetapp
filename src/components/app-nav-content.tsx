@@ -181,15 +181,15 @@ function NavLink({
         compact ? "min-h-[52px] w-full justify-start px-4 py-3" : ""
       } ${
         active
-          ? "border-r-[3px] border-[#c9a227] bg-[linear-gradient(90deg,rgba(201,162,39,.18),transparent)] text-white shadow-[0_0_20px_rgba(201,162,39,0.15)]"
-          : "text-slate-300 hover:translate-x-[-3px] hover:bg-white/[0.06] hover:text-white"
+          ? "border-r-[3px] border-[#c9a227] bg-[linear-gradient(90deg,rgba(201,162,39,.22),transparent)] text-white shadow-[0_0_24px_rgba(201,162,39,0.2)]"
+          : "text-slate-300 hover:translate-x-[-3px] hover:bg-white/[0.07] hover:text-white hover:shadow-[0_0_12px_rgba(201,162,39,0.08)]"
       }`}
     >
       <span
         className={`flex h-[42px] w-[42px] shrink-0 items-center justify-center rounded-[14px] border transition duration-300 ease-out group-hover/sidebar-item:scale-[1.08] ${
           active
-            ? "border-[#c9a227]/50 bg-[linear-gradient(135deg,#c9a227,#e8d48a)] text-[#081224] shadow-[0_0_16px_rgba(201,162,39,0.45)]"
-            : "border-white/10 bg-white/[0.04] text-slate-400 group-hover/sidebar-item:border-[#c9a227]/40 group-hover/sidebar-item:text-[#c9a227] group-hover/sidebar-item:shadow-[0_0_10px_rgba(201,162,39,0.12)]"
+            ? "border-[#c9a227]/55 bg-[linear-gradient(135deg,#c9a227,#e8d48a)] text-[#081224] shadow-[0_0_20px_rgba(201,162,39,0.5)]"
+            : "border-white/10 bg-white/[0.04] text-slate-400 group-hover/sidebar-item:border-[#c9a227]/45 group-hover/sidebar-item:text-[#c9a227] group-hover/sidebar-item:shadow-[0_0_14px_rgba(201,162,39,0.18)]"
         }`}
       >
         <Icon className="h-5 w-5" aria-hidden />

@@ -1,13 +1,12 @@
 "use client";
 
-import { AlertTriangle, CheckCircle2, Clock, Package, TrendingUp } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Clock, TrendingUp, Warehouse } from "lucide-react";
 import Link from "next/link";
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useI18n } from "@/components/i18n-provider";
+import { InventoryCountWorkspace } from "./inventory-count-workspace";
 import { InventoryFilters } from "./inventory-filters";
 import { InventoryStatsCards } from "./inventory-stats-cards";
-import { ShelfCard } from "./shelf-card";
-import { ShelfExpandedPanel } from "./shelf-expanded-panel";
 import { ShelfHistoryDrawer, ShelfStatsDrawer } from "./shelf-history-drawer";
 import type {
   InventoryLocationPick,
@@ -15,6 +14,7 @@ import type {
   MonthlyCountRow,
   ShelfSummary,
 } from "./types";
+import { WarehouseAreaCard } from "./warehouse-area-card";
 import { formatRelativeTime, localYmd, resolveShelfStatus } from "./utils";
 
 export type { InventoryCountProductRow, MonthlyCountRow, ShelfSummary } from "./types";
@@ -40,6 +40,7 @@ export type InventoryCountDashboardProps = {
   onAddProduct: (shelfName: string) => void;
   hasLocations: boolean;
   refreshKey?: number;
+  onShelfActivity?: () => void;
 };
 
 export function InventoryCountDashboard({
@@ -48,28 +49,17 @@ export function InventoryCountDashboard({
   inventoryLocations,
   countLocationName,
   setCountLocationName,
-  monthlyRows,
-  actualById,
-  setActualById,
   countDate,
-  setCountDate,
-  countQ,
-  setCountQ,
-  saveMonthly,
-  busy,
-  countMeta,
-  countPage,
-  setCountPage,
   onAddProduct,
   hasLocations,
   refreshKey = 0,
+  onShelfActivity,
 }: InventoryCountDashboardProps) {
   const { t, bcp47, dir } = useI18n();
   const tD = (key: string, vars?: Record<string, string | number>) =>
     t(`ops.inventory.countDashboard.${key}`, vars);
 
-  const [expandedShelf, setExpandedShelf] = useState("");
-  const [countingMode, setCountingMode] = useState(false);
+  const [workspaceShelf, setWorkspaceShelf] = useState<string | null>(null);
   const [shelfSearch, setShelfSearch] = useState("");
   const [filterArea, setFilterArea] = useState("");
   const [filterShortageOnly, setFilterShortageOnly] = useState(false);
@@ -80,9 +70,7 @@ export function InventoryCountDashboard({
   const [shelvesRecentActivity, setShelvesRecentActivity] = useState<Set<string>>(new Set());
   const [todaySurplusCount, setTodaySurplusCount] = useState(0);
   const [shelfLastUpdateMap, setShelfLastUpdateMap] = useState<Record<string, string>>({});
-
-  const activeShelf = countLocationName.trim();
-  const isExpanded = Boolean(activeShelf && expandedShelf === activeShelf);
+  const [shelfProgressMap, setShelfProgressMap] = useState<Record<string, number>>({});
 
   useEffect(() => {
     const today = localYmd(new Date());
@@ -96,13 +84,18 @@ export function InventoryCountDashboard({
           { credentials: "same-origin" },
         );
         const j = (await res.json()) as {
-          data?: { product: { location: string }; difference: number; createdAt: string }[];
+          data?: {
+            product: { location: string; id: string };
+            difference: number;
+            createdAt: string;
+          }[];
         };
         if (cancelled) return;
         const rows = j.data ?? [];
         const countedToday = new Set<string>();
         const recent = new Set<string>();
         const lastMap: Record<string, string> = {};
+        const progressByLoc: Record<string, Set<string>> = {};
         let surplus = 0;
         const todayStart = `${today}T00:00:00`;
         for (const r of rows) {
@@ -111,15 +104,25 @@ export function InventoryCountDashboard({
           if (r.createdAt >= todayStart) {
             countedToday.add(loc);
             if (r.difference > 0) surplus += 1;
+            if (!progressByLoc[loc]) progressByLoc[loc] = new Set();
+            progressByLoc[loc].add(r.product.id);
           } else {
             recent.add(loc);
           }
           if (!lastMap[loc] || r.createdAt > lastMap[loc]) lastMap[loc] = r.createdAt;
         }
+        const progressPct: Record<string, number> = {};
+        for (const s of shelfSummaries) {
+          const name = s.name.trim();
+          const counted = progressByLoc[name]?.size ?? 0;
+          progressPct[name] =
+            s.productCount > 0 ? Math.round((counted / s.productCount) * 100) : 0;
+        }
         setShelvesCountedToday(countedToday);
         setShelvesRecentActivity(recent);
         setTodaySurplusCount(surplus);
         setShelfLastUpdateMap(lastMap);
+        setShelfProgressMap(progressPct);
       } catch {
         if (!cancelled) {
           setShelvesCountedToday(new Set());
@@ -131,18 +134,7 @@ export function InventoryCountDashboard({
     return () => {
       cancelled = true;
     };
-  }, [refreshKey]);
-
-  useEffect(() => {
-    if (!activeShelf || !monthlyRows.length) return;
-    let max: string | null = null;
-    for (const p of monthlyRows) {
-      if (p.lastCountedAt && (!max || p.lastCountedAt > max)) max = p.lastCountedAt;
-    }
-    if (max) {
-      setShelfLastUpdateMap((m) => ({ ...m, [activeShelf]: max }));
-    }
-  }, [activeShelf, monthlyRows]);
+  }, [refreshKey, shelfSummaries]);
 
   const pendingShelfCount = useMemo(
     () => shelfSummaries.filter((s) => !shelvesCountedToday.has(s.name.trim())).length,
@@ -169,44 +161,10 @@ export function InventoryCountDashboard({
     shelvesCountedToday,
   ]);
 
-  const sheetStats = useMemo(() => {
-    let match = 0;
-    let short = 0;
-    let surplus = 0;
-    let filled = 0;
-    for (const r of monthlyRows) {
-      if (r.actual === null || Number.isNaN(r.actual)) continue;
-      filled += 1;
-      const d = r.actual - r.previousQuantity;
-      if (d === 0) match += 1;
-      else if (d < 0) short += 1;
-      else surplus += 1;
-    }
-    return { total: monthlyRows.length, match, short, surplus, filled };
-  }, [monthlyRows]);
-
-  const startCount = (name: string) => {
+  const openWorkspace = (name: string) => {
     const trimmed = name.trim();
-    if (expandedShelf === trimmed && activeShelf === trimmed) {
-      setCountingMode((c) => !c);
-      return;
-    }
     setCountLocationName(trimmed);
-    setExpandedShelf(trimmed);
-    setCountingMode(true);
-  };
-
-  const collapseShelf = () => {
-    setExpandedShelf("");
-    setCountLocationName("");
-    setCountingMode(false);
-  };
-
-  const bumpQty = (id: string, prev: number, delta: number) => {
-    const cur = actualById[id];
-    const base = cur === "" || cur === undefined ? prev : Number(cur);
-    const next = Math.max(0, (Number.isFinite(base) ? base : prev) + delta);
-    setActualById((p) => ({ ...p, [id]: String(next) }));
+    setWorkspaceShelf(trimmed);
   };
 
   const statCards = [
@@ -238,20 +196,20 @@ export function InventoryCountDashboard({
 
   return (
     <div className="space-y-6" dir={dir}>
-      <section className="overflow-hidden rounded-3xl border border-slate-200/60 bg-gradient-to-br from-white via-sky-50 to-slate-100/90 p-6 shadow-sm md:p-8">
+      <section className="overflow-hidden rounded-3xl border border-slate-200/60 bg-gradient-to-br from-slate-900 via-slate-800 to-sky-950 p-6 text-white shadow-xl md:p-8">
         <div className="flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
           <div className="order-2 min-w-0 flex-1 text-end md:order-1">
-            <p className="text-xs font-bold uppercase tracking-[0.18em] text-sky-700/80">
-              {tD("heroKicker")}
+            <p className="text-xs font-bold uppercase tracking-[0.2em] text-sky-300/90">
+              {t("ops.inventory.workspace.kicker")}
             </p>
-            <h2 className="mt-2 text-2xl font-black text-slate-900 md:text-3xl">{tD("heroTitle")}</h2>
-            <p className="mt-2 max-w-xl text-sm font-medium text-slate-600 md:text-base">
-              {tD("heroSubtitle")}
+            <h2 className="mt-2 text-2xl font-black md:text-3xl">{t("ops.inventory.workspace.heroTitle")}</h2>
+            <p className="mt-2 max-w-xl text-sm font-medium text-slate-300 md:text-base">
+              {t("ops.inventory.workspace.heroSubtitle")}
             </p>
           </div>
-          <div className="order-1 flex shrink-0 justify-center md:order-2 md:justify-start">
-            <div className="grid h-24 w-24 place-items-center rounded-3xl bg-gradient-to-br from-sky-100 to-indigo-200/70 shadow-inner ring-1 ring-white/90 md:h-28 md:w-28">
-              <Package className="h-12 w-12 text-sky-700/90 md:h-14 md:w-14" strokeWidth={1.5} aria-hidden />
+          <div className="order-1 flex shrink-0 justify-center md:order-2">
+            <div className="grid h-24 w-24 place-items-center rounded-3xl bg-white/10 ring-1 ring-white/20 md:h-28 md:w-28">
+              <Warehouse className="h-12 w-12 text-sky-200 md:h-14 md:w-14" strokeWidth={1.5} aria-hidden />
             </div>
           </div>
         </div>
@@ -277,8 +235,8 @@ export function InventoryCountDashboard({
       />
 
       <div>
-        <h3 className="text-sm font-black text-slate-800">{tD("shelvesTitle")}</h3>
-        <p className="mt-1 text-xs font-medium text-slate-500">{tD("shelvesHint")}</p>
+        <h3 className="text-base font-black text-slate-900">{t("ops.inventory.workspace.areasTitle")}</h3>
+        <p className="mt-1 text-xs font-medium text-slate-500">{t("ops.inventory.workspace.areasHint")}</p>
         {!hasLocations ? (
           <p className="mt-4 rounded-2xl border border-dashed border-amber-200 bg-amber-50/80 p-4 text-sm font-semibold text-amber-900">
             {tD("noLocations")}{" "}
@@ -291,10 +249,9 @@ export function InventoryCountDashboard({
             {tD("noShelvesMatch")}
           </p>
         ) : (
-          <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          <div className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
             {filteredShelves.map((shelf) => {
               const trimmed = shelf.name.trim();
-              const isActive = activeShelf === trimmed;
               const counted = shelvesCountedToday.has(trimmed);
               const status = resolveShelfStatus(
                 shelf,
@@ -302,55 +259,41 @@ export function InventoryCountDashboard({
                 shelvesRecentActivity.has(trimmed),
               );
               const lastIso = shelfLastUpdateMap[trimmed] ?? null;
+              const progressPct = shelfProgressMap[trimmed] ?? (counted ? 100 : 0);
               return (
-                <Fragment key={shelf.name}>
-                  <ShelfCard
-                    shelf={shelf}
-                    status={status}
-                    isActive={isActive}
-                    lastUpdateIso={lastIso}
-                    bcp47={bcp47}
-                    tD={tD}
-                    onStartCount={() => startCount(shelf.name)}
-                    onHistory={() => setHistoryShelf(trimmed)}
-                    onStats={() => setStatsShelf(shelf)}
-                    onAddProduct={() => onAddProduct(trimmed)}
-                  />
-                  {isExpanded && isActive ? (
-                    <div className="col-span-full">
-                      <ShelfExpandedPanel
-                        shelfName={trimmed}
-                        countingMode={countingMode}
-                        monthlyRows={monthlyRows}
-                        countDate={countDate}
-                        onCountDate={setCountDate}
-                        countQ={countQ}
-                        onCountQ={setCountQ}
-                        onAddProduct={() => onAddProduct(trimmed)}
-                        onCollapse={collapseShelf}
-                        actualById={actualById}
-                        setActualById={setActualById}
-                        bumpQty={bumpQty}
-                        countMeta={countMeta}
-                        countPage={countPage}
-                        setCountPage={setCountPage}
-                        sheetStats={sheetStats}
-                        saveMonthly={saveMonthly}
-                        busy={busy}
-                        tD={tD}
-                        dateLabel={t("ops.inventory.count.date")}
-                        addProductLabel={t("ops.inventory.count.addInventoryItem")}
-                        prevLabel={t("ops.inventory.pagination.previous")}
-                        nextLabel={t("ops.inventory.pagination.next")}
-                      />
-                    </div>
-                  ) : null}
-                </Fragment>
+                <WarehouseAreaCard
+                  key={shelf.name}
+                  shelf={shelf}
+                  status={status}
+                  progressPct={progressPct}
+                  lastUpdateIso={lastIso}
+                  bcp47={bcp47}
+                  tD={tD}
+                  onOpenWorkspace={() => openWorkspace(shelf.name)}
+                  onHistory={() => setHistoryShelf(trimmed)}
+                  onStats={() => setStatsShelf(shelf)}
+                  onAddProduct={() => onAddProduct(trimmed)}
+                />
               );
             })}
           </div>
         )}
       </div>
+
+      {workspaceShelf ? (
+        <InventoryCountWorkspace
+          shelfName={workspaceShelf}
+          countDate={countDate}
+          refreshKey={refreshKey}
+          onClose={() => {
+            setWorkspaceShelf(null);
+            setCountLocationName("");
+            onShelfActivity?.();
+          }}
+          onProductCounted={() => onShelfActivity?.()}
+          onAddProduct={() => onAddProduct(workspaceShelf)}
+        />
+      ) : null}
 
       <ShelfHistoryDrawer
         open={historyShelf !== null}

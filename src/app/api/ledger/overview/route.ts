@@ -65,23 +65,47 @@ export async function GET(req: NextRequest) {
     : undefined;
 
   try {
-    const [customers, suppliers, employees] = await Promise.all([
-      prisma.customer.findMany({
-        where: nameWhere,
-        orderBy: { name: "asc" },
-        select: { id: true, name: true, openingBalance: true },
-      }),
-      prisma.supplier.findMany({
-        where: nameWhere,
-        orderBy: { name: "asc" },
-        select: { id: true, name: true, openingBalance: true },
-      }),
-      prisma.employee.findMany({
-        where: nameWhere,
-        orderBy: { name: "asc" },
-        select: { id: true, name: true, openingBalance: true },
-      }),
-    ]);
+    const listCap = entityIdFilter
+      ? 1
+      : Math.min(500, page * pageSize + pageSize);
+
+    const fetchCustomers =
+      !entityTypeFilter || entityTypeFilter === "all" || entityTypeFilter === "customer";
+    const fetchSuppliers =
+      !entityTypeFilter || entityTypeFilter === "all" || entityTypeFilter === "supplier";
+    const fetchEmployees =
+      !entityTypeFilter || entityTypeFilter === "all" || entityTypeFilter === "employee";
+
+    const [customers, suppliers, employees, customerCount, supplierCount, employeeCount] =
+      await Promise.all([
+        fetchCustomers
+          ? prisma.customer.findMany({
+              where: nameWhere,
+              orderBy: { name: "asc" },
+              take: listCap,
+              select: { id: true, name: true, openingBalance: true },
+            })
+          : Promise.resolve([]),
+        fetchSuppliers
+          ? prisma.supplier.findMany({
+              where: nameWhere,
+              orderBy: { name: "asc" },
+              take: listCap,
+              select: { id: true, name: true, openingBalance: true },
+            })
+          : Promise.resolve([]),
+        fetchEmployees
+          ? prisma.employee.findMany({
+              where: nameWhere,
+              orderBy: { name: "asc" },
+              take: listCap,
+              select: { id: true, name: true, openingBalance: true },
+            })
+          : Promise.resolve([]),
+        fetchCustomers ? prisma.customer.count({ where: nameWhere }) : Promise.resolve(0),
+        fetchSuppliers ? prisma.supplier.count({ where: nameWhere }) : Promise.resolve(0),
+        fetchEmployees ? prisma.employee.count({ where: nameWhere }) : Promise.resolve(0),
+      ]);
 
     const merged: UnifiedEntity[] = [];
 
@@ -142,7 +166,9 @@ export async function GET(req: NextRequest) {
 
     filtered.sort((a, b) => a.name.localeCompare(b.name, "he"));
 
-    const total = filtered.length;
+    const total = entityIdFilter
+      ? filtered.length
+      : customerCount + supplierCount + employeeCount;
     const start = (page - 1) * pageSize;
     const pageRows = filtered.slice(start, start + pageSize);
 
@@ -150,30 +176,105 @@ export async function GET(req: NextRequest) {
     const supIds = pageRows.filter((r) => r.entity_type === "supplier").map((r) => r.id);
     const empIds = pageRows.filter((r) => r.entity_type === "employee").map((r) => r.id);
 
-    const docsForPage =
-      custIds.length > 0
-        ? await prisma.financialDocument.findMany({
-            where: { customerId: { in: custIds } },
-            select: {
-              customerId: true,
-              category: true,
-              totalAmount: true,
-              docDate: true,
-              createdAt: true,
-            },
-          })
-        : [];
+    const hasDateFilter = Boolean(dateFrom?.trim() || dateTo?.trim());
+    const docDateFrom = dateFrom?.trim() ? new Date(`${dateFrom.trim()}T00:00:00.000Z`) : null;
+    const docDateTo = dateTo?.trim() ? new Date(`${dateTo.trim()}T23:59:59.999Z`) : null;
 
-    const paysForPage =
+    const [
+      orderSums,
+      paySums,
+      periodDocs,
+      periodPays,
+      supLedger,
+      empLedger,
+    ] = await Promise.all([
       custIds.length > 0
-        ? await prisma.payment.findMany({
+        ? prisma.financialDocument.groupBy({
+            by: ["customerId"],
+            where: { customerId: { in: custIds }, category: "הכנסה" },
+            _sum: { totalAmount: true },
+          })
+        : Promise.resolve([]),
+      custIds.length > 0
+        ? prisma.payment.groupBy({
+            by: ["customerId"],
             where: {
               customerId: { in: custIds },
               document: { is: { category: "הכנסה" } },
             },
+            _sum: { amount: true },
+          })
+        : Promise.resolve([]),
+      custIds.length > 0
+        ? hasDateFilter
+          ? prisma.financialDocument.findMany({
+              where: {
+                customerId: { in: custIds },
+                category: "הכנסה",
+                OR: [
+                  ...(docDateFrom && docDateTo
+                    ? [{ docDate: { gte: docDateFrom, lte: docDateTo } }]
+                    : docDateFrom
+                      ? [{ docDate: { gte: docDateFrom } }]
+                      : docDateTo
+                        ? [{ docDate: { lte: docDateTo } }]
+                        : []),
+                  {
+                    docDate: null,
+                    createdAt: {
+                      ...(docDateFrom ? { gte: docDateFrom } : {}),
+                      ...(docDateTo ? { lte: docDateTo } : {}),
+                    },
+                  },
+                ],
+              },
+              select: {
+                customerId: true,
+                totalAmount: true,
+                docDate: true,
+                createdAt: true,
+              },
+            })
+          : prisma.financialDocument.findMany({
+              where: { customerId: { in: custIds }, category: "הכנסה" },
+              select: {
+                customerId: true,
+                totalAmount: true,
+                docDate: true,
+                createdAt: true,
+              },
+            })
+        : Promise.resolve([]),
+      custIds.length > 0
+        ? prisma.payment.findMany({
+            where: {
+              customerId: { in: custIds },
+              document: { is: { category: "הכנסה" } },
+              ...(hasDateFilter
+                ? {
+                    createdAt: {
+                      ...(docDateFrom ? { gte: docDateFrom } : {}),
+                      ...(docDateTo ? { lte: docDateTo } : {}),
+                    },
+                  }
+                : {}),
+            },
             select: { customerId: true, amount: true, createdAt: true },
           })
-        : [];
+        : Promise.resolve([]),
+      supIds.length > 0
+        ? prisma.ledgerEntry.findMany({
+            where: { supplierId: { in: supIds } },
+            select: { supplierId: true, debit: true, credit: true, entryDate: true },
+          })
+        : Promise.resolve([]),
+      empIds.length > 0
+        ? prisma.ledgerEntry.findMany({
+            where: { employeeId: { in: empIds } },
+            select: { employeeId: true, debit: true, credit: true, entryDate: true },
+          })
+        : Promise.resolve([]),
+    ]);
 
     const customerTotals = new Map<string, { orders: number; payments: number }>();
     const debitCreditMoves = new Map<string, { debit: number; credit: number; count: number }>();
@@ -182,11 +283,18 @@ export async function GET(req: NextRequest) {
       debitCreditMoves.set(id, { debit: 0, credit: 0, count: 0 });
     }
 
-    for (const d of docsForPage) {
+    for (const g of orderSums) {
+      if (!g.customerId) continue;
+      const totals = customerTotals.get(g.customerId);
+      if (totals) totals.orders += Math.max(0, g._sum.totalAmount ?? 0);
+    }
+    for (const g of paySums) {
+      const totals = customerTotals.get(g.customerId);
+      if (totals) totals.payments += Math.max(0, g._sum.amount ?? 0);
+    }
+
+    for (const d of periodDocs) {
       if (!d.customerId) continue;
-      if (d.category !== "הכנסה") continue;
-      const totals = customerTotals.get(d.customerId);
-      if (totals) totals.orders += Math.max(0, d.totalAmount);
       const entryDate = docEntryDate(d);
       if (!inDateRange(entryDate, dateFrom, dateTo)) continue;
       const row = debitCreditMoves.get(d.customerId);
@@ -195,31 +303,13 @@ export async function GET(req: NextRequest) {
       row.count += 1;
     }
 
-    for (const p of paysForPage) {
-      const totals = customerTotals.get(p.customerId);
-      if (totals) totals.payments += Math.max(0, p.amount);
+    for (const p of periodPays) {
       if (!inPaymentRange(p.createdAt, dateFrom, dateTo)) continue;
       const row = debitCreditMoves.get(p.customerId);
       if (!row) continue;
       row.credit += p.amount;
       row.count += 1;
     }
-
-    const supLedger =
-      supIds.length > 0
-        ? await prisma.ledgerEntry.findMany({
-            where: { supplierId: { in: supIds } },
-            select: { supplierId: true, debit: true, credit: true, entryDate: true },
-          })
-        : [];
-
-    const empLedger =
-      empIds.length > 0
-        ? await prisma.ledgerEntry.findMany({
-            where: { employeeId: { in: empIds } },
-            select: { employeeId: true, debit: true, credit: true, entryDate: true },
-          })
-        : [];
 
     const supAgg = new Map<string, { debit: number; credit: number; count: number; net: number }>();
     for (const id of supIds) {
@@ -300,9 +390,9 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({
       ok: true,
       counts: {
-        customers: customers.length,
-        suppliers: suppliers.length,
-        employees: employees.length,
+        customers: customerCount,
+        suppliers: supplierCount,
+        employees: employeeCount,
       },
       total,
       page,

@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireDb } from "@/lib/api-route";
 import { getSessionFromCookie } from "@/lib/auth/get-session";
-import { loadProductPickerCatalog } from "@/lib/finance/product-picker-catalog";
+import { searchProductPickerCatalog } from "@/lib/finance/product-picker-catalog";
 import { prisma } from "@/lib/prisma";
 
 export const dynamic = "force-dynamic";
 
-/** GET — קטלוג מוצרים מלא (טעינה אחת, סינון בלקוח) */
+/** GET — חיפוש ממוקד (q, skip, take) — לא טוען את כל המאגר */
 export async function GET(req: NextRequest) {
   const block = await requireDb();
   if (block) return block;
@@ -16,11 +16,20 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ ok: false, error: "נדרשת התחברות" }, { status: 401 });
   }
 
-  const supplierId = req.nextUrl.searchParams.get("supplierId")?.trim() || null;
+  const sp = req.nextUrl.searchParams;
+  const supplierId = sp.get("supplierId")?.trim() || null;
+  const q = sp.get("q")?.trim() ?? "";
+  const skip = Math.max(0, parseInt(sp.get("skip") ?? "0", 10) || 0);
+  const take = Math.min(30, Math.max(5, parseInt(sp.get("take") ?? "20", 10) || 20));
 
   try {
-    const data = await loadProductPickerCatalog(supplierId);
-    return NextResponse.json({ ok: true, data });
+    const { rows, hasMore } = await searchProductPickerCatalog({
+      q: q || undefined,
+      supplierId,
+      skip,
+      take,
+    });
+    return NextResponse.json({ ok: true, data: rows, hasMore });
   } catch (e) {
     console.error("[GET /api/finance/product-picker]", e);
     return NextResponse.json(
@@ -66,7 +75,14 @@ export async function POST(req: NextRequest) {
           regularPrice,
           unit,
         },
-        include: { supplier: { select: { name: true } } },
+        select: {
+          id: true,
+          productName: true,
+          regularPrice: true,
+          unit: true,
+          supplierId: true,
+          supplier: { select: { name: true } },
+        },
       });
       await prisma.supplierProductPriceHistory.create({
         data: { supplierProductId: p.id, price: regularPrice, source: "manual" },
@@ -91,6 +107,7 @@ export async function POST(req: NextRequest) {
       where: { name },
       update: {},
       create: { name },
+      select: { id: true, name: true },
     });
 
     return NextResponse.json({
