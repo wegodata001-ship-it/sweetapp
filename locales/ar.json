@@ -255,6 +255,11 @@
   },
   "permissions": {
     "title": "الصلاحيات (الشاشات)",
+    "groups": {
+      "finance": "المالية",
+      "ops": "التشغيل",
+      "other": "الإدارة والنظام"
+    },
     "labels": {
       "financial_registration": "التسجيل المالي",
       "ledger": "دفتر الحسابات",
@@ -384,7 +389,16 @@
       "documented": "طلبيات موثقة",
       "heroEyebrow": "لوحة الإدارة",
       "heroTitle": "لوحة التحكم المالية",
-      "heroSubtitle": "الإيرادات والمصروفات والأرباح — في لحظة",
+      "heroSubtitle": "الإيرادات والمصروفات والتدفق النقدي — في لحظة",
+      "heroTotalIncomeToday": "إجمالي إيرادات اليوم",
+      "heroExpensesToday": "مصروفات اليوم",
+      "heroCashIncomeToday": "إيرادات نقدية",
+      "heroMonthIncomeOnly": "إيرادات الشهر",
+      "heroBreakdownCash": "نقد",
+      "heroBreakdownCard": "بطاقة",
+      "heroBreakdownChecks": "شيكات",
+      "heroVsYesterdayUp": "+{{pct}}% عن أمس",
+      "heroVsYesterdayDown": "{{pct}}% أقل من أمس",
       "heroNetProfitToday": "صافي الربح اليوم",
       "heroMonthIncome": "إجمالي إيرادات الشهر",
       "heroTodayIncome": "إيرادات اليوم",
@@ -395,6 +409,7 @@
       "chartDaily": "يومي — 14 يومًا",
       "filter": {
         "today": "اليوم",
+        "week": "هذا الأسبوع",
         "7d": "7 أيام",
         "30d": "30 يوم",
         "month": "هذا الشهر"
@@ -2347,6 +2362,7 @@
         "areaProgress": "تقدم الجرد"
       },
       "warehouse": {
+        "pageHint": "اختر رفاً — اجرد — يُحفظ تلقائياً",
         "kpiShelves": "إجمالي الرفوف",
         "kpiShortage": "منتجات ناقصة",
         "kpiOver": "مخزون منخفض",
@@ -2356,10 +2372,23 @@
         "addShelf": "رف جديد",
         "noShelves": "لا توجد رفوف — أضف رفاً",
         "card": {
+          "noPermission": "لا توجد صلاحية لهذا الإجراء",
+          "menu": {
+            "label": "إجراءات الرف",
+            "addProducts": "إضافة منتجات",
+            "duplicate": "نسخ الرف",
+            "delete": "حذف الرف"
+          },
+          "statusPerfect": "تطابق كامل",
+          "statusShortage": "يوجد نواقص",
+          "statusErrors": "فروقات كثيرة",
           "statusCounted": "تم الجرد",
           "statusPending": "بانتظار الجرد",
-          "statusShortage": "نواقص",
           "statusActive": "نشط",
+          "metricProducts": "{{count}} منتجات",
+          "metricShort": "{{count}} ناقص",
+          "metricSurplus": "{{count}} زيادة",
+          "metricMatch": "{{pct}}% تطابق",
           "productCount": "{{count}} منتجات",
           "countProgress": "{{done}} جُرد · {{left}} متبقي",
           "progress": "التقدم",
@@ -2370,11 +2399,13 @@
         },
         "modal": {
           "kicker": "جرد الرف",
+          "autosaveHint": "حفظ تلقائي عند كل تغيير",
           "scanPlaceholder": "امسح الباركود / ابحث…",
           "empty": "لا منتجات على هذا الرف",
           "loading": "جاري التحميل…",
           "inSystem": "في النظام",
           "actual": "المجرود",
+          "diff": "الفرق",
           "lastCount": "آخر جرد",
           "noHistory": "لا سجل",
           "qty": "الكمية",
@@ -2397,6 +2428,51 @@
             "nameRequired": "الاسم مطلوب",
             "saveFailed": "خطأ"
           }
+        },
+        "toast": {
+          "deleted": "تم حذف الرف",
+          "duplicated": "تم نسخ الرف",
+          "deleteFailed": "فشل الحذف",
+          "duplicateFailed": "فشل النسخ"
+        },
+        "deleteShelf": {
+          "title": "حذف الرف",
+          "body": "حذف الرف «{{name}}»؟",
+          "hint": "سيتم إزالة ربط المنتجات بالرف — المنتجات نفسها لن تُحذف.",
+          "confirm": "حذف"
+        },
+        "addProductsModal": {
+          "title": "إضافة منتجات للرف",
+          "modeExisting": "منتج موجود",
+          "modeNew": "منتج جديد",
+          "newName": "اسم المنتج",
+          "newNamePlaceholder": "مثال: كولا 330",
+          "newNameRequired": "اسم المنتج مطلوب",
+          "newUnit": "الوحدة",
+          "newUnitPlaceholder": "قطعة / كغ / لتر",
+          "newMinimum": "الحد الأدنى",
+          "invalidMinimum": "حد أدنى غير صالح",
+          "createFailed": "فشل إنشاء المنتج",
+          "created": "تمت إضافة منتج جديد للرف",
+          "createFromSearch": "إنشاء «{{name}}» كمنتج جديد",
+          "search": "بحث منتج",
+          "searchPlaceholder": "اكتب اسم المنتج…",
+          "noResults": "لا منتجات",
+          "noLocation": "بدون رف",
+          "selected": "المحدد: {{name}}",
+          "quantity": "الكمية",
+          "slotNote": "موقع على الرف",
+          "slotOptional": "اختياري",
+          "pickProduct": "اختر منتجاً من القائمة",
+          "invalidQty": "كمية غير صالحة",
+          "save": "حفظ",
+          "saveContinue": "حفظ ومتابعة",
+          "saved": "تمت الإضافة للرف",
+          "saveFailed": "فشل الحفظ",
+          "existsTitle": "المنتج موجود على الرف",
+          "existsBody": "«{{name}}» موجود — زيادة الكمية؟",
+          "existsYes": "نعم",
+          "existsNo": "لا"
         },
         "addShelf": {
           "title": "رف جديد",
@@ -2887,7 +2963,19 @@
       "remaining": "متبقٍ",
       "targetLine": "الهدف: {{minutes}} د · {{percent}}%",
       "exceededHint": "تجاوزت الهدف — يلزم سبب التأخير",
-      "timeUntilTarget": "الوقت المتبقي حتى الهدف"
+      "timeUntilTarget": "الوقت المتبقي حتى الهدف",
+      "startedAt": "بدء: {{time}}",
+      "endsAt": "انتهاء: {{time}}",
+      "status": {
+        "PAUSED": "متوقف",
+        "RUNNING": "جارٍ",
+        "ON_TRACK": "في المسار",
+        "WARNING": "تحذير",
+        "LATE": "متأخر",
+        "OVERDUE": "تجاوز",
+        "PENDING": "قيد الانتظار",
+        "DONE": "منتهٍ"
+      }
     }
   },
   "workflows": {

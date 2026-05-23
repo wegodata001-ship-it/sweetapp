@@ -1,9 +1,13 @@
 "use client";
 
+import { useMemo, useState } from "react";
 import { Banknote, CreditCard, FileCheck, Layers, Receipt } from "lucide-react";
 import { CountUp } from "@/components/count-up";
 import { useI18n } from "@/components/i18n-provider";
+import { DashboardTimeFilter } from "@/components/dashboard/dashboard-time-filter";
 import type { ZPosMetrics } from "@/lib/dashboard/financial-engine";
+import type { DashboardTimeRange, RangeKeyed } from "@/lib/dashboard/time-range";
+import fade from "@/components/dashboard/section-fade.module.css";
 import styles from "./z-report-cards.module.css";
 
 const ITEMS = [
@@ -30,13 +34,18 @@ const TONE_CLASS: Record<(typeof ITEMS)[number]["tone"], string> = {
   other: styles.other,
 };
 
-export function ZReportCards({ data }: { data: ZPosMetrics }) {
+export function ZReportCards({ dataByRange }: { dataByRange: RangeKeyed<ZPosMetrics> }) {
   const { t } = useI18n();
+  const [range, setRange] = useState<DashboardTimeRange>("today");
+  const data = useMemo(() => dataByRange[range], [dataByRange, range]);
 
   return (
     <div className={styles.section}>
-      <h2 className={`${styles.title} font-arabic-brand`}>{t("dashboard.redesign.sectionZ")}</h2>
-      <div className={styles.grid}>
+      <div className={styles.head}>
+        <h2 className={`${styles.title} font-arabic-brand`}>{t("dashboard.redesign.sectionZ")}</h2>
+        <DashboardTimeFilter value={range} onChange={setRange} variant="z" />
+      </div>
+      <div key={range} className={`${styles.grid} ${fade.fade}`}>
         {ITEMS.map((item) => {
           const Icon = item.icon;
           const value = data[item.field];
@@ -47,7 +56,11 @@ export function ZReportCards({ data }: { data: ZPosMetrics }) {
               </div>
               <p className={styles.label}>{t(LABEL_KEYS[item.key])}</p>
               <p className={styles.value}>
-                {item.currency ? <CountUp value={value} currency duration={1000} /> : <CountUp value={value} duration={800} />}
+                {item.currency ? (
+                  <CountUp value={value} currency duration={1000} />
+                ) : (
+                  <CountUp value={value} duration={800} />
+                )}
               </p>
             </div>
           );

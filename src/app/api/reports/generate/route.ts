@@ -4,10 +4,9 @@ import { requireDb } from "@/lib/api-route";
 import { getSessionFromCookie } from "@/lib/auth/get-session";
 import { REPORT_TYPES } from "@/lib/pdf/constants";
 import { inferReportTypeForDocumentId, titleForReportType } from "@/lib/pdf/classify-report";
-import { generateFinancialDocumentPdfBytes } from "@/lib/pdf/generate-financial-document-pdf";
 import { generateCashFlowPdfBytes } from "@/lib/pdf/generate-cashflow-pdf";
-import { generatePaymentPdfBytes } from "@/lib/pdf/generate-payment-pdf";
 import { persistGeneratedReport } from "@/lib/pdf/persist-generated-report";
+import { runDocumentPdfJob, runPaymentPdfJob } from "@/lib/pdf/run-document-pdf-job";
 import { erpReportFileName } from "@/lib/storage/report-file-names";
 
 /**
@@ -37,34 +36,18 @@ export async function POST(req: NextRequest) {
     if (entity === "document") {
       const doc = await prisma.financialDocument.findUnique({
         where: { id: relatedId },
-        include: { customer: { select: { name: true } } },
+        select: { id: true },
       });
       if (!doc) return NextResponse.json({ ok: false, error: "מסמך לא נמצא" }, { status: 404 });
 
+      const result = await runDocumentPdfJob(relatedId, session.sub);
       const reportType = await inferReportTypeForDocumentId(relatedId);
-      const bytes = await generateFinancialDocumentPdfBytes(relatedId);
-      const docDate = doc.docDate ?? doc.createdAt;
-      const fileName = erpReportFileName(reportType, docDate, new Date());
-
-      const { report, publicUrl } = await persistGeneratedReport({
-        type: reportType,
-        title: titleForReportType(reportType, doc.title),
-        relatedId,
-        fileName,
-        pdfBytes: bytes,
-        createdById: session.sub,
-      });
-
-      await prisma.financialDocument.update({
-        where: { id: relatedId },
-        data: { pdfStoragePath: report.filePath },
-      });
 
       return NextResponse.json({
         ok: true,
-        pdfUrl: publicUrl,
-        reportId: report.id,
-        publicUrl,
+        pdfUrl: result.publicUrl,
+        reportId: result.reportId,
+        publicUrl: result.publicUrl,
         type: reportType,
       });
     }
@@ -101,27 +84,17 @@ export async function POST(req: NextRequest) {
     if (entity === "payment") {
       const pay = await prisma.payment.findUnique({
         where: { id: relatedId },
-        include: { customer: true },
+        select: { id: true },
       });
       if (!pay) return NextResponse.json({ ok: false, error: "תשלום לא נמצא" }, { status: 404 });
 
-      const bytes = await generatePaymentPdfBytes(relatedId);
-      const fileName = erpReportFileName(REPORT_TYPES.PAYMENT, pay.createdAt, new Date());
-
-      const { report, publicUrl } = await persistGeneratedReport({
-        type: REPORT_TYPES.PAYMENT,
-        title: titleForReportType(REPORT_TYPES.PAYMENT, pay.customer.name),
-        relatedId,
-        fileName,
-        pdfBytes: bytes,
-        createdById: session.sub,
-      });
+      const result = await runPaymentPdfJob(relatedId, session.sub);
 
       return NextResponse.json({
         ok: true,
-        pdfUrl: publicUrl,
-        reportId: report.id,
-        publicUrl,
+        pdfUrl: result.publicUrl,
+        reportId: result.reportId,
+        publicUrl: result.publicUrl,
         type: REPORT_TYPES.PAYMENT,
       });
     }

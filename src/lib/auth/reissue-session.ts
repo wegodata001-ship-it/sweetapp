@@ -12,20 +12,51 @@ const COOKIE_OPTIONS = {
   maxAge: 60 * 60 * 24 * 7,
 };
 
-/** Re-sign JWT from DB (e.g. after password change) and attach Set-Cookie. */
-export async function appendRefreshedSessionCookie(res: NextResponse, userId: string): Promise<boolean> {
-  const user = await prismaAny.user.findUnique({
-    where: { id: userId },
-    select: { id: true, email: true, role: true, isActive: true, mustChangePassword: true },
-  });
-  if (!user || !user.isActive) return false;
-  const permissions = await getPermissionStringsForUser(user.id, user.role as UserRole);
+export type SessionReissueUser = {
+  id: string;
+  email: string;
+  role: UserRole;
+  mustChangePassword: boolean;
+  permissions?: string[];
+};
+
+/** Re-sign JWT and attach Set-Cookie — permissions אופציונליים (כבר נטענו ב-sync). */
+export async function appendRefreshedSessionCookie(
+  res: NextResponse,
+  user: SessionReissueUser | string,
+): Promise<boolean> {
+  const base =
+    typeof user === "string"
+      ? await prismaAny.user.findUnique({
+          where: { id: user },
+          select: { id: true, email: true, role: true, isActive: true, mustChangePassword: true },
+        })
+      : null;
+
+  const row =
+    typeof user === "string"
+      ? base
+      : {
+          id: user.id,
+          email: user.email,
+          role: user.role,
+          isActive: true,
+          mustChangePassword: user.mustChangePassword,
+        };
+
+  if (!row || (typeof user === "string" && !row.isActive)) return false;
+
+  const permissions =
+    typeof user !== "string" && user.permissions
+      ? user.permissions
+      : await getPermissionStringsForUser(row.id, row.role as UserRole);
+
   const token = await signSessionToken({
-    sub: user.id,
-    email: user.email,
-    role: user.role as UserRole,
+    sub: row.id,
+    email: row.email,
+    role: row.role as UserRole,
     permissions,
-    mustChangePassword: Boolean(user.mustChangePassword),
+    mustChangePassword: Boolean(row.mustChangePassword),
   });
   res.cookies.set(COOKIE_NAME, token, COOKIE_OPTIONS);
   return true;

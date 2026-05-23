@@ -1,20 +1,33 @@
 import { unstable_cache } from "next/cache";
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { requireDb } from "@/lib/api-route";
 import { getSessionFromCookie } from "@/lib/auth/get-session";
-import { computeDashboardSummary } from "@/lib/dashboard/summary";
+import {
+  computeDashboardSummary,
+  computeDashboardHeroSlice,
+  type DashboardHeroSlice,
+  type DashboardSummary,
+} from "@/lib/dashboard/summary";
 import { WEGO_LOCALE_COOKIE, normalizeLocale } from "@/lib/i18n/constants";
 import { cookies } from "next/headers";
 
 export const dynamic = "force-dynamic";
 
+const CACHE_HEADERS = { "Cache-Control": "private, max-age=20, stale-while-revalidate=40" };
+
 const getCachedDashboardSummary = unstable_cache(
   async (locale: string) => computeDashboardSummary(locale),
   ["dashboard-summary"],
-  { revalidate: 45 },
+  { revalidate: 20 },
 );
 
-export async function GET() {
+const getCachedDashboardHero = unstable_cache(
+  async (locale: string) => computeDashboardHeroSlice(locale),
+  ["dashboard-hero"],
+  { revalidate: 20 },
+);
+
+export async function GET(req: NextRequest) {
   const block = await requireDb();
   if (block) return block;
 
@@ -25,12 +38,21 @@ export async function GET() {
 
   const cookieStore = await cookies();
   const locale = normalizeLocale(cookieStore.get(WEGO_LOCALE_COOKIE)?.value);
+  const section = req.nextUrl.searchParams.get("section");
 
   try {
+    if (section === "hero") {
+      const data = await getCachedDashboardHero(locale);
+      return NextResponse.json(
+        { ok: true, data } satisfies { ok: true; data: DashboardHeroSlice },
+        { headers: CACHE_HEADERS },
+      );
+    }
+
     const data = await getCachedDashboardSummary(locale);
     return NextResponse.json(
-      { ok: true, data },
-      { headers: { "Cache-Control": "private, max-age=30, stale-while-revalidate=60" } },
+      { ok: true, data } satisfies { ok: true; data: DashboardSummary },
+      { headers: CACHE_HEADERS },
     );
   } catch (e) {
     console.error("[api/dashboard/summary]", e);

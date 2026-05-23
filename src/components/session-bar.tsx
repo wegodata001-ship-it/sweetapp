@@ -89,7 +89,7 @@ export function SessionBar({ className }: SessionBarProps) {
         }}
         onSuccess={() => {
           setPwOpen(false);
-          void refresh();
+          void refresh({ sync: true });
         }}
       />
     </div>

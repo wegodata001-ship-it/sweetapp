@@ -255,6 +255,11 @@
   },
   "permissions": {
     "title": "Permissions (screens)",
+    "groups": {
+      "finance": "Finance",
+      "ops": "Operations",
+      "other": "Admin & system"
+    },
     "labels": {
       "financial_registration": "Finance register",
       "ledger": "Ledgers",
@@ -384,7 +389,16 @@
       "documented": "Documented orders",
       "heroEyebrow": "Admin console",
       "heroTitle": "Financial control center",
-      "heroSubtitle": "Revenue, expenses and profit — at a glance",
+      "heroSubtitle": "Revenue, expenses and cash flow — at a glance",
+      "heroTotalIncomeToday": "Total income today",
+      "heroExpensesToday": "Expenses today",
+      "heroCashIncomeToday": "Cash income today",
+      "heroMonthIncomeOnly": "Income this month",
+      "heroBreakdownCash": "Cash",
+      "heroBreakdownCard": "Card",
+      "heroBreakdownChecks": "Checks",
+      "heroVsYesterdayUp": "+{{pct}}% vs yesterday",
+      "heroVsYesterdayDown": "{{pct}}% less than yesterday",
       "heroNetProfitToday": "Net profit today",
       "heroMonthIncome": "Total income this month",
       "heroTodayIncome": "Income today",
@@ -395,6 +409,7 @@
       "chartDaily": "Daily — 14 days",
       "filter": {
         "today": "Today",
+        "week": "This week",
         "7d": "7 days",
         "30d": "30 days",
         "month": "This month"
@@ -2347,6 +2362,7 @@
         "areaProgress": "Count progress"
       },
       "warehouse": {
+        "pageHint": "Pick a shelf — count — saves automatically",
         "kpiShelves": "Total shelves",
         "kpiShortage": "Short items",
         "kpiOver": "Low stock",
@@ -2356,10 +2372,23 @@
         "addShelf": "New shelf",
         "noShelves": "No shelves — add your first shelf",
         "card": {
+          "noPermission": "No permission for this action",
+          "menu": {
+            "label": "Shelf actions",
+            "addProducts": "Add products",
+            "duplicate": "Duplicate shelf",
+            "delete": "Delete shelf"
+          },
+          "statusPerfect": "Full match",
+          "statusShortage": "Has shortages",
+          "statusErrors": "Many variances",
           "statusCounted": "Counted today",
           "statusPending": "Awaiting count",
-          "statusShortage": "Shortages",
           "statusActive": "Active",
+          "metricProducts": "{{count}} products",
+          "metricShort": "{{count}} short",
+          "metricSurplus": "{{count}} surplus",
+          "metricMatch": "{{pct}}% match",
           "productCount": "{{count}} products",
           "countProgress": "{{done}} counted · {{left}} left",
           "progress": "Progress",
@@ -2370,11 +2399,13 @@
         },
         "modal": {
           "kicker": "Shelf count",
+          "autosaveHint": "Auto-saves on every change",
           "scanPlaceholder": "Scan barcode / search…",
           "empty": "No products on this shelf",
           "loading": "Loading…",
           "inSystem": "System",
           "actual": "Counted",
+          "diff": "Diff",
           "lastCount": "Last count",
           "noHistory": "No history",
           "qty": "Qty",
@@ -2397,6 +2428,51 @@
             "nameRequired": "Name required",
             "saveFailed": "Error"
           }
+        },
+        "toast": {
+          "deleted": "Shelf deleted",
+          "duplicated": "Shelf duplicated",
+          "deleteFailed": "Delete failed",
+          "duplicateFailed": "Duplicate failed"
+        },
+        "deleteShelf": {
+          "title": "Delete shelf",
+          "body": "Delete shelf «{{name}}»?",
+          "hint": "Product links to this shelf will be removed — products are not deleted.",
+          "confirm": "Delete"
+        },
+        "addProductsModal": {
+          "title": "Add products to shelf",
+          "modeExisting": "Existing product",
+          "modeNew": "New product",
+          "newName": "Product name",
+          "newNamePlaceholder": "e.g. Cola 330",
+          "newNameRequired": "Product name required",
+          "newUnit": "Unit",
+          "newUnitPlaceholder": "pcs / kg / liter",
+          "newMinimum": "Minimum stock",
+          "invalidMinimum": "Invalid minimum",
+          "createFailed": "Could not create product",
+          "created": "New product added to shelf",
+          "createFromSearch": "Create «{{name}}» as new",
+          "search": "Search product",
+          "searchPlaceholder": "Type product name…",
+          "noResults": "No products found",
+          "noLocation": "No shelf",
+          "selected": "Selected: {{name}}",
+          "quantity": "Quantity",
+          "slotNote": "Slot on shelf",
+          "slotOptional": "Optional",
+          "pickProduct": "Pick a product from the list",
+          "invalidQty": "Invalid quantity",
+          "save": "Save",
+          "saveContinue": "Save & continue",
+          "saved": "Product added to shelf",
+          "saveFailed": "Save failed",
+          "existsTitle": "Product already on shelf",
+          "existsBody": "«{{name}}» is already on this shelf — increase quantity?",
+          "existsYes": "Yes, increase",
+          "existsNo": "No"
         },
         "addShelf": {
           "title": "New shelf",
@@ -2887,7 +2963,19 @@
       "remaining": "Left",
       "targetLine": "Target: {{minutes}} min · {{percent}}%",
       "exceededHint": "You exceeded the target — a delay reason is required",
-      "timeUntilTarget": "Time left until target"
+      "timeUntilTarget": "Time left until target",
+      "startedAt": "Started: {{time}}",
+      "endsAt": "Ends: {{time}}",
+      "status": {
+        "PAUSED": "Paused",
+        "RUNNING": "Running",
+        "ON_TRACK": "On track",
+        "WARNING": "Warning",
+        "LATE": "Late",
+        "OVERDUE": "Overdue",
+        "PENDING": "Pending",
+        "DONE": "Done"
+      }
     }
   },
   "workflows": {

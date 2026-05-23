@@ -1,5 +1,5 @@
-import fontkit from "@pdf-lib/fontkit";
-import { PDFDocument, StandardFonts } from "pdf-lib";
+import { PDFDocument } from "pdf-lib";
+import { embedInvoicePdfFonts } from "@/lib/pdf/font-cache";
 import { PAYMENT_METHOD_LABELS, type ZReportPayload } from "@/lib/finance/document-payload";
 import { parseNum } from "@/lib/format-shekel";
 
@@ -26,48 +26,13 @@ export function paymentMethodLabel(method: string | null): string {
   return PAYMENT_METHOD_LABELS[method as keyof typeof PAYMENT_METHOD_LABELS] ?? method;
 }
 
-/** Noto Sans Hebrew מה־Google Fonts — משתנה (VF) כולל עברית + ספרות לטיניות + ₪. קבצי hinted/NotoSansHebrew-*.ttf ב-noto-fonts הם תת-מערכת עברית בלבד וללא ספרות ASCII (□ ב־PDF). */
-const NOTO_SANS_HEBREW_VF_URL =
-  "https://raw.githubusercontent.com/google/fonts/main/ofl/notosanshebrew/NotoSansHebrew%5Bwdth%2Cwght%5D.ttf";
-
 export async function loadHebrewFont(pdfDoc: PDFDocument) {
-  pdfDoc.registerFontkit(fontkit);
-  try {
-    const res = await fetch(NOTO_SANS_HEBREW_VF_URL);
-    if (!res.ok) throw new Error("font fetch");
-    const bytes = new Uint8Array(await res.arrayBuffer());
-    return pdfDoc.embedFont(bytes);
-  } catch (e) {
-    throw new Error(
-      e instanceof Error
-        ? `טעינת גופן עברית ל-PDF נכשלה: ${e.message}`
-        : "טעינת גופן עברית ל-PDF נכשלה (בדקו רשת / CDN)",
-    );
-  }
+  const fonts = await embedInvoicePdfFonts(pdfDoc);
+  return fonts.he;
 }
 
-/**
- * גופנים למסמכי ERP: `he` = Noto Sans Hebrew VF (Unicode מלא לסכומים). `heBold` = Bold עברי בלבד
- * (לכותרות בלי ספרות) — לא לשרטוט מחרוזות עם מספרים/₪.
- */
 export async function loadInvoicePdfFonts(pdfDoc: PDFDocument) {
-  pdfDoc.registerFontkit(fontkit);
-  const boldUrl =
-    "https://raw.githubusercontent.com/googlefonts/noto-fonts/main/hinted/ttf/NotoSansHebrew/NotoSansHebrew-Bold.ttf";
-  const [regRes, boldRes] = await Promise.all([fetch(NOTO_SANS_HEBREW_VF_URL), fetch(boldUrl)]);
-  if (!regRes.ok) {
-    throw new Error("טעינת Noto Sans Hebrew ל-PDF נכשלה");
-  }
-  const regBytes = new Uint8Array(await regRes.arrayBuffer());
-  const he = await pdfDoc.embedFont(regBytes);
-  let heBold = he;
-  if (boldRes.ok) {
-    const boldBytes = new Uint8Array(await boldRes.arrayBuffer());
-    heBold = await pdfDoc.embedFont(boldBytes);
-  }
-  const en = await pdfDoc.embedFont(StandardFonts.Helvetica);
-  const enBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
-  return { he, heBold, en, enBold, num: en };
+  return embedInvoicePdfFonts(pdfDoc);
 }
 
 export function zReportTotals(z: ZReportPayload): {

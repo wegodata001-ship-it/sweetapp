@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useI18n } from "@/components/i18n-provider";
-import { PERMISSION_KEYS, type PermissionKey } from "@/lib/auth/permissions";
+import { PERMISSION_GROUPS, PERMISSION_KEYS, type PermissionKey } from "@/lib/auth/permissions";
 import { isValidNationalId, normalizeNationalId } from "@/lib/employees/national-id";
 import { translatePermission } from "@/lib/i18n/status-keys";
 
@@ -492,16 +492,50 @@ export default function AdminUsersPage() {
                       ))}
                     </div>
                   ) : null}
-                  <div className="grid gap-2">
-                    {PERMISSION_KEYS.map((key) => (
-                      <label key={key} className="flex items-center gap-2 text-sm text-slate-800">
-                        <input
-                          type="checkbox"
-                          checked={form.permissions.includes(key)}
-                          onChange={() => togglePermission(key)}
-                        />
-                        {translatePermission(t, key)}
-                      </label>
+                  <div className="space-y-4">
+                    {PERMISSION_GROUPS.map((group) => (
+                      <div
+                        key={group.groupKey}
+                        className="rounded-xl border border-slate-200/80 bg-white p-3 shadow-sm"
+                      >
+                        <p className="mb-2.5 text-[11px] font-black uppercase tracking-wide text-slate-500">
+                          {t(group.groupKey)}
+                        </p>
+                        <div className="grid gap-2.5">
+                          {group.keys.map((key) => {
+                            const on = form.permissions.includes(key);
+                            return (
+                              <label
+                                key={key}
+                                className={`flex cursor-pointer items-center justify-between gap-3 rounded-lg px-2 py-2 transition ${
+                                  on ? "bg-violet-50 ring-1 ring-violet-200" : "hover:bg-slate-50"
+                                }`}
+                              >
+                                <span className="text-sm font-semibold text-slate-800">
+                                  {translatePermission(t, key)}
+                                </span>
+                                <span
+                                  className={`relative inline-flex h-6 w-11 shrink-0 rounded-full transition ${
+                                    on ? "bg-violet-600" : "bg-slate-200"
+                                  }`}
+                                >
+                                  <input
+                                    type="checkbox"
+                                    className="sr-only"
+                                    checked={on}
+                                    onChange={() => togglePermission(key)}
+                                  />
+                                  <span
+                                    className={`absolute top-0.5 size-5 rounded-full bg-white shadow transition ${
+                                      on ? "end-0.5" : "start-0.5"
+                                    }`}
+                                  />
+                                </span>
+                              </label>
+                            );
+                          })}
+                        </div>
+                      </div>
                     ))}
                   </div>
                 </div>

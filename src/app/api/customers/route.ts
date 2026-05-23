@@ -4,24 +4,33 @@ import { requireDb } from "@/lib/api-route";
 
 export const dynamic = "force-dynamic";
 
+const SEARCH_HEADERS = { "Cache-Control": "private, max-age=15" };
+
 export async function GET(req: NextRequest) {
   const block = await requireDb();
   if (block) return block;
   const q = req.nextUrl.searchParams.get("q")?.trim() ?? "";
+  if (!q) {
+    return NextResponse.json({ ok: true, data: [] }, { headers: SEARCH_HEADERS });
+  }
   try {
     const rows = await prisma.customer.findMany({
-      where: q
-        ? {
-            name: {
-              contains: q,
-              mode: "insensitive",
-            },
-          }
-        : undefined,
+      where: {
+        name: {
+          contains: q,
+          mode: "insensitive",
+        },
+      },
+      select: {
+        id: true,
+        name: true,
+        phone: true,
+        customerType: true,
+      },
       orderBy: { name: "asc" },
-      take: q ? 8 : undefined,
+      take: 10,
     });
-    return NextResponse.json({ ok: true, data: rows });
+    return NextResponse.json({ ok: true, data: rows }, { headers: SEARCH_HEADERS });
   } catch (e) {
     return NextResponse.json(
       { ok: false, error: e instanceof Error ? e.message : "שגיאה" },
@@ -50,6 +59,7 @@ export async function POST(req: NextRequest) {
         customerType: body.customerType?.trim() || null,
         openingBalance: body.openingBalance ?? 0,
       },
+      select: { id: true, name: true, phone: true, customerType: true },
     });
     return NextResponse.json({ ok: true, data: row });
   } catch (e) {

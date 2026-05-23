@@ -1,3 +1,4 @@
+import { unstable_cache } from "next/cache";
 import { NextRequest, NextResponse } from "next/server";
 import { getSessionFromCookie } from "@/lib/auth/get-session";
 import {
@@ -6,6 +7,32 @@ import {
   sectionForNotificationType,
 } from "@/lib/notifications/me-inbox";
 import { resolveNotificationColor } from "@/lib/notifications/priority";
+
+const LIST_HEADERS = { "Cache-Control": "private, max-age=30, stale-while-revalidate=60" };
+
+function toIsoDate(value: Date | string): string {
+  if (value instanceof Date) return value.toISOString();
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? new Date().toISOString() : parsed.toISOString();
+}
+
+const getCachedInbox = unstable_cache(
+  async (userId: string, role: string) => {
+    const listed = await listMeNotifications({
+      userId,
+      role: role as "SUPER_ADMIN" | "ADMIN" | "EMPLOYEE",
+      onlyUnread: false,
+      take: 10,
+    });
+    return {
+      rows: listed.rows,
+      unreadCount: listed.unreadCount,
+      inbox: listed.inbox,
+    };
+  },
+  ["me-notifications-inbox"],
+  { revalidate: 30 },
+);
 
 export async function GET(req: NextRequest) {
   const session = await getSessionFromCookie();
@@ -18,20 +45,25 @@ export async function GET(req: NextRequest) {
   let unreadCount = 0;
   let inbox: "employee" | "admin" = "employee";
   try {
-    const listed = await listMeNotifications({
-      userId: session.sub,
-      role: session.role,
-      onlyUnread,
-      take: 10,
-    });
+    const listed = onlyUnread
+      ? await listMeNotifications({
+          userId: session.sub,
+          role: session.role,
+          onlyUnread: true,
+          take: 10,
+        })
+      : await getCachedInbox(session.sub, session.role);
     rows = listed.rows;
     unreadCount = listed.unreadCount;
     inbox = listed.inbox;
   } catch {
-    return NextResponse.json({
-      ok: true,
-      data: { inbox: "employee", unreadCount: 0, items: [] },
-    });
+    return NextResponse.json(
+      {
+        ok: true,
+        data: { inbox: "employee", unreadCount: 0, items: [] },
+      },
+      { headers: LIST_HEADERS },
+    );
   }
 
   const items = rows.map((a) => ({
@@ -44,19 +76,22 @@ export async function GET(req: NextRequest) {
     priority: a.priority,
     color: resolveNotificationColor(a.priority, a.color),
     isRead: a.isRead,
-    readAt: a.isRead ? a.createdAt.toISOString() : null,
+    readAt: a.isRead ? toIsoDate(a.createdAt) : null,
     actionUrl: a.actionUrl,
-    createdAt: a.createdAt.toISOString(),
+    createdAt: toIsoDate(a.createdAt),
   }));
 
-  return NextResponse.json({
-    ok: true,
-    data: {
-      inbox,
-      unreadCount,
-      items,
+  return NextResponse.json(
+    {
+      ok: true,
+      data: {
+        inbox,
+        unreadCount,
+        items,
+      },
     },
-  });
+    { headers: LIST_HEADERS },
+  );
 }
 
 export async function PATCH(req: NextRequest) {

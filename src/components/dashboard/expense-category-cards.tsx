@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo, useState } from "react";
 import {
   Building2,
   Hammer,
@@ -11,7 +12,10 @@ import {
 import { useI18n } from "@/components/i18n-provider";
 import { formatShekel } from "@/lib/format-shekel";
 import type { ExpenseCategoryMetrics } from "@/lib/dashboard/financial-engine";
+import type { DashboardTimeRange } from "@/lib/dashboard/time-range";
+import { DashboardTimeFilter } from "@/components/dashboard/dashboard-time-filter";
 import { smoothLinePath } from "@/components/dashboard/chart-utils";
+import fade from "@/components/dashboard/section-fade.module.css";
 import premium from "@/components/dashboard/dashboard-premium.module.css";
 
 const STYLES: Record<
@@ -33,16 +37,44 @@ const LABEL_KEYS: Record<ExpenseCategoryMetrics["type"], string> = {
   INVESTMENTS: "dashboard.redesign.expenseDev",
 };
 
+const PERIOD_LABEL_KEYS: Record<DashboardTimeRange, string> = {
+  today: "dashboard.redesign.today",
+  week: "dashboard.redesign.week",
+  month: "dashboard.redesign.filter.month",
+};
+
+function amountForRange(card: ExpenseCategoryMetrics, range: DashboardTimeRange): number {
+  if (range === "today") return card.today;
+  if (range === "week") return card.week;
+  return card.month;
+}
+
 export function ExpenseCategoryCards({ cards }: { cards: ExpenseCategoryMetrics[] }) {
   const { t } = useI18n();
+  const [range, setRange] = useState<DashboardTimeRange>("today");
+
+  const displayCards = useMemo(
+    () =>
+      cards.map((card) => ({
+        ...card,
+        periodAmount: amountForRange(card, range),
+      })),
+    [cards, range],
+  );
 
   return (
     <div className={`${premium.glassCard} flex h-full min-h-0 flex-col p-2.5`}>
-      <h2 className="font-arabic-brand mb-2 border-b border-slate-100 pb-2 text-[13px] font-black text-slate-800">
-        {t("dashboard.redesign.sectionExpenses")}
-      </h2>
-      <div className="grid flex-1 grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5 lg:grid-rows-1">
-        {cards.map((card) => {
+      <div className="mb-2 border-b border-slate-100 pb-2">
+        <h2 className="font-arabic-brand text-[13px] font-black text-slate-800">
+          {t("dashboard.redesign.sectionExpenses")}
+        </h2>
+        <DashboardTimeFilter value={range} onChange={setRange} variant="expense" />
+      </div>
+      <div
+        key={range}
+        className={`grid flex-1 grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5 lg:grid-rows-1 ${fade.fade}`}
+      >
+        {displayCards.map((card) => {
           const style = STYLES[card.type];
           const Icon = style.icon;
           const path = smoothLinePath(card.sparkline, 64, 22, 2);
@@ -65,11 +97,9 @@ export function ExpenseCategoryCards({ cards }: { cards: ExpenseCategoryMetrics[
               <p className="mt-1 line-clamp-2 text-[10px] font-bold leading-tight text-slate-600">
                 {t(LABEL_KEYS[card.type])}
               </p>
-              <p className="mt-0.5 text-[11px] font-semibold text-slate-500">
-                {t("dashboard.redesign.today")}: <span className="font-black text-slate-900">{formatShekel(card.today)}</span>
-              </p>
-              <p className="text-[11px] font-semibold text-slate-500">
-                {t("dashboard.redesign.week")}: <span className="font-black text-slate-800">{formatShekel(card.week)}</span>
+              <p className="mt-1 text-[11px] font-semibold text-slate-500">
+                {t(PERIOD_LABEL_KEYS[range])}:{" "}
+                <span className="text-sm font-black text-slate-900">{formatShekel(card.periodAmount)}</span>
               </p>
               <svg viewBox="0 0 64 22" className="mt-auto h-5 w-full opacity-75" aria-hidden>
                 <path d={path} fill="none" stroke={style.line} strokeWidth="1.75" strokeLinecap="round" />

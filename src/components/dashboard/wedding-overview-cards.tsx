@@ -1,11 +1,14 @@
 "use client";
 
+import { useMemo, useState } from "react";
 import { Gem, Heart, FileBadge } from "lucide-react";
 import { CountUp } from "@/components/count-up";
 import { useI18n } from "@/components/i18n-provider";
+import { DashboardTimeFilter } from "@/components/dashboard/dashboard-time-filter";
+import type { WeddingSectionStats } from "@/lib/dashboard/summary";
+import type { DashboardTimeRange, RangeKeyed } from "@/lib/dashboard/time-range";
+import fade from "@/components/dashboard/section-fade.module.css";
 import styles from "./wedding-overview-cards.module.css";
-
-type WeddingData = { weddings: number; orders: number; documented: number };
 
 const SPARK_HEIGHTS = [0.35, 0.55, 0.75, 0.5, 0.9, 0.65] as const;
 
@@ -27,8 +30,12 @@ function MiniSpark({ value }: { value: number }) {
   );
 }
 
-export function WeddingOverviewCards({ data }: { data: WeddingData }) {
+export function WeddingOverviewCards({ dataByRange }: { dataByRange: RangeKeyed<WeddingSectionStats> }) {
   const { t } = useI18n();
+  const [range, setRange] = useState<DashboardTimeRange>("today");
+
+  const data = useMemo(() => dataByRange[range], [dataByRange, range]);
+
   const cards = [
     { key: "weddings" as const, value: data.weddings, icon: Heart, tone: styles.weddings },
     { key: "orders" as const, value: data.orders, icon: Gem, tone: styles.orders },
@@ -43,8 +50,11 @@ export function WeddingOverviewCards({ data }: { data: WeddingData }) {
 
   return (
     <div className={styles.section}>
-      <h2 className={`${styles.title} font-arabic-brand`}>{t("dashboard.redesign.sectionWeddings")}</h2>
-      <div className={styles.list}>
+      <div className={styles.head}>
+        <h2 className={`${styles.title} font-arabic-brand`}>{t("dashboard.redesign.sectionWeddings")}</h2>
+        <DashboardTimeFilter value={range} onChange={setRange} variant="wedding" />
+      </div>
+      <div key={range} className={`${styles.list} ${fade.fade}`}>
         {cards.map((c) => {
           const Icon = c.icon;
           return (

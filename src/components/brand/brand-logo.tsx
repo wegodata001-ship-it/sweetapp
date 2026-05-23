@@ -25,7 +25,6 @@ export function BrandLogoMini({ size = 44, className, priority }: BrandLogoMiniP
         height={size}
         priority={priority}
         className={styles.miniImage}
-        style={{ width: size, height: size }}
       />
     </span>
   );

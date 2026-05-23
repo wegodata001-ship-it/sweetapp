@@ -1,9 +1,8 @@
 "use client";
 
 import { ClipboardList } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
 import type { SerializedWorkEmployeeTask } from "@/lib/work-tasks/serialize-work-task";
-import { formatTimerMs } from "@/lib/tasks/timer-display";
 import { useI18n } from "@/components/i18n-provider";
 
 type EmployeeTasksSessionProps = {
@@ -13,13 +12,6 @@ type EmployeeTasksSessionProps = {
 
 export function EmployeeTasksSession({ tasks, activeTask }: EmployeeTasksSessionProps) {
   const { t } = useI18n();
-  const [now, setNow] = useState(() => Date.now());
-
-  useEffect(() => {
-    if (!activeTask?.started_at || activeTask.completed_at) return;
-    const id = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(id);
-  }, [activeTask?.started_at, activeTask?.completed_at, activeTask?.id]);
 
   const { done, total, pct } = useMemo(() => {
     const total = tasks.length;
@@ -27,12 +19,6 @@ export function EmployeeTasksSession({ tasks, activeTask }: EmployeeTasksSession
     const pct = total > 0 ? Math.round((done / total) * 100) : 0;
     return { done, total, pct };
   }, [tasks]);
-
-  const sessionElapsed = useMemo(() => {
-    if (!activeTask?.started_at) return null;
-    const start = new Date(activeTask.started_at).getTime();
-    return formatTimerMs(Math.max(0, now - start));
-  }, [activeTask?.started_at, now]);
 
   return (
     <section
@@ -55,16 +41,6 @@ export function EmployeeTasksSession({ tasks, activeTask }: EmployeeTasksSession
               </p>
             ) : null}
           </div>
-          {sessionElapsed ? (
-            <div className="text-end">
-              <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
-                {t("employee.tasks.sessionElapsed")}
-              </p>
-              <p className="etask-timer-pulse text-3xl font-black tabular-nums text-[#2563eb] sm:text-4xl">
-                {sessionElapsed}
-              </p>
-            </div>
-          ) : null}
         </div>
 
         <div className="mt-4">

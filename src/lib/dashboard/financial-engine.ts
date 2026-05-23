@@ -3,6 +3,11 @@ import {
   normalizeExpenseType,
   type ExpenseType,
 } from "@/lib/finance/expense-types";
+import {
+  boundsForDashboardRange,
+  type DashboardTimeRange,
+  type RangeKeyed,
+} from "@/lib/dashboard/time-range";
 
 export type CashRow = {
   entryType: string;
@@ -19,6 +24,7 @@ export type ExpenseCategoryMetrics = {
   type: ExpenseType;
   today: number;
   week: number;
+  month: number;
   prevWeek: number;
   changePctWeek: number | null;
   sparkline: number[];
@@ -56,6 +62,23 @@ export type TodayPnl = {
   profit: number;
 };
 
+export type TodayIncomeByMethod = {
+  cash: number;
+  card: number;
+  check: number;
+  other: number;
+};
+
+export type DashboardHeroMetrics = {
+  todayIncomeTotal: number;
+  todayIncomeByMethod: TodayIncomeByMethod;
+  todayCashIncome: number;
+  todayExpenses: number;
+  yesterdayExpenses: number;
+  expenseChangeVsYesterdayPct: number | null;
+  monthIncome: number;
+};
+
 export type FinancialEngineResult = {
   monthIncome: number;
   monthExpenses: number;
@@ -64,8 +87,10 @@ export type FinancialEngineResult = {
   totalOperations: number;
   expensesByType: ExpenseCategoryMetrics[];
   zPos: ZPosMetrics;
+  zPosByRange: RangeKeyed<ZPosMetrics>;
   dailyChart: DailyPnlPoint[];
   todayPnl: TodayPnl;
+  heroMetrics: DashboardHeroMetrics;
   newCustomers: number;
 };
 
@@ -128,16 +153,55 @@ function isZEntry(row: { source: string | null; zReportId: string | null }) {
   return Boolean(row.zReportId?.trim() || row.source === "z_report");
 }
 
+function aggregateZPosForRange(
+  cashRows: CashRow[],
+  from: Date,
+  to: Date,
+  zReportsOpenedInRange: number,
+): ZPosMetrics {
+  let zCash = 0;
+  let zCard = 0;
+  let zChecks = 0;
+  let zOther = 0;
+  const zIds = new Set<string>();
+
+  for (const raw of cashRows) {
+    const ed = new Date(raw.entryDate);
+    if (!inRange(ed, from, to)) continue;
+    const row = cashflowAmounts(raw.entryType, raw.amount);
+    if (!isZEntry(raw) || row.inflow <= 0) continue;
+    const zid = raw.zReportId?.trim() || raw.documentId?.trim();
+    if (zid) zIds.add(zid);
+    const bucket = zPaymentBucket(raw.paymentMethod);
+    if (bucket === "cash") zCash += row.inflow;
+    else if (bucket === "card") zCard += row.inflow;
+    else if (bucket === "check") zChecks += row.inflow;
+    else zOther += row.inflow;
+  }
+
+  return {
+    reportsToday: zReportsOpenedInRange > 0 ? zReportsOpenedInRange : zIds.size,
+    cashToday: zCash,
+    cardToday: zCard,
+    checksToday: zChecks,
+    otherToday: zOther,
+  };
+}
+
 export function runFinancialEngine(
   cashRows: CashRow[],
   metaByDocId: Map<string, ExpenseType>,
   locale: string,
-  zReportsOpenedToday: number,
+  zReportsByRange: RangeKeyed<number>,
 ): FinancialEngineResult {
   const today0 = new Date();
   today0.setHours(0, 0, 0, 0);
   const todayEnd = new Date(today0);
   todayEnd.setHours(23, 59, 59, 999);
+  const yesterday0 = new Date(today0);
+  yesterday0.setDate(yesterday0.getDate() - 1);
+  const yesterdayEnd = new Date(yesterday0);
+  yesterdayEnd.setHours(23, 59, 59, 999);
 
   const { start: weekStart0, end: weekEnd0 } = weekWindow(today0);
   const prevWeekEnd = new Date(weekStart0);
@@ -158,13 +222,18 @@ export function runFinancialEngine(
 
   const expenseToday = new Map<ExpenseType, number>();
   const expenseWeek = new Map<ExpenseType, number>();
+  const expenseMonth = new Map<ExpenseType, number>();
   const expensePrevWeek = new Map<ExpenseType, number>();
   const expenseDaily = new Map<string, Map<ExpenseType, number>>();
   for (const t of EXPENSE_TYPE_VALUES) {
     expenseToday.set(t, 0);
     expenseWeek.set(t, 0);
+    expenseMonth.set(t, 0);
     expensePrevWeek.set(t, 0);
   }
+
+  const monthRangeFrom = boundsForDashboardRange("month").from;
+  const monthRangeTo = boundsForDashboardRange("month").to;
 
   const dailyMap = new Map<string, { income: number; expenses: number }>();
   for (let i = 0; i < chartDays; i++) {
@@ -176,17 +245,13 @@ export function runFinancialEngine(
 
   let todayIncome = 0;
   let todayExpenses = 0;
+  let yesterdayExpenses = 0;
   let monthIncome = 0;
+  const todayIncomeByMethod: TodayIncomeByMethod = { cash: 0, card: 0, check: 0, other: 0 };
   let monthExpenses = 0;
   let prevMonthIncome = 0;
   let prevMonthExpenses = 0;
   let totalOperations = 0;
-
-  let zCash = 0;
-  let zCard = 0;
-  let zChecks = 0;
-  let zOther = 0;
-  const zIdsToday = new Set<string>();
 
   for (const raw of cashRows) {
     const row = cashflowAmounts(raw.entryType, raw.amount);
@@ -206,6 +271,14 @@ export function runFinancialEngine(
     if (inRange(ed, today0, todayEnd)) {
       todayIncome += row.inflow;
       todayExpenses += row.outflow;
+      if (row.inflow > 0) {
+        const bucket = zPaymentBucket(raw.paymentMethod);
+        todayIncomeByMethod[bucket] += row.inflow;
+      }
+    }
+
+    if (inRange(ed, yesterday0, yesterdayEnd)) {
+      yesterdayExpenses += row.outflow;
     }
 
     const dk = dayKey(ed);
@@ -231,6 +304,9 @@ export function runFinancialEngine(
       if (inRange(ed, prevWeekStart, prevWeekEnd)) {
         expensePrevWeek.set(type, (expensePrevWeek.get(type) ?? 0) + row.outflow);
       }
+      if (inRange(ed, monthRangeFrom, monthRangeTo)) {
+        expenseMonth.set(type, (expenseMonth.get(type) ?? 0) + row.outflow);
+      }
 
       const sk = dayKey(ed);
       if (!expenseDaily.has(sk)) expenseDaily.set(sk, new Map());
@@ -238,16 +314,16 @@ export function runFinancialEngine(
       m.set(type, (m.get(type) ?? 0) + row.outflow);
     }
 
-    if (isZEntry(raw) && inRange(ed, today0, todayEnd) && row.inflow > 0) {
-      const zid = raw.zReportId?.trim() || raw.documentId?.trim();
-      if (zid) zIdsToday.add(zid);
-      const bucket = zPaymentBucket(raw.paymentMethod);
-      if (bucket === "cash") zCash += row.inflow;
-      else if (bucket === "card") zCard += row.inflow;
-      else if (bucket === "check") zChecks += row.inflow;
-      else zOther += row.inflow;
-    }
   }
+
+  const zPosByRange = (["today", "week", "month"] as const).reduce(
+    (acc, key) => {
+      const { from, to } = boundsForDashboardRange(key);
+      acc[key] = aggregateZPosForRange(cashRows, from, to, zReportsByRange[key]);
+      return acc;
+    },
+    {} as RangeKeyed<ZPosMetrics>,
+  );
 
   const sparkDays: string[] = [];
   for (let i = 6; i >= 0; i--) {
@@ -263,6 +339,7 @@ export function runFinancialEngine(
       type,
       today: expenseToday.get(type) ?? 0,
       week,
+      month: expenseMonth.get(type) ?? 0,
       prevWeek,
       changePctWeek: pctChange(week, prevWeek),
       sparkline: sparkDays.map((sk) => expenseDaily.get(sk)?.get(type) ?? 0),
@@ -288,18 +365,22 @@ export function runFinancialEngine(
     prevMonthExpenses,
     totalOperations,
     expensesByType,
-    zPos: {
-      reportsToday: zReportsOpenedToday > 0 ? zReportsOpenedToday : zIdsToday.size,
-      cashToday: zCash,
-      cardToday: zCard,
-      checksToday: zChecks,
-      otherToday: zOther,
-    },
+    zPos: zPosByRange.today,
+    zPosByRange,
     dailyChart,
     todayPnl: {
       income: todayIncome,
       expenses: todayExpenses,
       profit: todayIncome - todayExpenses,
+    },
+    heroMetrics: {
+      todayIncomeTotal: todayIncome,
+      todayIncomeByMethod,
+      todayCashIncome: todayIncomeByMethod.cash,
+      todayExpenses,
+      yesterdayExpenses,
+      expenseChangeVsYesterdayPct: pctChange(todayExpenses, yesterdayExpenses),
+      monthIncome,
     },
     newCustomers: 0,
   };

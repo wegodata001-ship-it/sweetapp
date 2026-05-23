@@ -255,6 +255,11 @@
   },
   "permissions": {
     "title": "הרשאות (מסכים)",
+    "groups": {
+      "finance": "כספים",
+      "ops": "תפעול",
+      "other": "ניהול ומערכת"
+    },
     "labels": {
       "financial_registration": "רישום כספי",
       "ledger": "כרטסות",
@@ -384,7 +389,16 @@
       "documented": "הזמנות מתועדות",
       "heroEyebrow": "לוח ניהול",
       "heroTitle": "לוח הבקרה הפיננסי",
-      "heroSubtitle": "הכנסות, הוצאות ורווח — ברגע",
+      "heroSubtitle": "הכנסות, הוצאות ותזרים — במבט אחד",
+      "heroTotalIncomeToday": "סה״כ הכנסות היום",
+      "heroExpensesToday": "הוצאות היום",
+      "heroCashIncomeToday": "הכנסות מזומן",
+      "heroMonthIncomeOnly": "הכנסות החודש",
+      "heroBreakdownCash": "מזומן",
+      "heroBreakdownCard": "אשראי",
+      "heroBreakdownChecks": "צ׳קים",
+      "heroVsYesterdayUp": "+{{pct}}% מאתמול",
+      "heroVsYesterdayDown": "{{pct}}% פחות מאתמול",
       "heroNetProfitToday": "רווח נקי היום",
       "heroMonthIncome": "סה״כ הכנסות החודש",
       "heroTodayIncome": "הכנסות היום",
@@ -395,6 +409,7 @@
       "chartDaily": "יומי — 14 ימים",
       "filter": {
         "today": "היום",
+        "week": "השבוע",
         "7d": "7 ימים",
         "30d": "30 יום",
         "month": "החודש"
@@ -2201,7 +2216,7 @@
   "ops": {
     "inventory": {
       "title": "ספירת מלאי",
-      "subtitle": "ניהול מלאי, ספירות חודשיות ותנועות.",
+      "subtitle": "ספירת מדפים מהירה — בחרו מדף וספרו.",
       "newProduct": "+ מוצר חדש",
       "newMovement": "+ תנועה חדשה",
       "tabProducts": "מוצרים",
@@ -2343,6 +2358,7 @@
         "areaProgress": "התקדמות ספירה"
       },
       "warehouse": {
+        "pageHint": "בחרו מדף — ספרו — נשמר אוטומטית",
         "kpiShelves": "סה״כ מדפים",
         "kpiShortage": "מוצרים חסרים",
         "kpiOver": "מלאי נמוך",
@@ -2352,10 +2368,23 @@
         "addShelf": "מדף חדש",
         "noShelves": "אין מדפים — הוסיפו מדף ראשון",
         "card": {
+          "noPermission": "אין הרשאה לפעולה זו",
+          "menu": {
+            "label": "פעולות מדף",
+            "addProducts": "הוסף מוצרים",
+            "duplicate": "שכפל מדף",
+            "delete": "מחק מדף"
+          },
+          "statusPerfect": "התאמה מלאה",
+          "statusShortage": "יש חוסרים",
+          "statusErrors": "חריגות רבות",
           "statusCounted": "נספר היום",
           "statusPending": "ממתין לספירה",
-          "statusShortage": "חוסרים",
           "statusActive": "פעיל",
+          "metricProducts": "{{count}} מוצרים",
+          "metricShort": "{{count}} חסרים",
+          "metricSurplus": "{{count}} עודף",
+          "metricMatch": "{{pct}}% התאמה",
           "productCount": "{{count}} מוצרים",
           "countProgress": "{{done}} נספרו · {{left}} נשארו",
           "progress": "התקדמות",
@@ -2366,11 +2395,13 @@
         },
         "modal": {
           "kicker": "ספירת מדף",
+          "autosaveHint": "שמירה אוטומטית בכל שינוי",
           "scanPlaceholder": "סרוק ברקוד / חפש מוצר…",
           "empty": "אין מוצרים במדף",
           "loading": "טוען…",
           "inSystem": "במערכת",
           "actual": "נספר",
+          "diff": "הפרש",
           "lastCount": "ספירה אחרונה",
           "noHistory": "אין היסטוריה",
           "qty": "כמות",
@@ -2393,6 +2424,51 @@
             "nameRequired": "חסר שם",
             "saveFailed": "שגיאה"
           }
+        },
+        "toast": {
+          "deleted": "המדף נמחק בהצלחה",
+          "duplicated": "המדף שוכפל בהצלחה",
+          "deleteFailed": "מחיקת המדף נכשלה",
+          "duplicateFailed": "שכפול המדף נכשל"
+        },
+        "deleteShelf": {
+          "title": "מחיקת מדף",
+          "body": "האם למחוק את המדף «{{name}}»?",
+          "hint": "שיוך המוצרים למדף יוסר — המוצרים עצמם לא יימחקו.",
+          "confirm": "מחק"
+        },
+        "addProductsModal": {
+          "title": "הוספת מוצרים למדף",
+          "modeExisting": "מוצר קיים",
+          "modeNew": "מוצר חדש",
+          "newName": "שם מוצר",
+          "newNamePlaceholder": "לדוגמה: קולה 330",
+          "newNameRequired": "חסר שם מוצר",
+          "newUnit": "יחידה",
+          "newUnitPlaceholder": "יח׳ / ק״ג / ליטר",
+          "newMinimum": "מינימום מלאי",
+          "invalidMinimum": "מינימום לא תקין",
+          "createFailed": "יצירת המוצר נכשלה",
+          "created": "מוצר חדש נוסף למדף",
+          "createFromSearch": "צור «{{name}}» כמוצר חדש",
+          "search": "חיפוש מוצר",
+          "searchPlaceholder": "הקלידו שם מוצר…",
+          "noResults": "לא נמצאו מוצרים",
+          "noLocation": "ללא מדף",
+          "selected": "נבחר: {{name}}",
+          "quantity": "כמות",
+          "slotNote": "מיקום במדף",
+          "slotOptional": "אופציונלי",
+          "pickProduct": "בחרו מוצר מהרשימה",
+          "invalidQty": "כמות לא תקינה",
+          "save": "שמור",
+          "saveContinue": "שמור והמשך",
+          "saved": "המוצר נוסף למדף",
+          "saveFailed": "שגיאת שמירה",
+          "existsTitle": "מוצר קיים במדף",
+          "existsBody": "«{{name}}» כבר קיים במדף — להגדיל כמות?",
+          "existsYes": "כן, הגדל",
+          "existsNo": "לא"
         },
         "addShelf": {
           "title": "מדף חדש",
@@ -2883,7 +2959,19 @@
       "remaining": "נשאר",
       "targetLine": "יעד: {{minutes}} דק׳ · {{percent}}%",
       "exceededHint": "חרגת מהיעד — דרושה סיבת איחור",
-      "timeUntilTarget": "זמן שנותר עד יעד"
+      "timeUntilTarget": "זמן שנותר עד יעד",
+      "startedAt": "התחלה: {{time}}",
+      "endsAt": "סיום: {{time}}",
+      "status": {
+        "PAUSED": "מושהה",
+        "RUNNING": "רץ",
+        "ON_TRACK": "במסלול",
+        "WARNING": "אזהרה",
+        "LATE": "מאוחר",
+        "OVERDUE": "חריגה",
+        "PENDING": "ממתין",
+        "DONE": "הושלם"
+      }
     }
   },
   "workflows": {

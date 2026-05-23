@@ -269,11 +269,6 @@ export function AppNavContent({ onNavigate, variant = "sidebar" }: AppNavContent
   const managementVisible = managementNav.filter((i) => canShowNavItem(i, role, permSet));
   const adminVisible = adminOnlyNav.filter((i) => canShowNavItem(i, role, permSet));
 
-  // Pure EMPLOYEEs get the simplified, focused sidebar (Home / My Tasks /
-  // Hours / Profile) — no finance / admin sections. Admins still see the
-  // full ERP sidebar plus the My-Tasks section for QA.
-  const employeeOnlyMode = role === "EMPLOYEE";
-
   const showMyTasksNav =
     role === "SUPER_ADMIN" ||
     role === "EMPLOYEE" ||
@@ -291,31 +286,112 @@ export function AppNavContent({ onNavigate, variant = "sidebar" }: AppNavContent
     );
   }
 
-  if (employeeOnlyMode) {
-    // Focused employee portal sidebar — only the 4 items the spec calls for.
-    const items: NavItem[] = [
-      { labelKey: "nav.employeeHome", href: "/employee", permission: "employee_clock", icon: LayoutDashboard },
-      { labelKey: "nav.workStatus", href: "/employee/work-status", permission: "employee_clock", icon: Activity },
-      {
-        labelKey: "nav.dailyOrders",
-        href: "/admin/daily-orders",
-        permission: "employee_clock",
-        icon: Package,
-        showForAllAuthenticated: true,
-      },
-      { labelKey: "nav.myHours", href: "/employee/hours", permission: "employee_clock", icon: Clock3 },
-      { labelKey: "nav.profile", href: "/employee/profile", permission: "employee_clock", icon: UserCircle2 },
-    ];
+  const employeePortalNav: NavItem[] = [
+    {
+      labelKey: "nav.employeeHome",
+      href: "/employee",
+      permission: "employee_clock",
+      icon: LayoutDashboard,
+      showForAllAuthenticated: true,
+    },
+    {
+      labelKey: "nav.workStatus",
+      href: "/employee/work-status",
+      permission: "employee_clock",
+      icon: Activity,
+    },
+    {
+      labelKey: "nav.dailyOrders",
+      href: "/admin/daily-orders",
+      permission: "employee_clock",
+      icon: Package,
+      showForAllAuthenticated: true,
+    },
+    { labelKey: "nav.myHours", href: "/employee/hours", permission: "employee_clock", icon: Clock3 },
+    {
+      labelKey: "nav.profile",
+      href: "/employee/profile",
+      permission: "employee_clock",
+      icon: UserCircle2,
+      showForAllAuthenticated: true,
+    },
+  ];
+  const employeePortalVisible = employeePortalNav.filter((i) => canShowNavItem(i, role, permSet));
+
+  if (role === "EMPLOYEE") {
     return (
       <nav className="space-y-5 px-3 pb-8 pt-4 lg:px-0 lg:pb-0 lg:pt-0">
-        <div>
-          <SectionTitle>{t("nav.sectionEmployee")}</SectionTitle>
-          <div className="space-y-1">
-            {items.map((item) => (
-              <NavLink key={item.href} item={item} onNavigate={onNavigate} compact={compact} />
-            ))}
+        {employeePortalVisible.length > 0 ? (
+          <div>
+            <SectionTitle>{t("nav.sectionEmployee")}</SectionTitle>
+            <div className="space-y-1">
+              {employeePortalVisible.map((item) => (
+                <NavLink key={item.href} item={item} onNavigate={onNavigate} compact={compact} />
+              ))}
+            </div>
           </div>
-        </div>
+        ) : null}
+
+        {financeVisible.length > 0 ? (
+          <div>
+            <SectionTitle>{t("nav.sectionFinance")}</SectionTitle>
+            <div className="space-y-1">
+              {financeVisible.map((item) => (
+                <NavLink key={item.href} item={item} onNavigate={onNavigate} compact={compact} />
+              ))}
+            </div>
+          </div>
+        ) : null}
+
+        {managementVisible.length > 0 ? (
+          <div>
+            <SectionTitle>{t("nav.sectionManagement")}</SectionTitle>
+            <div className="space-y-1">
+              {managementVisible.map((item) => (
+                <div key={item.href}>
+                  <NavLink item={item} onNavigate={onNavigate} compact={compact} />
+                  {item.href === "/admin/workflows" &&
+                  (pathname === "/admin/workflows" || pathname.startsWith("/admin/workflows/")) ? (
+                    <SubMenu items={tasksSubMenu} compact={compact} onNavigate={onNavigate} />
+                  ) : null}
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
+
+        {showMyTasksNav ? (
+          <div>
+            <SectionTitle>{t("nav.sectionMyTasks")}</SectionTitle>
+            <div className="space-y-1">
+              <Link
+                href="/employee/tasks"
+                title={t("nav.myTasks")}
+                onClick={onNavigate}
+                className={`group/sidebar-item relative flex min-h-[54px] items-center justify-center gap-3 rounded-2xl px-2 py-2 text-[15px] font-bold transition duration-300 ease-out ${
+                  compact ? "w-full justify-start px-4 py-3" : "lg:justify-start lg:px-3"
+                } ${
+                  pathname === "/employee/tasks" || pathname.startsWith("/employee/tasks/")
+                    ? "border-r-[3px] border-[#c9a227] bg-[linear-gradient(90deg,rgba(201,162,39,.12),transparent)] text-white shadow-sm"
+                    : "text-slate-300 hover:translate-x-[-3px] hover:bg-white/[0.06] hover:text-white"
+                }`}
+              >
+                <span
+                  className={`flex h-[42px] w-[42px] shrink-0 items-center justify-center rounded-[14px] border transition duration-300 ease-out group-hover/sidebar-item:scale-[1.08] ${
+                    pathname === "/employee/tasks" || pathname.startsWith("/employee/tasks/")
+                      ? "border-[#c9a227]/35 bg-[linear-gradient(135deg,#c9a227,#d4bc5c)] text-[#081224] shadow-sm"
+                      : "border-white/10 bg-white/[0.04] text-slate-400 group-hover/sidebar-item:border-[#c9a227]/40 group-hover/sidebar-item:text-[#c9a227]"
+                  }`}
+                >
+                  <CheckSquare className="h-5 w-5" aria-hidden />
+                </span>
+                <span className={`min-w-0 truncate ${compact ? "block" : "hidden lg:block"}`}>
+                  {t("nav.myTasks")}
+                </span>
+              </Link>
+            </div>
+          </div>
+        ) : null}
       </nav>
     );
   }

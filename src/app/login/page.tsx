@@ -13,7 +13,7 @@ import styles from "./login.module.css";
 function LoginContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { refresh, user, loading } = useAuth();
+  const { setSessionUser, user, loading } = useAuth();
   const { t, dir } = useI18n();
   const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
@@ -48,7 +48,16 @@ function LoginContent() {
         ok?: boolean;
         error?: string;
         code?: string;
-        user?: { mustChangePassword?: boolean; role?: string };
+        user?: {
+          id: string;
+          fullName: string;
+          email: string;
+          nationalId?: string | null;
+          phone?: string | null;
+          role: "SUPER_ADMIN" | "ADMIN" | "EMPLOYEE";
+          mustChangePassword?: boolean;
+          permissions: string[];
+        };
       };
       if (!res.ok || !data.ok) {
         const code = data.code ?? "";
@@ -64,10 +73,10 @@ function LoginContent() {
         setSubmitting(false);
         return;
       }
-      await refresh();
+      if (data.user) setSessionUser(data.user);
+      setSubmitting(false);
       if (data.user?.mustChangePassword) {
         router.replace("/change-password");
-        setSubmitting(false);
         return;
       }
       const dest =
@@ -75,7 +84,6 @@ function LoginContent() {
           ? "/employee"
           : nextUrl;
       router.replace(dest);
-      setSubmitting(false);
     } catch {
       setError(t("auth.errorNetwork"));
       setSubmitting(false);

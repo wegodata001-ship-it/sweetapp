@@ -296,6 +296,19 @@ export function IncomeExpenseFields({
   };
 
   useEffect(() => {
+    if (isExpense) return;
+    const q = value.counterpartyName.trim();
+    if (q.length < 1) {
+      setCustomerSuggestions([]);
+      return;
+    }
+    const tmr = window.setTimeout(() => {
+      void fetchCustomerSuggestions(q);
+    }, 400);
+    return () => window.clearTimeout(tmr);
+  }, [value.counterpartyName, isExpense]);
+
+  useEffect(() => {
     if (!isExpense) return;
     void (async () => {
       try {
@@ -450,10 +463,7 @@ export function IncomeExpenseFields({
               type="text"
               value={value.counterpartyName}
               list={isExpense ? undefined : "customer-suggestions"}
-              onChange={(e) => {
-                setPatch({ counterpartyName: e.target.value });
-                if (!isExpense) void fetchCustomerSuggestions(e.target.value);
-              }}
+              onChange={(e) => setPatch({ counterpartyName: e.target.value })}
               className={inputClass}
               placeholder={isExpense ? t("register.fields.supplierExample") : t("register.fields.customerExample")}
             />

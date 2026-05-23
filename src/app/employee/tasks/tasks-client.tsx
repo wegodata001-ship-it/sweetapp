@@ -3,7 +3,7 @@
 import { KeyRound, Loader2, Timer } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { SerializedWorkEmployeeTask } from "@/lib/work-tasks/serialize-work-task";
-import { timerProgress } from "@/lib/tasks/helpers";
+import { computeCountdownTimer } from "@/lib/tasks/countdown-timer";
 import { playEmployeeSound } from "@/lib/employee-experience/sounds";
 import { computeEmployeeTaskDayStats } from "@/lib/employee-experience/task-stats";
 import { EmployeeTaskCard } from "@/components/tasks/employee-task-card";
@@ -150,15 +150,18 @@ export function EmployeeTasksClient() {
   };
 
   const completeWork = async (task: SerializedWorkEmployeeTask, providedReason?: string) => {
-    const tpBefore =
+    const snapBefore =
       task.started_at && task.estimated_minutes
-        ? timerProgress({
+        ? computeCountdownTimer({
             estimatedMinutes: task.estimated_minutes,
             startedAt: task.started_at,
+            taskStatus: "IN_PROGRESS",
             nowMs: Date.now(),
           })
         : null;
-    const wasOnTime = tpBefore ? !tpBefore.isOver && tpBefore.tier !== "red" && tpBefore.tier !== "orange" : true;
+    const wasOnTime = snapBefore
+      ? !snapBefore.isOverdue && snapBefore.statusKey !== "LATE" && snapBefore.statusKey !== "OVERDUE"
+      : true;
 
     setBusyId(task.id);
     try {

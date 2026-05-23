@@ -1,13 +1,14 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import type { UserRole } from "@prisma/client";
 import { cookies } from "next/headers";
 import { prismaAny } from "@/lib/prisma";
-import { ensureBootstrapSuperAdmin } from "@/lib/auth/bootstrap";
 import { verifySessionToken, COOKIE_NAME } from "@/lib/auth/jwt";
+import { appendRefreshedSessionCookie } from "@/lib/auth/reissue-session";
+import { getPermissionStringsForUser } from "@/lib/auth/user-permissions";
 
-export async function GET() {
-  await ensureBootstrapSuperAdmin();
+const FAST_HEADERS = { "Cache-Control": "private, max-age=15" };
 
+export async function GET(req: NextRequest) {
   const cookieStore = await cookies();
   const token = cookieStore.get(COOKIE_NAME)?.value;
   if (!token) {
@@ -18,6 +19,8 @@ export async function GET() {
   if (!session) {
     return NextResponse.json({ ok: true, user: null });
   }
+
+  const sync = req.nextUrl.searchParams.get("sync") === "1";
 
   const user = (await prismaAny.user.findUnique({
     where: { id: session.sub },
@@ -30,7 +33,6 @@ export async function GET() {
       role: true,
       isActive: true,
       hourlyRate: true,
-      employeeId: true,
       language: true,
       mustChangePassword: true,
     },
@@ -43,7 +45,6 @@ export async function GET() {
     role: UserRole;
     isActive: boolean;
     hourlyRate: number;
-    employeeId: string | null;
     language: string;
     mustChangePassword: boolean;
   } | null;
@@ -52,11 +53,49 @@ export async function GET() {
     return NextResponse.json({ ok: true, user: null });
   }
 
-  return NextResponse.json({
-    ok: true,
-    user: {
-      ...user,
-      permissions: session.permissions,
+  if (sync) {
+    const permissions = await getPermissionStringsForUser(user.id, user.role);
+    const res = NextResponse.json({
+      ok: true,
+      user: {
+        id: user.id,
+        fullName: user.fullName,
+        email: user.email,
+        nationalId: user.nationalId,
+        phone: user.phone,
+        role: user.role,
+        hourlyRate: user.hourlyRate,
+        language: user.language,
+        mustChangePassword: user.mustChangePassword,
+        permissions,
+      },
+    });
+    await appendRefreshedSessionCookie(res, {
+      id: user.id,
+      email: user.email,
+      role: user.role,
+      mustChangePassword: user.mustChangePassword,
+      permissions,
+    });
+    return res;
+  }
+
+  return NextResponse.json(
+    {
+      ok: true,
+      user: {
+        id: user.id,
+        fullName: user.fullName,
+        email: user.email,
+        nationalId: user.nationalId,
+        phone: user.phone,
+        role: user.role,
+        hourlyRate: user.hourlyRate,
+        language: user.language,
+        mustChangePassword: user.mustChangePassword,
+        permissions: session.permissions,
+      },
     },
-  });
+    { headers: FAST_HEADERS },
+  );
 }

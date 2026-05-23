@@ -1,157 +1,146 @@
 "use client";
 
 import { memo } from "react";
+import { AlertTriangle, CheckCircle2, Loader2, Package, Play } from "lucide-react";
 import {
-  AlertTriangle,
-  BarChart3,
-  CheckCircle2,
-  Clock,
-  Layers,
-  Package,
-  Play,
-  Plus,
-} from "lucide-react";
-import type { ShelfStatusKind } from "@/components/ops/inventory-count/types";
-import { formatRelativeTime } from "@/components/ops/inventory-count/utils";
+  ShelfCardActionsMenu,
+  type ShelfCardMenuAction,
+} from "./shelf-card-actions-menu";
+
+export type ShelfVisualStatus = "perfect" | "shortage" | "errors";
 
 export type ShelfGridModel = {
   name: string;
   productCount: number;
   shortageCount: number;
-  countedToday: number;
-  progressPct: number;
-  lastUpdateIso: string | null;
-  status: ShelfStatusKind;
+  surplusCount: number;
+  matchPct: number;
+  visualStatus: ShelfVisualStatus;
   locationId?: string | null;
 };
 
+export function resolveShelfVisualStatus(s: {
+  productCount: number;
+  shortageCount: number;
+  surplusCount: number;
+  matchPct: number;
+}): ShelfVisualStatus {
+  if (s.productCount === 0) return "perfect";
+  if (s.matchPct >= 100 && s.shortageCount === 0 && s.surplusCount === 0) return "perfect";
+  const issues = s.shortageCount + s.surplusCount;
+  if (s.matchPct < 70 || issues > Math.max(3, Math.floor(s.productCount * 0.25))) {
+    return "errors";
+  }
+  return "shortage";
+}
+
 const statusUi: Record<
-  ShelfStatusKind,
-  { ring: string; badge: string; labelKey: string; Icon: typeof CheckCircle2 }
+  ShelfVisualStatus,
+  { card: string; glow: string; labelKey: string; Icon: typeof CheckCircle2 }
 > = {
-  counted: {
-    ring: "ring-[#16c784]/30",
-    badge: "bg-[#16c784]/12 text-emerald-800",
-    labelKey: "statusCounted",
+  perfect: {
+    card: "border-emerald-200/80 ring-emerald-300/40 hover:shadow-[0_16px_48px_rgba(16,199,132,0.22)]",
+    glow: "shadow-[0_0_28px_rgba(16,199,132,0.18)]",
+    labelKey: "statusPerfect",
     Icon: CheckCircle2,
   },
-  pending: {
-    ring: "ring-[#ffb020]/35",
-    badge: "bg-[#ffb020]/15 text-amber-900",
-    labelKey: "statusPending",
-    Icon: Clock,
-  },
   shortage: {
-    ring: "ring-[#ff5b6e]/35",
-    badge: "bg-[#ff5b6e]/12 text-rose-800",
+    card: "border-amber-200/90 ring-amber-300/45 hover:shadow-[0_16px_48px_rgba(255,176,32,0.2)]",
+    glow: "shadow-[0_0_24px_rgba(255,176,32,0.14)]",
     labelKey: "statusShortage",
     Icon: AlertTriangle,
   },
-  recent: {
-    ring: "ring-[#6c4cff]/30",
-    badge: "bg-[#6c4cff]/12 text-violet-900",
-    labelKey: "statusActive",
-    Icon: Layers,
+  errors: {
+    card: "border-rose-200/90 ring-rose-300/50 hover:shadow-[0_16px_48px_rgba(255,91,110,0.22)]",
+    glow: "shadow-[0_0_28px_rgba(255,91,110,0.2)]",
+    labelKey: "statusErrors",
+    Icon: AlertTriangle,
   },
 };
 
 type Props = {
   shelf: ShelfGridModel;
-  bcp47: string;
   t: (key: string, vars?: Record<string, string | number>) => string;
-  onStartCount: () => void;
-  onViewProducts: () => void;
-  onMovements?: () => void;
-  onEdit?: () => void;
+  onOpen: () => void;
+  onMenuAction?: (action: ShelfCardMenuAction) => void;
+  busy?: boolean;
+  exiting?: boolean;
+  entering?: boolean;
+  canManage?: boolean;
+  noPermissionTitle?: string;
 };
 
 function ShelfGridCardInner({
   shelf,
-  bcp47,
   t,
-  onStartCount,
-  onViewProducts,
-  onMovements,
-  onEdit,
+  onOpen,
+  onMenuAction,
+  busy,
+  exiting,
+  entering,
+  canManage = true,
+  noPermissionTitle,
 }: Props) {
-  const ui = statusUi[shelf.status];
+  const ui = statusUi[shelf.visualStatus];
   const StatusIcon = ui.Icon;
-  const remaining = Math.max(0, shelf.productCount - shelf.countedToday);
-  const pct = Math.min(100, shelf.progressPct);
 
   return (
     <article
-      className={`flex flex-col rounded-[20px] border border-[#e7ecf5] bg-white p-4 shadow-[0_6px_24px_rgba(15,23,42,0.05)] ring-1 transition-all duration-200 hover:-translate-y-1 hover:shadow-[0_14px_36px_rgba(108,76,255,0.12)] hover:scale-[1.01] ${ui.ring}`}
+      role="button"
+      tabIndex={0}
+      onClick={onOpen}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onOpen();
+        }
+      }}
+      className={`group relative flex cursor-pointer flex-col rounded-[24px] border bg-white p-4 ring-1 transition-all duration-300 hover:-translate-y-1 hover:scale-[1.01] ${ui.card} ${ui.glow} shadow-[0_8px_32px_rgba(15,23,42,0.06)] ${
+        exiting ? "pointer-events-none scale-95 opacity-0" : ""
+      } ${entering ? "animate-[shelf-enter_0.35s_ease-out]" : ""} ${busy ? "opacity-80" : ""}`}
     >
+      {busy ? (
+        <div className="absolute inset-0 z-10 flex items-center justify-center rounded-[24px] bg-white/60 backdrop-blur-[2px]">
+          <Loader2 className="h-7 w-7 animate-spin text-[#6c4cff]" aria-hidden />
+        </div>
+      ) : null}
+
       <div className="flex items-start justify-between gap-2">
-        <div className="grid h-11 w-11 place-items-center rounded-xl bg-[#f6f8fc] text-[#6c4cff]">
-          <Package className="h-5 w-5" aria-hidden />
+        <div className="grid h-12 w-12 place-items-center rounded-2xl bg-[#f6f8fc] text-[#6c4cff] transition group-hover:scale-105">
+          <Package className="h-6 w-6" aria-hidden />
         </div>
-        <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[10px] font-black ${ui.badge}`}>
-          <StatusIcon className="h-3 w-3" aria-hidden />
-          {t(ui.labelKey)}
-        </span>
-      </div>
-
-      <h3 className="mt-3 text-lg font-black leading-tight text-slate-900">{shelf.name}</h3>
-      <p className="mt-1 text-sm font-bold text-slate-600">
-        {t("productCount", { count: shelf.productCount })}
-      </p>
-      <p className="mt-0.5 text-xs font-semibold text-slate-500">
-        {t("countProgress", { done: shelf.countedToday, left: remaining })}
-      </p>
-
-      <div className="mt-3">
-        <div className="flex justify-between text-[10px] font-bold text-slate-500">
-          <span>{t("progress")}</span>
-          <span className="tabular-nums text-[#6c4cff]">{pct}%</span>
-        </div>
-        <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-[#e7ecf5]">
-          <div
-            className="h-full rounded-full bg-gradient-to-r from-[#6c4cff] to-[#16c784] transition-all duration-500"
-            style={{ width: `${pct}%` }}
-          />
+        <div className="flex items-center gap-1.5">
+          {onMenuAction ? (
+            <ShelfCardActionsMenu
+              onAction={onMenuAction}
+              busy={busy}
+              disabled={!canManage}
+              disabledTitle={noPermissionTitle}
+            />
+          ) : null}
+          <span className="inline-flex items-center gap-1 rounded-full bg-white px-2.5 py-1 text-[10px] font-black text-slate-700 ring-1 ring-[#e7ecf5]">
+            <StatusIcon className="h-3 w-3" aria-hidden />
+            {t(ui.labelKey)}
+          </span>
         </div>
       </div>
 
-      <p className="mt-2 text-[10px] font-medium text-slate-400">
-        {t("lastUpdate")}: {formatRelativeTime(shelf.lastUpdateIso, bcp47)}
-      </p>
+      <h3 className="mt-3 text-xl font-black leading-tight text-slate-900">{shelf.name}</h3>
 
-      <div className="mt-3 flex flex-wrap gap-1.5">
-        <button
-          type="button"
-          onClick={onViewProducts}
-          className="inline-flex h-8 flex-1 items-center justify-center gap-1 rounded-xl border border-[#e7ecf5] text-[10px] font-bold text-slate-700 hover:bg-[#f6f8fc]"
-        >
-          <Package className="h-3 w-3" />
-          {t("viewProducts")}
-        </button>
-        {onMovements ? (
-          <button
-            type="button"
-            onClick={onMovements}
-            className="inline-flex h-8 items-center justify-center gap-1 rounded-xl border border-[#e7ecf5] px-2 text-[10px] font-bold text-slate-700 hover:bg-[#f6f8fc]"
-          >
-            <BarChart3 className="h-3 w-3" />
-          </button>
-        ) : null}
-        {onEdit ? (
-          <button
-            type="button"
-            onClick={onEdit}
-            className="inline-flex h-8 w-8 items-center justify-center rounded-xl border border-[#e7ecf5] text-slate-700 hover:bg-[#f6f8fc]"
-            title={t("edit")}
-          >
-            <Plus className="h-3.5 w-3.5" />
-          </button>
-        ) : null}
-      </div>
+      <ul className="mt-3 space-y-1.5 text-sm font-bold text-slate-600">
+        <li>{t("metricProducts", { count: shelf.productCount })}</li>
+        <li className="text-rose-600">{t("metricShort", { count: shelf.shortageCount })}</li>
+        <li className="text-amber-700">{t("metricSurplus", { count: shelf.surplusCount })}</li>
+        <li className="text-[#6c4cff]">{t("metricMatch", { pct: shelf.matchPct })}</li>
+      </ul>
 
       <button
         type="button"
-        onClick={onStartCount}
-        className="mt-2 flex w-full items-center justify-center gap-2 rounded-2xl py-3 text-sm font-black text-white shadow-md transition hover:brightness-110 active:scale-[0.99]"
+        onClick={(e) => {
+          e.stopPropagation();
+          onOpen();
+        }}
+        className="mt-4 flex w-full items-center justify-center gap-2 rounded-2xl py-3 text-sm font-black text-white shadow-md transition hover:brightness-110 active:scale-[0.99]"
         style={{ background: "linear-gradient(135deg, #6c4cff 0%, #5a3de8 100%)" }}
       >
         <Play className="h-4 w-4 fill-current" aria-hidden />

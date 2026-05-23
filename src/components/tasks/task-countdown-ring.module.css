@@ -1,0 +1,367 @@
+.wrap {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-inline: auto;
+  transition:
+    transform 0.35s cubic-bezier(0.22, 1, 0.36, 1),
+    filter 0.35s ease;
+  animation: ringFadeIn 0.5s ease-out backwards;
+}
+
+.wrap:hover {
+  transform: scale(1.03);
+  filter: brightness(1.04);
+}
+
+.sizeDefault {
+  width: min(100%, 220px);
+}
+
+.sizeCompact {
+  width: min(100%, 140px);
+}
+
+.sizeLarge {
+  width: min(100%, 280px);
+}
+
+.ringOuter {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1;
+}
+
+.glassPlate {
+  position: absolute;
+  inset: 12%;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow:
+    inset 0 2px 24px rgba(255, 255, 255, 0.12),
+    inset 0 -8px 32px rgba(0, 0, 0, 0.2);
+  pointer-events: none;
+}
+
+.innerGlow {
+  position: absolute;
+  inset: 18%;
+  border-radius: 50%;
+  pointer-events: none;
+  opacity: 0.55;
+  filter: blur(18px);
+  animation: innerGlowPulse 3.5s ease-in-out infinite alternate;
+}
+
+.ringSvg {
+  width: 100%;
+  height: 100%;
+  transform: rotate(-90deg);
+  overflow: visible;
+}
+
+.ringTrack {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.08);
+  stroke-width: 10;
+}
+
+.ringProgress {
+  fill: none;
+  stroke-width: 10;
+  stroke-linecap: round;
+  transition:
+    stroke-dashoffset 0.45s cubic-bezier(0.22, 1, 0.36, 1),
+    stroke 0.4s ease;
+  filter: drop-shadow(0 0 8px currentColor);
+}
+
+.center {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 18%;
+  text-align: center;
+  pointer-events: none;
+}
+
+.time {
+  font-variant-numeric: tabular-nums;
+  font-weight: 900;
+  letter-spacing: -0.03em;
+  line-height: 1;
+  transition: color 0.35s ease, text-shadow 0.35s ease;
+}
+
+.sizeDefault .time {
+  font-size: clamp(2rem, 9vw, 2.75rem);
+}
+
+.sizeCompact .time {
+  font-size: clamp(1.35rem, 6vw, 1.65rem);
+}
+
+.sizeLarge .time {
+  font-size: clamp(2.5rem, 11vw, 3.5rem);
+}
+
+.timeTick {
+  animation: digitPulse 1s ease-in-out;
+}
+
+.status {
+  margin-top: 0.35rem;
+  font-size: 0.62rem;
+  font-weight: 900;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.sizeCompact .status {
+  font-size: 0.55rem;
+  margin-top: 0.2rem;
+}
+
+.progressPct {
+  margin-top: 0.2rem;
+  font-size: 0.7rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.85;
+}
+
+.meta {
+  margin-top: 0.65rem;
+  width: 100%;
+  max-width: 240px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.65rem;
+  font-weight: 700;
+  color: rgba(226, 232, 240, 0.75);
+  text-align: center;
+}
+
+.taskTitle {
+  margin-top: 0.5rem;
+  max-width: 100%;
+  padding-inline: 0.25rem;
+  font-size: 0.72rem;
+  font-weight: 800;
+  line-height: 1.3;
+  color: rgba(241, 245, 249, 0.9);
+  text-align: center;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* —— tiers —— */
+.onTrack .ringProgress {
+  stroke: url(#ringGradOnTrack);
+  color: #34d399;
+}
+
+.onTrack .innerGlow {
+  background: radial-gradient(circle, rgba(16, 185, 129, 0.45), transparent 70%);
+}
+
+.onTrack .time {
+  color: #ecfdf5;
+  text-shadow: 0 0 28px rgba(16, 185, 129, 0.55);
+}
+
+.onTrack .status {
+  color: #6ee7b7;
+}
+
+.warning .ringProgress {
+  stroke: url(#ringGradWarning);
+  color: #fbbf24;
+}
+
+.warning .innerGlow {
+  background: radial-gradient(circle, rgba(245, 158, 11, 0.4), transparent 70%);
+}
+
+.warning .time {
+  color: #fffbeb;
+  text-shadow: 0 0 24px rgba(245, 158, 11, 0.45);
+}
+
+.warning .status {
+  color: #fcd34d;
+}
+
+.danger .ringProgress {
+  stroke: url(#ringGradDanger);
+  color: #f87171;
+}
+
+.danger .innerGlow {
+  background: radial-gradient(circle, rgba(239, 68, 68, 0.45), transparent 70%);
+}
+
+.danger .time {
+  color: #fff1f2;
+  text-shadow: 0 0 32px rgba(239, 68, 68, 0.55);
+}
+
+.danger .status {
+  color: #fda4af;
+}
+
+.overdue .ringProgress {
+  stroke: url(#ringGradOverdue);
+  color: #be123c;
+}
+
+.overdue .innerGlow {
+  background: radial-gradient(circle, rgba(190, 18, 60, 0.5), transparent 70%);
+}
+
+.overdue .time {
+  color: #ffe4e6;
+  text-shadow: 0 0 36px rgba(190, 18, 60, 0.65);
+}
+
+.overdue .status {
+  color: #fb7185;
+}
+
+.overdue.wrap {
+  animation:
+    ringFadeIn 0.5s ease-out backwards,
+    overdueShake 4s ease-in-out infinite;
+}
+
+.paused .ringProgress {
+  stroke: rgba(148, 163, 184, 0.6);
+  color: #94a3b8;
+}
+
+.paused .innerGlow {
+  background: radial-gradient(circle, rgba(100, 116, 139, 0.25), transparent 70%);
+  animation: none;
+}
+
+.paused .time {
+  color: #cbd5e1;
+}
+
+.paused .status {
+  color: #94a3b8;
+}
+
+.idle .ringProgress {
+  stroke: url(#ringGradOnTrack);
+  color: #38bdf8;
+}
+
+.idle .time {
+  color: #e0f2fe;
+}
+
+.idle .status {
+  color: #7dd3fc;
+}
+
+.done .ringProgress {
+  stroke: #22c55e;
+}
+
+.done .time {
+  color: #bbf7d0;
+}
+
+.wrap.criticalMinute {
+  animation:
+    ringFadeIn 0.5s ease-out backwards,
+    criticalPulse 0.85s ease-in-out infinite;
+}
+
+.wrap.criticalMinute .ringOuter {
+  animation: ringVibrate 0.4s ease-in-out infinite;
+}
+
+@keyframes ringFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.94);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes digitPulse {
+  0% {
+    transform: scale(1);
+  }
+  40% {
+    transform: scale(1.04);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+@keyframes innerGlowPulse {
+  from {
+    opacity: 0.4;
+    transform: scale(0.92);
+  }
+  to {
+    opacity: 0.75;
+    transform: scale(1.05);
+  }
+}
+
+@keyframes criticalPulse {
+  0%,
+  100% {
+    filter: brightness(1) drop-shadow(0 0 12px rgba(239, 68, 68, 0.35));
+  }
+  50% {
+    filter: brightness(1.12) drop-shadow(0 0 28px rgba(239, 68, 68, 0.65));
+  }
+}
+
+@keyframes overdueShake {
+  0%,
+  88%,
+  100% {
+    transform: translateX(0);
+  }
+  90% {
+    transform: translateX(-2px);
+  }
+  92% {
+    transform: translateX(2px);
+  }
+  94% {
+    transform: translateX(-1px);
+  }
+}
+
+@keyframes ringVibrate {
+  0%,
+  100% {
+    transform: rotate(-90deg);
+  }
+  25% {
+    transform: rotate(-90.4deg);
+  }
+  75% {
+    transform: rotate(-89.6deg);
+  }
+}

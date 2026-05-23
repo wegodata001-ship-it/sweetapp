@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Bell,
   Banknote,
@@ -14,32 +14,16 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useI18n } from "@/components/i18n-provider";
-import { useToast } from "@/components/toast-provider";
-import { NOTIFICATIONS_REFRESH_EVENT } from "@/lib/notifications/refresh-event";
+import {
+  useNotificationsInbox,
+  type NotifItem,
+} from "@/components/notifications-provider";
 import { priorityToColor } from "@/lib/notifications/priority";
-
-type InboxKind = "employee" | "admin";
-
-type NotifItem = {
-  id: string;
-  type: string;
-  section: string;
-  title: string;
-  message: string;
-  priority?: string;
-  color: string | null;
-  isRead: boolean;
-  actionUrl?: string | null;
-  createdAt: string;
-};
 
 const SECTION_ORDER = ["employees", "tasks", "finance", "inventory", "orders", "other"] as const;
 
 type SectionKey = (typeof SECTION_ORDER)[number];
 
-const POLL_MS = 60_000;
-const REFRESH_DEBOUNCE_MS = 4_000;
-const API_LIST = "/api/me/notifications";
 const API_READ = "/api/me/notifications";
 
 function sectionTKey(section: string): string {
@@ -92,19 +76,6 @@ function actionLabel(type: string, actionUrl: string | null | undefined, t: (k: 
   if (actionUrl?.startsWith("tel:")) return t("alerts.actionContact");
   if (actionUrl) return t("alerts.actionOpen");
   return "";
-}
-
-function toastForNewNotification(item: NotifItem): { title: string; description?: string } {
-  if (item.type === "TASK_ASSIGNED") {
-    return { title: "נוספה לך משימה חדשה", description: item.message || item.title };
-  }
-  if (item.type === "TASK_COMPLETED") {
-    return { title: item.title, description: item.message };
-  }
-  if (item.type === "NEW_UPDATE") {
-    return { title: "פורסם עדכון חדש", description: item.message };
-  }
-  return { title: item.title, description: item.message || undefined };
 }
 
 function NotificationCard({
@@ -185,80 +156,10 @@ function NotificationCard({
 
 export function StaffAlertsBell() {
   const { t, bcp47 } = useI18n();
-  const { showToast } = useToast();
+  const { unread, items, inbox, refresh, applyLocalRead, setAllReadLocally } =
+    useNotificationsInbox();
   const [open, setOpen] = useState(false);
-  const [unread, setUnread] = useState(0);
-  const [items, setItems] = useState<NotifItem[]>([]);
-  const [inbox, setInbox] = useState<InboxKind>("employee");
   const wrapRef = useRef<HTMLDivElement>(null);
-  const knownIdsRef = useRef<Set<string>>(new Set());
-  const initialLoadRef = useRef(true);
-  const itemsRef = useRef<NotifItem[]>([]);
-
-  const applyPayload = useCallback(
-    (data: { unreadCount: number; items: NotifItem[]; inbox: InboxKind }, showNewToasts: boolean) => {
-      setUnread(data.unreadCount);
-      setItems(data.items);
-      itemsRef.current = data.items;
-      setInbox(data.inbox);
-
-      if (!showNewToasts) {
-        for (const it of data.items) knownIdsRef.current.add(it.id);
-        return;
-      }
-
-      const fresh = data.items.filter((it) => !it.isRead && !knownIdsRef.current.has(it.id));
-      for (const it of data.items) knownIdsRef.current.add(it.id);
-
-      if (initialLoadRef.current) {
-        initialLoadRef.current = false;
-        return;
-      }
-
-      for (const it of fresh.slice(0, 3)) {
-        const toast = toastForNewNotification(it);
-        showToast({ tone: "info", title: toast.title, description: toast.description, durationMs: 5000 });
-      }
-    },
-    [showToast],
-  );
-
-  const load = useCallback(async () => {
-    try {
-      const res = await fetch(API_LIST, { credentials: "same-origin", cache: "no-store" });
-      if (!res.ok) return;
-      const j = (await res.json()) as {
-        ok?: boolean;
-        data?: { unreadCount: number; items: NotifItem[]; inbox: InboxKind };
-      };
-      if (!j.ok || !j.data) return;
-      applyPayload(j.data, true);
-    } catch {
-      /* ignore */
-    }
-  }, [applyPayload]);
-
-  const refreshDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(() => {
-    void load();
-    const timer = setInterval(() => void load(), POLL_MS);
-    const onRefresh = () => {
-      if (refreshDebounceRef.current) clearTimeout(refreshDebounceRef.current);
-      refreshDebounceRef.current = setTimeout(() => void load(), REFRESH_DEBOUNCE_MS);
-    };
-    window.addEventListener(NOTIFICATIONS_REFRESH_EVENT, onRefresh);
-    return () => {
-      clearInterval(timer);
-      if (refreshDebounceRef.current) clearTimeout(refreshDebounceRef.current);
-      window.removeEventListener(NOTIFICATIONS_REFRESH_EVENT, onRefresh);
-    };
-  }, [load]);
-
-  useEffect(() => {
-    if (!open) return;
-    void load();
-  }, [open, load]);
 
   useEffect(() => {
     function onDoc(e: MouseEvent) {
@@ -279,47 +180,27 @@ export function StaffAlertsBell() {
     };
   }, [open]);
 
-  const markReadLocally = useCallback((ids: string[]) => {
-    if (!ids.length) return;
-    const idSet = new Set(ids);
-    let decrement = 0;
-    for (const it of itemsRef.current) {
-      if (idSet.has(it.id) && !it.isRead) decrement += 1;
-    }
-    setItems((prev) => {
-      const next = prev.map((it) => (idSet.has(it.id) ? { ...it, isRead: true } : it));
-      itemsRef.current = next;
-      return next;
-    });
-    setUnread((prev) => Math.max(0, prev - decrement));
-  }, []);
-
   async function markRead(ids: string[]) {
     if (!ids.length) return;
-    markReadLocally(ids);
+    applyLocalRead(ids);
     await fetch(API_READ, {
       method: "PATCH",
       credentials: "same-origin",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ ids }),
     });
-    void load();
+    void refresh({ force: true });
   }
 
   async function markAll() {
-    setItems((prev) => {
-      const next = prev.map((it) => ({ ...it, isRead: true }));
-      itemsRef.current = next;
-      return next;
-    });
-    setUnread(0);
+    setAllReadLocally();
     await fetch(API_READ, {
       method: "PATCH",
       credentials: "same-origin",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ markAllRead: true }),
     });
-    void load();
+    void refresh({ force: true });
   }
 
   const grouped = useMemo(() => {

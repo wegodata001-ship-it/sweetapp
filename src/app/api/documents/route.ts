@@ -225,11 +225,11 @@ export async function POST(req: NextRequest) {
       },
     });
 
-    await saveProductHistoryFromItems(items);
-
+    const sideEffects: Promise<unknown>[] = [saveProductHistoryFromItems(items)];
     if (body.category === "הוצאה" && ie.kind === "expense") {
-      await recordSupplierPriceHistoryFromExpense(ie);
+      sideEffects.push(recordSupplierPriceHistoryFromExpense(ie));
     }
+    await Promise.all(sideEffects);
 
     if (isIncomeRegister) {
       const payments = normalizedPaymentLines(ie);
@@ -247,12 +247,14 @@ export async function POST(req: NextRequest) {
     }
 
     await syncFinancialDocumentPaymentTotals(doc.id);
-    await replaceCashFlowForDocument(doc.id);
-    await syncCheckPaymentsForDocument(doc.id);
-    if (body.category === "הוצאה" && ie.kind === "expense") {
-      await syncExpenseDocumentLedgerEntry(doc.id);
-    }
-    if (session) await logActivity(session.sub, "document_create");
+    await Promise.all([
+      replaceCashFlowForDocument(doc.id),
+      syncCheckPaymentsForDocument(doc.id),
+      body.category === "הוצאה" && ie.kind === "expense"
+        ? syncExpenseDocumentLedgerEntry(doc.id)
+        : Promise.resolve(),
+    ]);
+    if (session) void logActivity(session.sub, "document_create");
     return NextResponse.json({ ok: true, id: doc.id });
   } catch (e) {
     return NextResponse.json(

@@ -8,6 +8,7 @@ import { MobileAppHeader } from "@/components/mobile-app-header";
 import { MobileBottomNav } from "@/components/mobile-bottom-nav";
 import { MobileNavDrawer } from "@/components/mobile-nav-drawer";
 import { MobileNavProvider } from "@/components/mobile-nav-context";
+import { PermissionRouteGuard } from "@/components/permission-route-guard";
 
 type AppShellProps = {
   children: ReactNode;
@@ -34,6 +35,7 @@ export function AppShell({ children }: AppShellProps) {
   if (workerPortal) {
     return (
       <MobileNavProvider>
+        <PermissionRouteGuard />
         <div className="min-h-screen bg-white">
           <MobileAppHeader />
           <MobileNavDrawer />
@@ -47,6 +49,7 @@ export function AppShell({ children }: AppShellProps) {
 
   return (
     <MobileNavProvider>
+      <PermissionRouteGuard />
       <MobileAppHeader />
       <MobileNavDrawer />
       <div className="flex min-h-screen">

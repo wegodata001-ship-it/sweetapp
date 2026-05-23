@@ -12,9 +12,14 @@ import {
   Receipt,
   Trash2,
 } from "lucide-react";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useI18n } from "@/components/i18n-provider";
+import {
+  computeDropdownMenuPosition,
+  FLOATING_MENU_Z,
+  type DropdownMenuPosition,
+} from "@/lib/ui/floating-menu-position";
 
 export type CashflowMenuAction =
   | "view"
@@ -46,9 +51,11 @@ type Props = {
 };
 
 const MENU_WIDTH = 208;
+const MENU_ITEM_HEIGHT = 40;
+const MENU_PADDING = 8;
 
 /**
- * ⋮ — תפריט פעולות לשורת יומן תזרים (dropdown בדסקטופ, bottom sheet במובייל).
+ * ⋮ — תפריט פעולות לשורת יומן תזרים (portal + fixed, flip למעלה בשורות תחתונות).
  */
 export function CashflowRowActionsMenu({
   onAction,
@@ -63,65 +70,10 @@ export function CashflowRowActionsMenu({
   const [open, setOpen] = useState(false);
   const [entered, setEntered] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
-  const [anchor, setAnchor] = useState<{ top: number; left: number } | null>(null);
+  const [position, setPosition] = useState<DropdownMenuPosition | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const btnRef = useRef<HTMLButtonElement>(null);
-
-  useEffect(() => {
-    const mq = window.matchMedia("(max-width: 639px)");
-    const sync = () => setIsMobile(mq.matches);
-    sync();
-    mq.addEventListener("change", sync);
-    return () => mq.removeEventListener("change", sync);
-  }, []);
-
-  useLayoutEffect(() => {
-    if (!open || isMobile || !btnRef.current) {
-      setAnchor(null);
-      return;
-    }
-    const rect = btnRef.current.getBoundingClientRect();
-    const top = rect.bottom + 4;
-    const left =
-      dir === "rtl"
-        ? Math.max(8, rect.right - MENU_WIDTH)
-        : Math.min(window.innerWidth - MENU_WIDTH - 8, rect.left);
-    setAnchor({ top, left });
-  }, [open, isMobile, dir]);
-
-  useEffect(() => {
-    if (!open) {
-      setEntered(false);
-      return;
-    }
-    const id = requestAnimationFrame(() => setEntered(true));
-    return () => cancelAnimationFrame(id);
-  }, [open]);
-
-  useEffect(() => {
-    if (!open) return;
-    const onDoc = (e: MouseEvent) => {
-      const t = e.target as Node;
-      if (rootRef.current?.contains(t)) return;
-      const portal = document.getElementById("cashflow-actions-menu-portal");
-      if (portal?.contains(t)) return;
-      setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
-    };
-    document.addEventListener("mousedown", onDoc);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDoc);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
-
-  const pick = (action: CashflowMenuAction) => {
-    setOpen(false);
-    onAction(action);
-  };
+  const menuRef = useRef<HTMLUListElement>(null);
 
   const items: MenuItem[] =
     variant === "zReport"
@@ -141,23 +93,113 @@ export function CashflowRowActionsMenu({
           { id: "delete", icon: Trash2, labelKey: "cashflow.menuDelete", danger: true },
         ];
 
+  const estimatedMenuHeight = items.length * MENU_ITEM_HEIGHT + MENU_PADDING;
+
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 639px)");
+    const sync = () => setIsMobile(mq.matches);
+    sync();
+    mq.addEventListener("change", sync);
+    return () => mq.removeEventListener("change", sync);
+  }, []);
+
+  const updatePosition = useCallback(() => {
+    const el = btnRef.current;
+    if (!el) return;
+    setPosition(
+      computeDropdownMenuPosition(el, dir, {
+        width: MENU_WIDTH,
+        estimatedHeight: estimatedMenuHeight,
+      }),
+    );
+  }, [dir, estimatedMenuHeight]);
+
+  useLayoutEffect(() => {
+    if (!open || isMobile) {
+      setPosition(null);
+      return;
+    }
+    updatePosition();
+  }, [open, isMobile, updatePosition]);
+
+  useEffect(() => {
+    if (!open || isMobile) return;
+    const onReposition = () => updatePosition();
+    window.addEventListener("resize", onReposition);
+    window.addEventListener("scroll", onReposition, true);
+    return () => {
+      window.removeEventListener("resize", onReposition);
+      window.removeEventListener("scroll", onReposition, true);
+    };
+  }, [open, isMobile, updatePosition]);
+
+  useEffect(() => {
+    if (!open) {
+      setEntered(false);
+      return;
+    }
+    const id = requestAnimationFrame(() => setEntered(true));
+    return () => cancelAnimationFrame(id);
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (rootRef.current?.contains(target) || menuRef.current?.contains(target)) return;
+      setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  const pick = (action: CashflowMenuAction) => {
+    setOpen(false);
+    onAction(action);
+  };
+
+  const transformOrigin =
+    dir === "rtl"
+      ? position?.openAbove
+        ? "bottom right"
+        : "top right"
+      : position?.openAbove
+        ? "bottom left"
+        : "top left";
+
   const menuList = (
     <ul
+      ref={menuRef}
       role="menu"
       dir={dir}
-      className={`overflow-hidden rounded-2xl border border-slate-200/80 bg-white/95 py-1 shadow-2xl backdrop-blur-md transition-all duration-150 ease-out sm:rounded-xl sm:shadow-lg ${
+      className={`overflow-hidden rounded-2xl border border-slate-200/80 bg-white/95 py-1 shadow-2xl backdrop-blur-md transition-all duration-150 ease-out sm:rounded-xl sm:shadow-[0_16px_48px_rgba(15,23,42,0.18)] ${
         isMobile
-          ? `fixed inset-x-3 bottom-3 z-[61] max-h-[min(70vh,420px)] overflow-y-auto ${
+          ? `fixed inset-x-3 bottom-3 max-h-[min(70vh,420px)] overflow-y-auto ${
               entered ? "scale-100 opacity-100" : "scale-95 opacity-0"
             }`
-          : `fixed z-[61] w-52 origin-top transition-all duration-150 ease-out ${
+          : `fixed w-52 transition-all duration-150 ease-out ${
               entered ? "scale-100 opacity-100" : "scale-95 opacity-0"
             }`
       }`}
       style={
-        !isMobile && anchor
-          ? { top: anchor.top, left: anchor.left, width: MENU_WIDTH, transformOrigin: "top end" }
-          : undefined
+        !isMobile && position
+          ? {
+              zIndex: FLOATING_MENU_Z,
+              top: position.top,
+              left: position.left,
+              width: position.width,
+              transformOrigin,
+            }
+          : isMobile
+            ? { zIndex: FLOATING_MENU_Z }
+            : undefined
       }
     >
       {items.map(({ id, icon: Icon, labelKey, danger, disabled }) => (
@@ -210,11 +252,11 @@ export function CashflowRowActionsMenu({
         ? createPortal(
             <>
               <div
-                className={`fixed inset-0 z-[60] ${isMobile ? "bg-slate-900/35 backdrop-blur-[2px]" : "bg-transparent"}`}
+                className={`fixed inset-0 ${isMobile ? "z-[9998] bg-slate-900/35 backdrop-blur-[2px]" : "z-[9998] bg-transparent"}`}
                 aria-hidden
                 onClick={() => setOpen(false)}
               />
-              <div id="cashflow-actions-menu-portal">{menuList}</div>
+              {menuList}
             </>,
             document.body,
           )

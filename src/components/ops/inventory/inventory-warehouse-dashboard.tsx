@@ -1,40 +1,56 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { AlertTriangle, Layers, Plus, TrendingUp, Warehouse } from "lucide-react";
+import { Plus } from "lucide-react";
 import Link from "next/link";
+import { useAuth } from "@/components/auth-provider";
 import { useI18n } from "@/components/i18n-provider";
+import { useToast } from "@/components/toast-provider";
 import type { ShelfSummary } from "@/components/ops/inventory-count/types";
-import { localYmd, resolveShelfStatus } from "@/components/ops/inventory-count/utils";
+import { localYmd } from "@/components/ops/inventory-count/utils";
 import { AddShelfModal } from "./add-shelf-modal";
+import { ShelfAddProductsModal } from "./shelf-add-products-modal";
 import { ShelfCountModal } from "./shelf-count-modal";
-import { ShelfGridCard, type ShelfGridModel } from "./shelf-grid-card";
-import { WarehouseKpiCards } from "./warehouse-kpi-cards";
+import { ShelfDeleteConfirmModal } from "./shelf-delete-confirm-modal";
+import type { ShelfCardMenuAction } from "./shelf-card-actions-menu";
+import {
+  resolveShelfVisualStatus,
+  ShelfGridCard,
+  type ShelfGridModel,
+} from "./shelf-grid-card";
 
 type LocationRow = { id: string; name: string; description: string | null };
-type StatsDto = {
-  shortageCount: number;
-  lowStockCount: number;
-  todayMovements: number;
-};
+
+function canManageInventory(user: { role: string; permissions: string[] } | null) {
+  if (!user) return false;
+  if (user.role === "SUPER_ADMIN" || user.role === "ADMIN") return true;
+  return user.permissions.includes("inventory");
+}
 
 export function InventoryWarehouseDashboard() {
-  const { t, bcp47, dir } = useI18n();
+  const { user } = useAuth();
+  const { showToast } = useToast();
+  const { t, dir } = useI18n();
   const tW = (key: string, vars?: Record<string, string | number>) =>
     t(`ops.inventory.warehouse.${key}`, vars);
   const tCard = (key: string, vars?: Record<string, string | number>) =>
     t(`ops.inventory.warehouse.card.${key}`, vars);
 
+  const canManage = canManageInventory(user);
+
   const [shelfSummaries, setShelfSummaries] = useState<ShelfSummary[]>([]);
   const [locations, setLocations] = useState<LocationRow[]>([]);
-  const [stats, setStats] = useState<StatsDto | null>(null);
-  const [shelfMeta, setShelfMeta] = useState<
-    Record<string, { countedToday: number; lastIso: string | null }>
-  >({});
   const [modalShelf, setModalShelf] = useState<string | null>(null);
   const [addShelfOpen, setAddShelfOpen] = useState(false);
   const [search, setSearch] = useState("");
   const countDate = localYmd(new Date());
+
+  const [actionShelf, setActionShelf] = useState<ShelfGridModel | null>(null);
+  const [addProductsOpen, setAddProductsOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [busyShelfName, setBusyShelfName] = useState<string | null>(null);
+  const [exitingNames, setExitingNames] = useState<Set<string>>(new Set());
+  const [enteringNames, setEnteringNames] = useState<Set<string>>(new Set());
 
   const loadShelves = useCallback(async () => {
     const res = await fetch("/api/inventory/shelf-summaries", { credentials: "same-origin" });
@@ -48,56 +64,9 @@ export function InventoryWarehouseDashboard() {
     setLocations(j.data ?? []);
   }, []);
 
-  const loadStats = useCallback(async () => {
-    const res = await fetch("/api/inventory/stats", { credentials: "same-origin" });
-    const j = (await res.json()) as { data?: StatsDto };
-    if (j.data) setStats(j.data);
-  }, []);
-
-  const loadShelfMeta = useCallback(async () => {
-    const today = localYmd(new Date());
-    const weekAgo = new Date();
-    weekAgo.setDate(weekAgo.getDate() - 7);
-    try {
-      const res = await fetch(
-        `/api/inventory/count-history?dateFrom=${encodeURIComponent(localYmd(weekAgo))}&dateTo=${encodeURIComponent(today)}`,
-        { credentials: "same-origin" },
-      );
-      const j = (await res.json()) as {
-        data?: { product: { id: string; location: string }; createdAt: string }[];
-      };
-      const byLoc = new Map<string, Set<string>>();
-      const lastMap: Record<string, string> = {};
-      const todayStart = `${today}T00:00:00`;
-      for (const r of j.data ?? []) {
-        const loc = (r.product?.location ?? "").trim();
-        if (!loc) continue;
-        if (r.createdAt >= todayStart) {
-          if (!byLoc.has(loc)) byLoc.set(loc, new Set());
-          byLoc.get(loc)!.add(r.product.id);
-        }
-        if (!lastMap[loc] || r.createdAt > lastMap[loc]) lastMap[loc] = r.createdAt;
-      }
-      const meta: Record<string, { countedToday: number; lastIso: string | null }> = {};
-      for (const [loc, set] of byLoc) {
-        meta[loc] = { countedToday: set.size, lastIso: lastMap[loc] ?? null };
-      }
-      for (const loc of Object.keys(lastMap)) {
-        if (!meta[loc]) meta[loc] = { countedToday: 0, lastIso: lastMap[loc] };
-      }
-      setShelfMeta(meta);
-    } catch {
-      setShelfMeta({});
-    }
-  }, []);
-
-  const refresh = useCallback(() => {
-    void Promise.all([loadShelves(), loadLocations(), loadStats(), loadShelfMeta()]);
-  }, [loadShelves, loadLocations, loadStats, loadShelfMeta]);
-
   useEffect(() => {
-    queueMicrotask(() => refresh());
-  }, [refresh]);
+    void Promise.all([loadShelves(), loadLocations()]);
+  }, [loadShelves, loadLocations]);
 
   const locationByName = useMemo(() => {
     const m = new Map<string, LocationRow>();
@@ -113,84 +82,159 @@ export function InventoryWarehouseDashboard() {
         name,
         productCount: 0,
         shortageCount: 0,
-        countedToday: 0,
-        progressPct: 0,
-        lastUpdateIso: null,
-        status: "pending",
+        surplusCount: 0,
+        matchPct: 100,
+        visualStatus: "perfect",
         locationId: loc.id,
       });
     }
     for (const s of shelfSummaries) {
       const name = s.name.trim();
-      const meta = shelfMeta[name];
-      const countedToday = meta?.countedToday ?? 0;
-      const progressPct =
-        s.productCount > 0 ? Math.min(100, Math.round((countedToday / s.productCount) * 100)) : 0;
-      const counted = countedToday >= s.productCount && s.productCount > 0;
-      const existing = map.get(name);
-      map.set(name, {
+      const base = {
         name,
         productCount: s.productCount,
         shortageCount: s.shortageCount,
-        countedToday,
-        progressPct,
-        lastUpdateIso: meta?.lastIso ?? null,
-        status: resolveShelfStatus(s, counted, false),
-        locationId: existing?.locationId ?? locationByName.get(name)?.id ?? null,
+        surplusCount: s.surplusCount ?? 0,
+        matchPct: s.matchPct ?? 0,
+      };
+      map.set(name, {
+        ...base,
+        visualStatus: resolveShelfVisualStatus(base),
+        locationId: map.get(name)?.locationId ?? locationByName.get(name)?.id ?? null,
       });
     }
     const q = search.trim().toLowerCase();
     return [...map.values()]
       .filter((s) => !q || s.name.toLowerCase().includes(q))
+      .filter((s) => !exitingNames.has(s.name))
       .sort((a, b) => a.name.localeCompare(b.name, "he"));
-  }, [locations, shelfSummaries, shelfMeta, search, locationByName]);
+  }, [locations, shelfSummaries, search, locationByName, exitingNames]);
 
-  const kpis = useMemo(
-    () => [
-      {
-        key: "shelves",
-        label: tW("kpiShelves"),
-        value: shelves.length,
-        icon: Warehouse,
-        accent: "#6c4cff",
-        iconBg: "rgba(108, 76, 255, 0.12)",
-      },
-      {
-        key: "short",
-        label: tW("kpiShortage"),
-        value: stats?.shortageCount ?? 0,
-        icon: AlertTriangle,
-        accent: "#ff5b6e",
-        iconBg: "rgba(255, 91, 110, 0.12)",
-      },
-      {
-        key: "over",
-        label: tW("kpiOver"),
-        value: stats?.lowStockCount ?? 0,
-        icon: TrendingUp,
-        accent: "#ffb020",
-        iconBg: "rgba(255, 176, 32, 0.15)",
-      },
-      {
-        key: "mov",
-        label: tW("kpiMovements"),
-        value: stats?.todayMovements ?? 0,
-        icon: Layers,
-        accent: "#16c784",
-        iconBg: "rgba(22, 199, 132, 0.12)",
-      },
-    ],
-    [shelves.length, stats, tW],
-  );
+  const upsertSummary = useCallback((summary: ShelfSummary) => {
+    setShelfSummaries((prev) => {
+      const next = prev.filter((s) => s.name.trim() !== summary.name.trim());
+      next.push(summary);
+      return next.sort((a, b) => a.name.localeCompare(b.name, "he"));
+    });
+  }, []);
 
-  const openShelf = modalShelf ? locationByName.get(modalShelf.trim()) : null;
+  const handleMenuAction = (shelf: ShelfGridModel, action: ShelfCardMenuAction) => {
+    if (!canManage) return;
+    setActionShelf(shelf);
+    if (action === "addProducts") setAddProductsOpen(true);
+    if (action === "delete") setDeleteOpen(true);
+    if (action === "duplicate") void duplicateShelf(shelf);
+  };
+
+  const shelfApiPath = (shelf: ShelfGridModel) =>
+    shelf.locationId ? shelf.locationId : "by-name";
+
+  const duplicateShelf = async (shelf: ShelfGridModel) => {
+    if (busyShelfName) return;
+    setBusyShelfName(shelf.name);
+    try {
+      const res = await fetch(`/api/inventory/shelves/${shelfApiPath(shelf)}/duplicate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({ shelfName: shelf.name }),
+      });
+      const j = (await res.json()) as {
+        ok?: boolean;
+        error?: string;
+        data?: {
+          shelf: { id: string; name: string; description: string | null };
+          summary: ShelfSummary;
+          sourceSummary?: ShelfSummary;
+        };
+      };
+      if (!res.ok || !j.ok || !j.data?.summary) {
+        showToast({ tone: "error", title: j.error ?? tW("toast.duplicateFailed"), durationMs: 3000 });
+        return;
+      }
+
+      setLocations((prev) => {
+        if (prev.some((l) => l.id === j.data!.shelf.id)) return prev;
+        return [
+          ...prev,
+          {
+            id: j.data!.shelf.id,
+            name: j.data!.shelf.name,
+            description: j.data!.shelf.description,
+          },
+        ].sort((a, b) => a.name.localeCompare(b.name, "he"));
+      });
+
+      if (j.data.sourceSummary) upsertSummary(j.data.sourceSummary);
+      upsertSummary(j.data.summary);
+
+      setEnteringNames((prev) => new Set(prev).add(j.data!.summary.name));
+      setTimeout(() => {
+        setEnteringNames((prev) => {
+          const n = new Set(prev);
+          n.delete(j.data!.summary.name);
+          return n;
+        });
+      }, 400);
+
+      showToast({ tone: "success", title: tW("toast.duplicated"), durationMs: 2500 });
+    } catch {
+      showToast({ tone: "error", title: tW("toast.duplicateFailed"), durationMs: 3000 });
+    } finally {
+      setBusyShelfName(null);
+    }
+  };
+
+  const confirmDeleteShelf = async () => {
+    if (!actionShelf || busyShelfName) return;
+    const name = actionShelf.name;
+    setBusyShelfName(name);
+    try {
+      const res = await fetch(
+        `/api/inventory/shelves/${shelfApiPath(actionShelf)}?name=${encodeURIComponent(name)}`,
+        { method: "DELETE", credentials: "same-origin" },
+      );
+      const j = (await res.json()) as { ok?: boolean; error?: string };
+      if (!res.ok || !j.ok) {
+        showToast({ tone: "error", title: j.error ?? tW("toast.deleteFailed"), durationMs: 3000 });
+        return;
+      }
+
+      setDeleteOpen(false);
+      setExitingNames((prev) => new Set(prev).add(name));
+      setTimeout(() => {
+        setShelfSummaries((prev) => prev.filter((s) => s.name.trim() !== name.trim()));
+        setLocations((prev) => prev.filter((l) => l.name.trim() !== name.trim()));
+        setExitingNames((prev) => {
+          const n = new Set(prev);
+          n.delete(name);
+          return n;
+        });
+      }, 320);
+
+      showToast({ tone: "success", title: tW("toast.deleted"), durationMs: 2500 });
+    } catch {
+      showToast({ tone: "error", title: tW("toast.deleteFailed"), durationMs: 3000 });
+    } finally {
+      setBusyShelfName(null);
+      setActionShelf(null);
+    }
+  };
 
   return (
-    <div className="space-y-5" dir={dir} style={{ background: "#f6f8fc" }}>
-      <WarehouseKpiCards items={kpis} />
+    <div className="space-y-5" dir={dir}>
+      <style>{`
+        @keyframes shelf-enter {
+          from { opacity: 0; transform: scale(0.96) translateY(8px); }
+          to { opacity: 1; transform: scale(1) translateY(0); }
+        }
+      `}</style>
 
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h2 className="text-base font-black text-slate-900">{tW("gridTitle")}</h2>
+      <header className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-black text-slate-900">{t("ops.inventory.title")}</h1>
+          <p className="mt-1 text-sm font-semibold text-slate-500">{tW("pageHint")}</p>
+        </div>
         <div className="flex flex-wrap gap-2">
           <input
             type="search"
@@ -209,10 +253,10 @@ export function InventoryWarehouseDashboard() {
             {tW("addShelf")}
           </button>
         </div>
-      </div>
+      </header>
 
       {shelves.length === 0 ? (
-        <div className="rounded-[20px] border border-dashed border-[#e7ecf5] bg-white p-10 text-center">
+        <div className="rounded-[24px] border border-dashed border-[#e7ecf5] bg-white p-10 text-center">
           <p className="text-sm font-semibold text-slate-600">{tW("noShelves")}</p>
           <Link
             href="/ops/inventory/locations"
@@ -227,10 +271,13 @@ export function InventoryWarehouseDashboard() {
             <ShelfGridCard
               key={shelf.name}
               shelf={shelf}
-              bcp47={bcp47}
               t={tCard}
-              onStartCount={() => setModalShelf(shelf.name)}
-              onViewProducts={() => setModalShelf(shelf.name)}
+              onOpen={() => setModalShelf(shelf.name)}
+              onMenuAction={(action) => handleMenuAction(shelf, action)}
+              busy={busyShelfName === shelf.name}
+              entering={enteringNames.has(shelf.name)}
+              canManage={canManage}
+              noPermissionTitle={tCard("noPermission")}
             />
           ))}
         </div>
@@ -239,11 +286,34 @@ export function InventoryWarehouseDashboard() {
       <ShelfCountModal
         open={modalShelf !== null}
         shelfName={modalShelf ?? ""}
-        locationId={openShelf?.id ?? locationByName.get(modalShelf?.trim() ?? "")?.id ?? null}
         countDate={countDate}
         onClose={() => setModalShelf(null)}
-        onSaved={refresh}
+        onShelfStatsChange={loadShelves}
         t={(k, v) => t(`ops.inventory.warehouse.modal.${k}`, v)}
+      />
+
+      <ShelfAddProductsModal
+        open={addProductsOpen && actionShelf !== null}
+        shelfName={actionShelf?.name ?? ""}
+        locationId={actionShelf?.locationId ?? null}
+        countDate={countDate}
+        onClose={() => {
+          setAddProductsOpen(false);
+          setActionShelf(null);
+        }}
+        onShelfUpdated={(summary) => upsertSummary(summary)}
+      />
+
+      <ShelfDeleteConfirmModal
+        open={deleteOpen && actionShelf !== null}
+        shelfName={actionShelf?.name ?? ""}
+        busy={busyShelfName === actionShelf?.name}
+        onCancel={() => {
+          if (busyShelfName) return;
+          setDeleteOpen(false);
+          setActionShelf(null);
+        }}
+        onConfirm={() => void confirmDeleteShelf()}
       />
 
       <AddShelfModal
@@ -259,7 +329,14 @@ export function InventoryWarehouseDashboard() {
             if (prev.some((s) => s.name.trim() === loc.name.trim())) return prev;
             return [
               ...prev,
-              { name: loc.name, productCount: 0, shortageCount: 0 },
+              {
+                name: loc.name,
+                productCount: 0,
+                shortageCount: 0,
+                surplusCount: 0,
+                okCount: 0,
+                matchPct: 100,
+              },
             ].sort((a, b) => a.name.localeCompare(b.name, "he"));
           });
         }}

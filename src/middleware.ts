@@ -132,11 +132,21 @@ export async function middleware(request: NextRequest) {
     pathname === "/admin/wedding-orders" || pathname.startsWith("/admin/wedding-orders/");
 
   if (isPureEmployeeRole(role)) {
-    if (
-      (pathname.startsWith("/admin") || pathname.startsWith("/manager")) &&
-      !isDailyOrdersPath
-    ) {
+    if (pathname.startsWith("/manager")) {
       return NextResponse.redirect(new URL("/employee", request.url));
+    }
+    if (pathname.startsWith("/admin") && !isDailyOrdersPath && !isWeddingOrdersPath) {
+      const adminRule = matchRule(pathname, PAGE_ACCESS_RULES);
+      if (
+        adminRule &&
+        adminRule !== "SUPER_ADMIN_ONLY" &&
+        adminRule !== "ADMIN_ONLY" &&
+        permSet.has(adminRule)
+      ) {
+        // עובד עם הרשאה (משימות, מלאי וכו') — מותר לגשת לנתיבי /admin הרלוונטיים
+      } else {
+        return NextResponse.redirect(new URL("/employee", request.url));
+      }
     }
   }
 

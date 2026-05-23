@@ -31,7 +31,15 @@ import {
   type ZReportPayload,
 } from "@/lib/finance/document-payload";
 import { IncomeExpenseFields } from "@/app/finance/register/income-expense-fields";
+import { useToast } from "@/components/toast-provider";
 import { useI18n } from "@/components/i18n-provider";
+import {
+  enqueueDocumentPdf,
+  enqueuePaymentPdf,
+  pollDocumentPdf,
+  pollPaymentPdf,
+  type PdfQueueStatus,
+} from "@/lib/finance/register-pdf-queue";
 import { REGISTER_LABEL_KEYS as LK } from "@/lib/i18n/register-label-keys";
 import { formatShekel, parseNum } from "@/lib/format-shekel";
 
@@ -46,6 +54,7 @@ type OperationModalState = {
   amount?: number;
   date?: string;
   viewUrl?: string;
+  pdfStatus?: PdfQueueStatus;
   nextTab?: TabId;
 };
 
@@ -59,6 +68,7 @@ function freshIncomeExpensePayload(kind: "income" | "expense"): IncomeExpensePay
 
 function FinanceRegisterPageInner() {
   const { t, bcp47, locale } = useI18n();
+  const { showToast } = useToast();
   void bcp47;
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -448,10 +458,67 @@ function FinanceRegisterPageInner() {
     amount?: number;
     date?: string;
     viewUrl?: string;
+    pdfStatus?: PdfQueueStatus;
     nextTab?: TabId;
   }) => {
     setArchiveFeedback(null);
     setOperationModal({ type: "success", ...params });
+  };
+
+  /** שמירה הושלמה — PDF ברקע, toast מיידי */
+  const finishDocumentSaveWithBackgroundPdf = (
+    documentId: string,
+    modal: {
+      tone: Exclude<ModalTone, "error">;
+      title: string;
+      description: string;
+      amount?: number;
+      date?: string;
+      nextTab?: TabId;
+    },
+  ) => {
+    showToast({
+      tone: "success",
+      title: "המסמך נשמר בהצלחה",
+      description: "מייצר PDF ברקע…",
+      durationMs: 4500,
+    });
+    showSuccessModal({ ...modal, documentId, pdfStatus: "processing" });
+    enqueueDocumentPdf(documentId);
+    pollDocumentPdf(documentId, (u) => {
+      setOperationModal((prev) =>
+        prev?.documentId === documentId && prev.type === "success"
+          ? { ...prev, pdfStatus: u.status, viewUrl: u.pdfUrl ?? prev.viewUrl }
+          : prev,
+      );
+    });
+  };
+
+  const finishPaymentSaveWithBackgroundPdf = (
+    paymentId: string,
+    modal: {
+      tone: Exclude<ModalTone, "error">;
+      title: string;
+      description: string;
+      amount?: number;
+      date?: string;
+      nextTab?: TabId;
+    },
+  ) => {
+    showToast({
+      tone: "success",
+      title: "התשלום נשמר בהצלחה",
+      durationMs: 4000,
+    });
+    showSuccessModal({ ...modal, documentId: paymentId, pdfStatus: "processing" });
+    enqueuePaymentPdf(paymentId);
+    pollPaymentPdf(paymentId, (u) => {
+      setOperationModal((prev) =>
+        prev?.documentId === paymentId && prev.type === "success"
+          ? { ...prev, pdfStatus: u.status, viewUrl: u.pdfUrl ?? prev.viewUrl }
+          : prev,
+      );
+    });
   };
 
   const clearEditMode = useCallback(() => {
@@ -473,68 +540,34 @@ function FinanceRegisterPageInner() {
     };
   }, [cashTaxable, cashExempt, creditTaxable, creditExempt, transfers, zDate, zNumber]);
 
-  const triggerPdfForDocument = async (documentId: string): Promise<{ ok: boolean; pdfUrl?: string; error?: string }> => {
-    try {
-      const res = await fetch("/api/pdfs", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ documentId }),
-        credentials: "same-origin",
-      });
-      const j = (await res.json()) as { ok?: boolean; pdfUrl?: string; error?: string };
-      if (!res.ok || !j.ok) return { ok: false, error: j.error ?? t("register.errors.pdfFailed") };
-      return {
-        ok: true,
-        pdfUrl: j.pdfUrl && /^https?:\/\//.test(j.pdfUrl) ? j.pdfUrl : undefined,
-      };
-    } catch {
-      return { ok: false, error: t("register.errors.pdfFailed") };
-    }
-  };
-
-  const triggerPdfForPayment = async (paymentId: string): Promise<{ ok: boolean; pdfUrl?: string; error?: string }> => {
-    try {
-      const res = await fetch("/api/pdfs", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ paymentId }),
-        credentials: "same-origin",
-      });
-      const j = (await res.json()) as { ok?: boolean; pdfUrl?: string; error?: string };
-      if (!res.ok || !j.ok) return { ok: false, error: j.error ?? t("register.errors.pdfFailed") };
-      return {
-        ok: true,
-        pdfUrl: j.pdfUrl && /^https?:\/\//.test(j.pdfUrl) ? j.pdfUrl : undefined,
-      };
-    } catch {
-      return { ok: false, error: t("register.errors.pdfFailed") };
-    }
-  };
-
-  const openOrCreateDocumentPdf = async (documentId: string) => {
+  const openOrCreateDocumentPdf = (documentId: string) => {
     setOpeningDocPdf(true);
-    try {
-      const latest = await fetch(`/api/reports/latest?relatedId=${encodeURIComponent(documentId)}`, {
-        credentials: "same-origin",
-      });
-      const lj = (await latest.json()) as { data?: { publicUrl: string; fileName: string } | null };
-      if (lj.data?.publicUrl) {
-        setDocPdfPreview({ url: lj.data.publicUrl, title: lj.data.fileName });
-        return;
+    void (async () => {
+      try {
+        const latest = await fetch(`/api/reports/latest?relatedId=${encodeURIComponent(documentId)}`, {
+          credentials: "same-origin",
+        });
+        const lj = (await latest.json()) as { data?: { publicUrl: string; fileName: string } | null };
+        if (lj.data?.publicUrl) {
+          setDocPdfPreview({ url: lj.data.publicUrl, title: lj.data.fileName });
+          setOpeningDocPdf(false);
+          return;
+        }
+        enqueueDocumentPdf(documentId);
+        pollDocumentPdf(documentId, (u) => {
+          if (u.status === "ready" && u.pdfUrl) {
+            setDocPdfPreview({ url: u.pdfUrl, title: `doc-${documentId.slice(0, 8)}.pdf` });
+            setOpeningDocPdf(false);
+          } else if (u.status === "failed") {
+            showErrorModal(t("register.errors.pdfFailed"), "neutral");
+            setOpeningDocPdf(false);
+          }
+        });
+      } catch {
+        showErrorModal(t("register.errors.pdfFailed"), "neutral");
+        setOpeningDocPdf(false);
       }
-      const gen = await fetch("/api/reports/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "same-origin",
-        body: JSON.stringify({ entity: "document", relatedId: documentId }),
-      });
-      const gj = (await gen.json()) as { publicUrl?: string; pdfUrl?: string; ok?: boolean; error?: string };
-      const url = gj.publicUrl ?? gj.pdfUrl;
-      if (url) setDocPdfPreview({ url, title: `doc-${documentId.slice(0, 8)}.pdf` });
-      else showErrorModal(gj.error ?? t("register.errors.pdfFailed"), "neutral");
-    } finally {
-      setOpeningDocPdf(false);
-    }
+    })();
   };
 
   const publishIncomeDoc = async () => {
@@ -570,19 +603,12 @@ function FinanceRegisterPageInner() {
           showErrorModal(res.error ?? t("register.errors.updateFailed"), "income");
           return;
         }
-        const pdf = await triggerPdfForDocument(editingDocId);
-        if (!pdf.ok) {
-          showErrorModal(pdf.error ?? t("register.errors.docSavedPdfFailed"), "income");
-          return;
-        }
-        showSuccessModal({
+        finishDocumentSaveWithBackgroundPdf(editingDocId, {
           tone: "income",
           title: t("register.modal.incomeSaved"),
           description: t("register.modal.docSavedToCashflow"),
-          documentId: editingDocId,
           amount: incomeExpenseTotalToPay(payload),
           date: payload.docDate || todayInputValue(),
-          viewUrl: pdf.pdfUrl,
           nextTab: "income",
         });
         resetFormForNewDocument("income");
@@ -599,19 +625,12 @@ function FinanceRegisterPageInner() {
         showErrorModal(res.error ?? t("register.errors.saveFailed"), "income");
         return;
       }
-      const pdf = await triggerPdfForDocument(res.id);
-      if (!pdf.ok) {
-        showErrorModal(pdf.error ?? t("register.errors.docSavedPdfFailed"), "income");
-        return;
-      }
-      showSuccessModal({
+      finishDocumentSaveWithBackgroundPdf(res.id, {
         tone: "income",
         title: t("register.modal.incomeSaved"),
         description: t("register.modal.docSavedToCashflow"),
-        documentId: res.id,
         amount: incomeExpenseTotalToPay(payload),
         date: payload.docDate || todayInputValue(),
-        viewUrl: pdf.pdfUrl,
         nextTab: "income",
       });
       resetFormForNewDocument("income");
@@ -644,19 +663,12 @@ function FinanceRegisterPageInner() {
           showErrorModal(res.error ?? t("register.errors.updateFailed"), "neutral");
           return;
         }
-        const pdf = await triggerPdfForDocument(editingDocId);
-        if (!pdf.ok) {
-          showErrorModal(pdf.error ?? t("register.errors.docSavedPdfFailed"), "neutral");
-          return;
-        }
-        showSuccessModal({
+        finishDocumentSaveWithBackgroundPdf(editingDocId, {
           tone: "neutral",
           title: t("register.modal.zSaved"),
           description: t("register.modal.docSavedToCashflow"),
-          documentId: editingDocId,
           amount: zGrandTotal,
           date: zDate || todayInputValue(),
-          viewUrl: pdf.pdfUrl,
           nextTab: "zreport",
         });
         resetZ();
@@ -674,19 +686,12 @@ function FinanceRegisterPageInner() {
         showErrorModal(res.error ?? t("register.errors.saveFailed"), "neutral");
         return;
       }
-      const pdf = await triggerPdfForDocument(res.id);
-      if (!pdf.ok) {
-        showErrorModal(pdf.error ?? t("register.errors.docSavedPdfFailed"), "neutral");
-        return;
-      }
-      showSuccessModal({
+      finishDocumentSaveWithBackgroundPdf(res.id, {
         tone: "neutral",
         title: t("register.modal.zSaved"),
         description: t("register.modal.docSavedToCashflow"),
-        documentId: res.id,
         amount: zGrandTotal,
         date: zDate || todayInputValue(),
-        viewUrl: pdf.pdfUrl,
         nextTab: "zreport",
       });
       resetZ();
@@ -746,19 +751,12 @@ function FinanceRegisterPageInner() {
           showErrorModal(res.error ?? t("register.errors.updateFailed"), "expense");
           return;
         }
-        const pdf = await triggerPdfForDocument(editingDocId);
-        if (!pdf.ok) {
-          showErrorModal(pdf.error ?? t("register.errors.docSavedPdfFailed"), "expense");
-          return;
-        }
-        showSuccessModal({
+        finishDocumentSaveWithBackgroundPdf(editingDocId, {
           tone: "expense",
           title: t("register.modal.expenseSaved"),
           description: t("register.modal.docSavedToCashflow"),
-          documentId: editingDocId,
           amount: incomeExpenseTotalToPay(payload),
           date: payload.docDate || todayInputValue(),
-          viewUrl: pdf.pdfUrl,
           nextTab: "expenses",
         });
         resetFormForNewDocument("expenses");
@@ -775,19 +773,12 @@ function FinanceRegisterPageInner() {
         showErrorModal(res.error ?? t("register.errors.saveFailed"), "expense");
         return;
       }
-      const pdf = await triggerPdfForDocument(res.id);
-      if (!pdf.ok) {
-        showErrorModal(pdf.error ?? t("register.errors.docSavedPdfFailed"), "expense");
-        return;
-      }
-      showSuccessModal({
+      finishDocumentSaveWithBackgroundPdf(res.id, {
         tone: "expense",
         title: t("register.modal.expenseSaved"),
         description: t("register.modal.docSavedToCashflow"),
-        documentId: res.id,
         amount: incomeExpenseTotalToPay(payload),
         date: payload.docDate || todayInputValue(),
-        viewUrl: pdf.pdfUrl,
         nextTab: "expenses",
       });
       resetFormForNewDocument("expenses", { keepRoute: true });
@@ -861,23 +852,16 @@ function FinanceRegisterPageInner() {
         showErrorModal(json.error ?? t("register.errors.paymentFailed"), "neutral");
         return;
       }
-      const pdf = await triggerPdfForPayment(json.data.id);
-      if (!pdf.ok) {
-        showErrorModal(pdf.error ?? t("register.errors.paymentSavedPdfFailed"), "neutral");
-        return;
-      }
       setPaymentAmount("");
       setPaymentNotes("");
       setPaymentMethod(PAYMENT_INSTRUMENT_OPTIONS[0]);
       resetCheckFields();
-      showSuccessModal({
+      finishPaymentSaveWithBackgroundPdf(json.data.id, {
         tone: "neutral",
         title: t("register.modal.paymentSaved"),
         description: t("register.modal.paymentSavedDescription"),
-        documentId: json.data.id,
         amount,
         date: todayInputValue(),
-        viewUrl: pdf.pdfUrl,
         nextTab: "income",
       });
     } catch (e) {
@@ -930,26 +914,18 @@ function FinanceRegisterPageInner() {
         showErrorModal(json.error ?? t("register.errors.paymentFailed"), "neutral");
         return;
       }
-      const pdf = await triggerPdfForPayment(json.data.id);
-      if (!pdf.ok) {
-        showErrorModal(pdf.error ?? t("register.errors.paymentSavedPdfFailed"), "neutral");
-        return;
-      }
-
       const updated = await fetchFinanceDocumentById(paymentDoc.id);
       setPaymentDoc(updated);
       setPaymentAmount(updated?.remaining_amount && updated.remaining_amount > 0 ? String(updated.remaining_amount) : "");
       setPaymentNotes("");
       setPaymentMethod(PAYMENT_INSTRUMENT_OPTIONS[0]);
       resetCheckFields();
-      showSuccessModal({
+      finishPaymentSaveWithBackgroundPdf(json.data.id, {
         tone: "neutral",
         title: t("register.modal.paymentSaved"),
         description: t("register.modal.paymentSavedDocDescription"),
-        documentId: json.data.id,
         amount,
         date: todayInputValue(),
-        viewUrl: pdf.pdfUrl,
         nextTab: "income",
       });
     } catch (e) {
@@ -1656,6 +1632,21 @@ function OperationResultModal({
         <h2 className="mt-5 text-2xl font-black text-slate-950">{state.title}</h2>
         <p className="mt-2 text-sm font-semibold leading-6 text-slate-600">{state.description}</p>
 
+        {isSuccess && state.pdfStatus ? (
+          <p className="mt-3 inline-flex items-center justify-center gap-2 rounded-full bg-slate-100 px-3 py-1.5 text-xs font-bold text-slate-700">
+            {state.pdfStatus === "processing" ? (
+              <>
+                <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+                PDF בהכנה…
+              </>
+            ) : state.pdfStatus === "ready" ? (
+              <span className="text-emerald-700">PDF מוכן</span>
+            ) : (
+              <span className="text-amber-800">PDF — נסו שוב מהארכיון</span>
+            )}
+          </p>
+        ) : null}
+
         {isSuccess ? (
           <dl className="mt-5 grid grid-cols-1 gap-2 rounded-2xl border border-slate-100 bg-slate-50 p-4 text-right text-sm">
             {state.documentId ? (
@@ -1688,14 +1679,20 @@ function OperationResultModal({
             {isSuccess ? t("register.modal.newOrder") : t("register.modal.tryAgainShort")}
           </button>
           {isSuccess ? (
-            <a
-              href={state.viewUrl ?? "/finance/archive"}
-              target={state.viewUrl ? "_blank" : undefined}
-              rel={state.viewUrl ? "noopener noreferrer" : undefined}
-              className="rounded-xl border border-slate-200 bg-white px-5 py-3 text-sm font-black text-slate-800 shadow-sm transition hover:bg-slate-50"
-            >
-              {t("register.modal.viewDoc")}
-            </a>
+            state.viewUrl ? (
+              <a
+                href={state.viewUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="rounded-xl border border-slate-200 bg-white px-5 py-3 text-sm font-black text-slate-800 shadow-sm transition hover:bg-slate-50"
+              >
+                {t("register.modal.viewDoc")}
+              </a>
+            ) : (
+              <span className="rounded-xl border border-slate-200 bg-slate-50 px-5 py-3 text-sm font-black text-slate-400">
+                {state.pdfStatus === "processing" ? "PDF בהכנה…" : t("register.modal.viewDoc")}
+              </span>
+            )
           ) : (
             <button
               type="button"

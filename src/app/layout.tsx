@@ -1,8 +1,9 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Cairo, Geist, Geist_Mono, Tajawal } from "next/font/google";
 import { cookies } from "next/headers";
 import { AppShell } from "@/components/app-shell";
 import { AuthProvider } from "@/components/auth-provider";
+import { NotificationsProvider } from "@/components/notifications-provider";
 import { I18nProvider } from "@/components/i18n-provider";
 import { ToastProvider } from "@/components/toast-provider";
 import {
@@ -55,10 +56,6 @@ export async function generateMetadata(): Promise<Metadata> {
       ],
       apple: [{ url: "/apple-icon.png", sizes: "180x180", type: "image/png" }],
     },
-    themeColor: [
-      { media: "(prefers-color-scheme: light)", color: "#071826" },
-      { media: "(prefers-color-scheme: dark)", color: "#071826" },
-    ],
     appleWebApp: {
       capable: true,
       title: t("meta.erpShort"),
@@ -66,6 +63,10 @@ export async function generateMetadata(): Promise<Metadata> {
     },
   };
 }
+
+export const viewport: Viewport = {
+  themeColor: "#071826",
+};
 
 export default async function RootLayout({
   children,
@@ -90,7 +91,9 @@ export default async function RootLayout({
         <AuthProvider>
           <I18nProvider initialLocale={locale}>
             <ToastProvider>
-              <AppShell>{children}</AppShell>
+              <NotificationsProvider>
+                <AppShell>{children}</AppShell>
+              </NotificationsProvider>
             </ToastProvider>
           </I18nProvider>
         </AuthProvider>

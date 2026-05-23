@@ -14,6 +14,22 @@ export const PERMISSION_KEYS = [
 
 export type PermissionKey = (typeof PERMISSION_KEYS)[number];
 
+/** קבוצות להצגה ב-modal הרשאות */
+export const PERMISSION_GROUPS: { groupKey: string; keys: PermissionKey[] }[] = [
+  {
+    groupKey: "permissions.groups.finance",
+    keys: ["financial_registration", "ledger", "cash_flow"],
+  },
+  {
+    groupKey: "permissions.groups.ops",
+    keys: ["inventory", "tasks", "employee_clock"],
+  },
+  {
+    groupKey: "permissions.groups.other",
+    keys: ["reports", "settings", "admin", "wedding_orders"],
+  },
+];
+
 export const PERMISSION_LABELS: Record<PermissionKey, string> = {
   financial_registration: "רישום כספי",
   ledger: "כרטסות",

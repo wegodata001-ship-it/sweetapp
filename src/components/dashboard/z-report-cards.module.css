@@ -9,13 +9,21 @@
   box-shadow: 0 0 32px rgba(34, 211, 238, 0.08);
 }
 
-.title {
+.head {
   margin-bottom: 0.5rem;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   padding-bottom: 0.5rem;
+}
+
+.title {
+  margin-bottom: 0;
   font-size: 13px;
   font-weight: 900;
   color: rgba(165, 243, 252, 0.95);
+}
+
+.head :global([class*="wrap"]) {
+  margin-bottom: 0;
 }
 
 .grid {

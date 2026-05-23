@@ -7,6 +7,7 @@
     0 20px 50px rgba(0, 0, 0, 0.35),
     0 4px 12px rgba(7, 24, 38, 0.2);
   color: #e8eef4;
+  animation: heroFadeIn 0.55s ease-out;
 }
 
 .hero::before {
@@ -38,7 +39,7 @@
   top: -80px;
   right: 10%;
   border-radius: 50%;
-  background: radial-gradient(circle, rgba(212, 175, 55, 0.12), transparent 70%);
+  background: radial-gradient(circle, rgba(16, 185, 129, 0.14), transparent 70%);
   filter: blur(40px);
   animation: floatGlow 9s ease-in-out infinite;
 }
@@ -132,30 +133,43 @@
   padding: 0.65rem 1rem 1.25rem;
 }
 
-.topRow {
+.layout {
   display: flex;
   flex-direction: column;
-  gap: 1rem;
-  align-items: stretch;
+  gap: 1.25rem;
 }
 
 @media (min-width: 768px) {
-  .topRow {
+  .layout {
     flex-direction: row;
     align-items: flex-start;
     justify-content: space-between;
-    gap: 1.25rem;
+    gap: 1.5rem;
+  }
+
+  :global([dir="ltr"]) .layout {
+    flex-direction: row-reverse;
+  }
+
+  .titleCol {
+    order: 1;
+  }
+
+  .metricsCol {
+    order: 2;
   }
 }
 
-.titleBlock {
+.titleCol {
   text-align: center;
+  flex-shrink: 0;
 }
 
 @media (min-width: 768px) {
-  .titleBlock {
+  .titleCol {
     text-align: start;
-    max-width: 50%;
+    max-width: 38%;
+    padding-top: 0.25rem;
   }
 }
 
@@ -168,7 +182,7 @@
 
 .heroTitle {
   margin-top: 0.35rem;
-  font-size: clamp(1.15rem, 2.5vw, 1.55rem);
+  font-size: clamp(1.2rem, 2.8vw, 1.75rem);
   font-weight: 900;
   line-height: 1.25;
   color: #f8fafc;
@@ -183,101 +197,167 @@
   max-width: 22rem;
 }
 
-.profitCard {
+.metricsCol {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
   width: 100%;
-  padding: 1.1rem 1.25rem;
-  text-align: center;
-  border-radius: 20px;
-  background: rgba(255, 255, 255, 0.06);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(212, 175, 55, 0.25);
-  box-shadow:
-    0 0 40px rgba(212, 175, 55, 0.14),
-    inset 0 1px 0 rgba(255, 255, 255, 0.08);
-  animation: profitGlow 4s ease-in-out infinite alternate;
+  min-width: 0;
 }
 
 @media (min-width: 768px) {
-  .profitCard {
-    max-width: 280px;
-    flex-shrink: 0;
+  .metricsCol {
+    flex: 1;
+    max-width: 58%;
   }
 }
 
-.profitLabel {
-  font-size: 0.72rem;
-  font-weight: 800;
-  letter-spacing: 0.08em;
-  color: rgba(212, 175, 55, 0.9);
+/* —— כרטיס ראשי: סה״כ הכנסות היום —— */
+.mainCard {
+  position: relative;
+  border-radius: 22px;
+  overflow: hidden;
+  animation: kpiFadeIn 0.5s ease-out backwards;
 }
 
-.profitAmount {
-  margin-top: 0.45rem;
-  font-size: clamp(1.65rem, 4vw, 2.2rem);
+.mainCardGlow {
+  position: absolute;
+  inset: -2px;
+  border-radius: inherit;
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.45), rgba(56, 189, 248, 0.35), rgba(212, 175, 55, 0.25));
+  filter: blur(8px);
+  opacity: 0.75;
+  animation: mainGlowPulse 5s ease-in-out infinite alternate;
+  pointer-events: none;
+}
+
+.mainCardInner {
+  position: relative;
+  padding: 1.25rem 1.35rem 1.1rem;
+  text-align: center;
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.07);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  border: 1px solid rgba(16, 185, 129, 0.35);
+  box-shadow:
+    0 0 48px rgba(16, 185, 129, 0.18),
+    0 0 80px rgba(56, 189, 248, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12),
+    inset 0 -12px 32px rgba(0, 0, 0, 0.15);
+  transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
+
+.mainCard:hover .mainCardInner {
+  transform: translateY(-2px);
+  box-shadow:
+    0 0 56px rgba(16, 185, 129, 0.28),
+    inset 0 1px 0 rgba(255, 255, 255, 0.14);
+}
+
+.mainCardTop {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.mainIconWrap {
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  border-radius: 16px;
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.35), rgba(56, 189, 248, 0.25));
+  border: 1px solid rgba(110, 231, 183, 0.4);
+  color: #a7f3d0;
+  box-shadow: 0 0 24px rgba(16, 185, 129, 0.35);
+}
+
+.mainLabel {
+  font-size: 0.75rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  color: rgba(167, 243, 208, 0.95);
+}
+
+.mainAmount {
+  margin-top: 0.55rem;
+  font-size: clamp(2rem, 6vw, 2.85rem);
   font-weight: 900;
-  line-height: 1.1;
+  line-height: 1.05;
   color: #fff;
-  text-shadow: 0 0 30px rgba(212, 175, 55, 0.3);
+  text-shadow:
+    0 0 40px rgba(16, 185, 129, 0.45),
+    0 0 20px rgba(56, 189, 248, 0.25);
   font-variant-numeric: tabular-nums;
 }
 
-.profitMeta {
-  margin-top: 0.65rem;
+.breakdown {
+  margin-top: 0.85rem;
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
-  gap: 0.5rem 1rem;
-  font-size: 0.62rem;
+  align-items: center;
+  gap: 0.35rem 0.5rem;
+  font-size: 0.65rem;
   font-weight: 700;
-  color: rgba(203, 213, 225, 0.7);
+  color: rgba(203, 213, 225, 0.82);
 }
 
-.metaIncome {
+.breakdownSep {
+  opacity: 0.35;
+}
+
+.brCash {
   color: #6ee7b7;
 }
 
-.metaExpense {
-  color: #fda4af;
+.brCard {
+  color: #7dd3fc;
 }
 
-.kpiGrid {
+.brCheck {
+  color: #f5e6b8;
+}
+
+/* —— 4 כרטיסים קטנים — אותו גודל —— */
+.miniGrid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.65rem;
-  margin-top: 1rem;
 }
 
 @media (min-width: 640px) {
-  .kpiGrid {
+  .miniGrid {
     grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 0.75rem;
+    gap: 0.65rem;
   }
 }
 
-.kpiCard {
+.miniCard {
   position: relative;
   overflow: hidden;
   border-radius: 16px;
-  padding: 0.75rem 0.85rem;
+  padding: 0.85rem 0.9rem;
   background: rgba(255, 255, 255, 0.05);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
   border: 1px solid rgba(255, 255, 255, 0.1);
   transition:
-    transform 0.25s ease,
-    box-shadow 0.25s ease,
-    border-color 0.25s ease;
+    transform 0.28s ease,
+    box-shadow 0.28s ease,
+    border-color 0.28s ease;
   animation: kpiFadeIn 0.6s ease-out backwards;
 }
 
-.kpiCard::before {
+.miniCard::before {
   content: "";
   position: absolute;
   inset: 0;
   border-radius: inherit;
   padding: 1px;
-  background: linear-gradient(135deg, rgba(255, 255, 255, 0.15), transparent 55%, rgba(212, 175, 55, 0.2));
+  background: linear-gradient(145deg, rgba(255, 255, 255, 0.18), transparent 50%, rgba(255, 255, 255, 0.06));
   -webkit-mask:
     linear-gradient(#fff 0 0) content-box,
     linear-gradient(#fff 0 0);
@@ -289,81 +369,148 @@
   pointer-events: none;
 }
 
-.kpiCard:hover {
-  transform: translateY(-3px);
+.miniCard:hover {
+  transform: translateY(-4px);
 }
 
-.kpiCard:nth-child(1) {
-  animation-delay: 0.05s;
+.miniCard:nth-child(1) {
+  animation-delay: 0.08s;
 }
-.kpiCard:nth-child(2) {
-  animation-delay: 0.12s;
+.miniCard:nth-child(2) {
+  animation-delay: 0.15s;
 }
-.kpiCard:nth-child(3) {
-  animation-delay: 0.19s;
+.miniCard:nth-child(3) {
+  animation-delay: 0.22s;
 }
-.kpiCard:nth-child(4) {
-  animation-delay: 0.26s;
+.miniCard:nth-child(4) {
+  animation-delay: 0.29s;
 }
 
-.kpiLabel {
-  font-size: 0.6rem;
+.miniHeader {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.miniIconWrap {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.miniLabel {
+  font-size: 0.58rem;
   font-weight: 800;
-  letter-spacing: 0.05em;
-  line-height: 1.3;
-  color: rgba(226, 232, 240, 0.72);
+  letter-spacing: 0.04em;
+  line-height: 1.25;
+  color: rgba(226, 232, 240, 0.75);
 }
 
-.kpiValue {
-  margin-top: 0.35rem;
-  font-size: clamp(1rem, 2.2vw, 1.35rem);
+.miniValue {
+  margin-top: 0.4rem;
+  font-size: clamp(1.05rem, 2.5vw, 1.3rem);
   font-weight: 900;
   font-variant-numeric: tabular-nums;
   line-height: 1.15;
 }
 
-.kpiMonthIncome {
-  box-shadow:
-    0 0 24px rgba(16, 185, 129, 0.15),
-    inset 0 1px 0 rgba(16, 185, 129, 0.08);
-  border-color: rgba(16, 185, 129, 0.28);
+.miniSub {
+  margin-top: 0.35rem;
+  font-size: 0.58rem;
+  font-weight: 700;
 }
 
-.kpiMonthIncome .kpiValue {
+.miniExpense {
+  box-shadow:
+    0 0 28px rgba(190, 24, 93, 0.14),
+    inset 0 1px 0 rgba(251, 113, 133, 0.08);
+  border-color: rgba(190, 24, 93, 0.35);
+}
+
+.miniExpense .miniIconWrap {
+  color: #fda4af;
+  border-color: rgba(251, 113, 133, 0.35);
+  background: rgba(190, 24, 93, 0.12);
+}
+
+.miniExpense .miniValue {
+  color: #fb7185;
+}
+
+/* הכנסות היום — כחול / טורקיז */
+.miniIncome {
+  box-shadow:
+    0 0 28px rgba(6, 182, 212, 0.18),
+    inset 0 1px 0 rgba(34, 211, 238, 0.1);
+  border-color: rgba(6, 182, 212, 0.38);
+}
+
+.miniIncome .miniIconWrap {
+  color: #67e8f9;
+  border-color: rgba(34, 211, 238, 0.4);
+  background: rgba(8, 145, 178, 0.18);
+}
+
+.miniIncome .miniValue {
+  color: #22d3ee;
+}
+
+/* הכנסות מזומן — ירוק / זהב */
+.miniCash {
+  box-shadow:
+    0 0 28px rgba(16, 185, 129, 0.16),
+    inset 0 1px 0 rgba(212, 175, 55, 0.12);
+  border-color: rgba(16, 185, 129, 0.32);
+}
+
+.miniCash .miniIconWrap {
+  color: #a7f3d0;
+  border-color: rgba(212, 175, 55, 0.38);
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.15), rgba(212, 175, 55, 0.12));
+}
+
+.miniCash .miniValue {
+  color: #fde68a;
+}
+
+/* הכנסות חודש — emerald */
+.miniMonth {
+  box-shadow:
+    0 0 28px rgba(16, 185, 129, 0.22),
+    inset 0 1px 0 rgba(52, 211, 153, 0.1);
+  border-color: rgba(5, 150, 105, 0.4);
+}
+
+.miniMonth .miniIconWrap {
   color: #6ee7b7;
+  border-color: rgba(16, 185, 129, 0.45);
+  background: rgba(6, 95, 70, 0.2);
 }
 
-.kpiTodayIncome {
-  box-shadow:
-    0 0 24px rgba(56, 189, 248, 0.12),
-    inset 0 1px 0 rgba(56, 189, 248, 0.08);
-  border-color: rgba(56, 189, 248, 0.28);
+.miniMonth .miniValue {
+  color: #34d399;
 }
 
-.kpiTodayIncome .kpiValue {
-  color: #7dd3fc;
-}
-
-.kpiMonthExpense {
-  box-shadow:
-    0 0 24px rgba(244, 63, 94, 0.12),
-    inset 0 1px 0 rgba(244, 63, 94, 0.06);
-  border-color: rgba(244, 63, 94, 0.25);
-}
-
-.kpiMonthExpense .kpiValue {
+.deltaUp {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
   color: #fda4af;
 }
 
-.kpiMonthProfit {
-  box-shadow:
-    0 0 28px rgba(212, 175, 55, 0.18),
-    inset 0 1px 0 rgba(212, 175, 55, 0.1);
-  border-color: rgba(212, 175, 55, 0.32);
+.deltaDown {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  color: #6ee7b7;
 }
 
-.kpiMonthProfit .kpiValue {
-  color: #f5e6b8;
+.deltaMuted {
+  color: rgba(148, 163, 184, 0.75);
 }
 
 @keyframes particleFloat {
@@ -378,12 +525,12 @@
   }
 }
 
-@keyframes profitGlow {
+@keyframes mainGlowPulse {
   from {
-    box-shadow: 0 0 28px rgba(212, 175, 55, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+    opacity: 0.55;
   }
   to {
-    box-shadow: 0 0 52px rgba(212, 175, 55, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+    opacity: 0.9;
   }
 }
 
@@ -411,7 +558,18 @@
 @keyframes kpiFadeIn {
   from {
     opacity: 0;
-    transform: translateY(8px);
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes heroFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
   }
   to {
     opacity: 1;

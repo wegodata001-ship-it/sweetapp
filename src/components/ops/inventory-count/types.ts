@@ -2,6 +2,9 @@ export type ShelfSummary = {
   name: string;
   productCount: number;
   shortageCount: number;
+  surplusCount: number;
+  okCount: number;
+  matchPct: number;
 };
 
 export type InventoryCountProductRow = {
