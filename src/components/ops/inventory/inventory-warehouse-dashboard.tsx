@@ -14,6 +14,11 @@ import { ShelfCountModal } from "./shelf-count-modal";
 import { ShelfDeleteConfirmModal } from "./shelf-delete-confirm-modal";
 import type { ShelfCardMenuAction } from "./shelf-card-actions-menu";
 import {
+  formatCountElapsed,
+  shelfCountTargetMinutes,
+  type ShelfCountSession,
+} from "@/lib/inventory/shelf-count-session";
+import {
   resolveShelfVisualStatus,
   ShelfGridCard,
   type ShelfGridModel,
@@ -51,6 +56,8 @@ export function InventoryWarehouseDashboard() {
   const [busyShelfName, setBusyShelfName] = useState<string | null>(null);
   const [exitingNames, setExitingNames] = useState<Set<string>>(new Set());
   const [enteringNames, setEnteringNames] = useState<Set<string>>(new Set());
+  const [countSessions, setCountSessions] = useState<Record<string, ShelfCountSession>>({});
+  const [, setTick] = useState(0);
 
   const loadShelves = useCallback(async () => {
     const res = await fetch("/api/inventory/shelf-summaries", { credentials: "same-origin" });
@@ -67,6 +74,36 @@ export function InventoryWarehouseDashboard() {
   useEffect(() => {
     void Promise.all([loadShelves(), loadLocations()]);
   }, [loadShelves, loadLocations]);
+
+  useEffect(() => {
+    if (!modalShelf) return;
+    const id = window.setInterval(() => setTick((n) => n + 1), 1000);
+    return () => window.clearInterval(id);
+  }, [modalShelf]);
+
+  const openShelfCount = useCallback((shelf: ShelfGridModel) => {
+    setCountSessions((prev) => ({
+      ...prev,
+      [shelf.name]: {
+        startedAt: prev[shelf.name]?.startedAt ?? new Date().toISOString(),
+        targetMinutes: shelfCountTargetMinutes(shelf.productCount),
+      },
+    }));
+    setModalShelf(shelf.name);
+  }, []);
+
+  const closeShelfCount = useCallback(() => {
+    setModalShelf((name) => {
+      if (name) {
+        setCountSessions((prev) => {
+          const next = { ...prev };
+          delete next[name];
+          return next;
+        });
+      }
+      return null;
+    });
+  }, []);
 
   const locationByName = useMemo(() => {
     const m = new Map<string, LocationRow>();
@@ -266,20 +303,37 @@ export function InventoryWarehouseDashboard() {
           </Link>
         </div>
       ) : (
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
-          {shelves.map((shelf) => (
-            <ShelfGridCard
-              key={shelf.name}
-              shelf={shelf}
-              t={tCard}
-              onOpen={() => setModalShelf(shelf.name)}
-              onMenuAction={(action) => handleMenuAction(shelf, action)}
-              busy={busyShelfName === shelf.name}
-              entering={enteringNames.has(shelf.name)}
-              canManage={canManage}
-              noPermissionTitle={tCard("noPermission")}
-            />
-          ))}
+        <div className="grid gap-4 lg:grid-cols-2">
+          {shelves.map((shelf) => {
+            const session = countSessions[shelf.name];
+            const isCounting = modalShelf === shelf.name;
+            const elapsed =
+              session && isCounting
+                ? formatCountElapsed(Date.now() - new Date(session.startedAt).getTime())
+                : "00:00";
+            return (
+              <ShelfGridCard
+                key={shelf.name}
+                shelf={shelf}
+                t={tCard}
+                onOpen={() => {
+                  if (isCounting) closeShelfCount();
+                  else openShelfCount(shelf);
+                }}
+                onMenuAction={(action) => handleMenuAction(shelf, action)}
+                busy={busyShelfName === shelf.name}
+                entering={enteringNames.has(shelf.name)}
+                canManage={canManage}
+                noPermissionTitle={tCard("noPermission")}
+                isCounting={isCounting}
+                elapsedLabel={elapsed}
+                targetMinutes={
+                  session?.targetMinutes ?? shelfCountTargetMinutes(shelf.productCount)
+                }
+                countProgressPct={shelf.matchPct}
+              />
+            );
+          })}
         </div>
       )}
 
@@ -287,7 +341,7 @@ export function InventoryWarehouseDashboard() {
         open={modalShelf !== null}
         shelfName={modalShelf ?? ""}
         countDate={countDate}
-        onClose={() => setModalShelf(null)}
+        onClose={closeShelfCount}
         onShelfStatsChange={loadShelves}
         t={(k, v) => t(`ops.inventory.warehouse.modal.${k}`, v)}
       />

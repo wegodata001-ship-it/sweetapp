@@ -2395,7 +2395,11 @@
           "lastUpdate": "Updated",
           "viewProducts": "Products",
           "edit": "Edit",
-          "startCount": "Start count"
+          "startCount": "Start count",
+          "finishCount": "Finish count",
+          "timerLabel": "Time",
+          "targetMinutes": "Target: {{minutes}} min",
+          "activeBadge": "Active"
         },
         "modal": {
           "kicker": "Shelf count",

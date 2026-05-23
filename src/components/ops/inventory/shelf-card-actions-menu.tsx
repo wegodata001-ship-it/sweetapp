@@ -11,9 +11,16 @@ type Props = {
   busy?: boolean;
   disabled?: boolean;
   disabledTitle?: string;
+  variant?: "dark" | "light";
 };
 
-export function ShelfCardActionsMenu({ onAction, busy, disabled, disabledTitle }: Props) {
+export function ShelfCardActionsMenu({
+  onAction,
+  busy,
+  disabled,
+  disabledTitle,
+  variant = "dark",
+}: Props) {
   const { t, dir } = useI18n();
   const tMenu = (key: string) => t(`ops.inventory.warehouse.card.menu.${key}`);
   const [open, setOpen] = useState(false);
@@ -78,7 +85,11 @@ export function ShelfCardActionsMenu({ onAction, busy, disabled, disabledTitle }
           if (disabled) return;
           setOpen((v) => !v);
         }}
-        className="grid h-8 w-8 place-items-center rounded-xl bg-white/90 text-slate-700 shadow-sm ring-1 ring-[#e7ecf5] transition hover:bg-white hover:shadow disabled:cursor-not-allowed disabled:opacity-45"
+        className={`grid h-8 w-8 place-items-center rounded-xl shadow-sm ring-1 transition disabled:cursor-not-allowed disabled:opacity-45 ${
+          variant === "light"
+            ? "bg-slate-100 text-slate-600 ring-slate-200 hover:bg-slate-200 hover:text-slate-900"
+            : "bg-white/10 text-white/80 ring-white/15 hover:bg-white/20 hover:text-white"
+        }`}
         aria-label={tMenu("label")}
         aria-expanded={open}
         aria-haspopup="menu"

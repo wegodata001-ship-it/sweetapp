@@ -2391,7 +2391,11 @@
           "lastUpdate": "עדכון",
           "viewProducts": "מוצרים",
           "edit": "עריכה",
-          "startCount": "התחל ספירה"
+          "startCount": "התחל ספירה",
+          "finishCount": "סיים ספירה",
+          "timerLabel": "זמן",
+          "targetMinutes": "יעד: {{minutes}} דק׳",
+          "activeBadge": "פעיל"
         },
         "modal": {
           "kicker": "ספירת מדף",

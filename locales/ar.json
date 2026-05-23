@@ -2395,7 +2395,11 @@
           "lastUpdate": "آخر تحديث",
           "viewProducts": "المنتجات",
           "edit": "تعديل",
-          "startCount": "بدء الجرد"
+          "startCount": "بدء الجرد",
+          "finishCount": "إنهاء الجرد",
+          "timerLabel": "الوقت",
+          "targetMinutes": "الهدف: {{minutes}} د",
+          "activeBadge": "نشط"
         },
         "modal": {
           "kicker": "جرد الرف",

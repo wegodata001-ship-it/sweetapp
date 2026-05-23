@@ -1,0 +1,139 @@
+/* טיימר ספירת מלאי — בלי rotate על טקסט */
+
+.wrapper {
+  position: relative;
+  flex-shrink: 0;
+  width: min(100%, 160px);
+  height: min(100%, 160px);
+  max-width: 160px;
+  max-height: 160px;
+  aspect-ratio: 1;
+}
+
+.progressRing {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  padding: 6px;
+  box-sizing: border-box;
+  transition: background 0.35s ease;
+}
+
+/* —— מצב לא פעיל (כרטיס כהה) —— */
+.wrapperIdle .progressRing {
+  background: conic-gradient(
+    from -90deg,
+    #3b82f6 0deg,
+    #06b6d4 calc(var(--pct, 0) * 3.6deg),
+    rgba(255, 255, 255, 0.14) calc(var(--pct, 0) * 3.6deg),
+    rgba(255, 255, 255, 0.14) 360deg
+  );
+}
+
+.wrapperIdle .progressRing::after {
+  content: "";
+  position: absolute;
+  inset: 6px;
+  border-radius: 50%;
+  background: #132238;
+  border: 1px solid rgba(59, 130, 246, 0.25);
+}
+
+.wrapperIdle .time {
+  color: #e2e8f0;
+}
+
+.wrapperIdle .caption {
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.wrapperIdle .pct {
+  color: #93c5fd;
+}
+
+/* —— מצב פעיל (ספירה רצה) —— */
+.wrapperActive .progressRing {
+  background: conic-gradient(
+    from -90deg,
+    #2563eb 0deg,
+    #06b6d4 calc(var(--pct, 0) * 3.6deg),
+    #dbeafe calc(var(--pct, 0) * 3.6deg),
+    #dbeafe 360deg
+  );
+}
+
+.wrapperActive .progressRing::after {
+  content: "";
+  position: absolute;
+  inset: 6px;
+  border-radius: 50%;
+  background: radial-gradient(circle at center, #ffffff 0%, #f8fbff 60%, #eef5ff 100%);
+  box-shadow: inset 0 0 0 1px rgba(37, 99, 235, 0.08);
+}
+
+.content {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  text-align: center;
+  pointer-events: none;
+  direction: ltr;
+  unicode-bidi: isolate;
+  transform: none !important;
+  writing-mode: horizontal-tb !important;
+}
+
+.badge {
+  margin: 0 0 2px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: #eff6ff;
+  color: #2563eb;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: 0.02em;
+}
+
+.time {
+  margin: 0;
+  font-size: 44px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  letter-spacing: -2px;
+  transform: none !important;
+}
+
+.wrapperActive .time {
+  color: #2563eb;
+  text-shadow: 0 1px 2px rgba(37, 99, 235, 0.1);
+}
+
+.caption {
+  margin: 2px 0 0;
+  font-size: 0.65rem;
+  font-weight: 600;
+  transform: none !important;
+}
+
+.wrapperActive .caption {
+  color: #64748b;
+}
+
+.pct {
+  margin: 0;
+  font-size: 0.7rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  transform: none !important;
+}
+
+.wrapperActive .pct {
+  color: #2563eb;
+}
