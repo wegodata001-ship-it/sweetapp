@@ -144,6 +144,7 @@ export type ZReportDetailPayload = {
     docDate: string | null;
     createdAt: string;
     notes: string | null;
+    hasSourceDocument: boolean;
   };
   payload: ZReportPayload;
   lines: CashFlowRow[];

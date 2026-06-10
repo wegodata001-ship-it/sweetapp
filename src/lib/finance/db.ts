@@ -357,6 +357,90 @@ export async function bulkSetDocumentsAccountantSent(
   }
 }
 
+export async function sendAccountantDocumentsByEmail(params: {
+  documentIds: string[];
+  recipients: string[];
+  subject?: string;
+  message?: string;
+}): Promise<{
+  ok: boolean;
+  sentCount?: number;
+  recipientCount?: number;
+  zipped?: boolean;
+  message?: string;
+  error?: string;
+  missingPdfDocumentIds?: string[];
+}> {
+  const res = await fetch("/api/documents/accountant/email", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(params),
+    credentials: "same-origin",
+  });
+  try {
+    const j = (await res.json()) as {
+      ok?: boolean;
+      sentCount?: number;
+      recipientCount?: number;
+      zipped?: boolean;
+      message?: string;
+      error?: string;
+      missingPdfDocumentIds?: string[];
+    };
+    return {
+      ok: Boolean(j.ok),
+      sentCount: j.sentCount,
+      recipientCount: j.recipientCount,
+      zipped: j.zipped,
+      message: j.message,
+      error: j.error,
+      missingPdfDocumentIds: j.missingPdfDocumentIds,
+    };
+  } catch {
+    return { ok: false, error: "תגובת שרת לא תקינה" };
+  }
+}
+
+export type DocumentEmailContactRow = {
+  id: string;
+  businessId: string;
+  name: string | null;
+  email: string;
+  isFavorite: boolean;
+  lastUsedAt: string | null;
+  createdAt: string;
+};
+
+export async function fetchDocumentEmailContacts(): Promise<DocumentEmailContactRow[]> {
+  const res = await fetch("/api/documents/accountant/email-contacts", {
+    credentials: "same-origin",
+  });
+  try {
+    const j = (await res.json()) as { ok?: boolean; data?: DocumentEmailContactRow[] };
+    return j.ok && Array.isArray(j.data) ? j.data : [];
+  } catch {
+    return [];
+  }
+}
+
+export async function toggleDocumentEmailContactFavorite(
+  id: string,
+  isFavorite: boolean,
+): Promise<boolean> {
+  const res = await fetch(`/api/documents/accountant/email-contacts/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ isFavorite }),
+    credentials: "same-origin",
+  });
+  try {
+    const j = (await res.json()) as { ok?: boolean };
+    return Boolean(j.ok);
+  } catch {
+    return false;
+  }
+}
+
 export async function fetchAccountantTransferLog(documentId: string): Promise<AccountantTransferLogRow[]> {
   const res = await fetch(
     `/api/documents/${encodeURIComponent(documentId)}/accountant/log`,

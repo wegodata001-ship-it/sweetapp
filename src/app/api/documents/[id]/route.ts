@@ -11,7 +11,7 @@ import {
   type IncomeExpensePayload,
   type ZReportPayload,
 } from "@/lib/finance/document-payload";
-import { prismaDocToFinanceRow } from "@/lib/finance/map-document";
+import { archiveSourceDocumentForFinancialDoc } from "@/lib/finance/source-documents";
 import { documentTypeForEmployeePay, normalizeEmployeePayType } from "@/lib/finance/employee-pay-types";
 import {
   resolveExpenseDocumentLinks,
@@ -119,6 +119,12 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
         });
         await syncFinancialDocumentPaymentTotals(id);
         await replaceCashFlowForDocument(id);
+        await archiveSourceDocumentForFinancialDoc({
+          financialDocumentId: id,
+          documentType: "z_report",
+          payload: z,
+          uploadedById: session?.sub ?? null,
+        });
       } else {
         const ie = meta as IncomeExpensePayload;
         if (isWorkerExpensePayload(ie)) {
@@ -226,6 +232,14 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
         await syncFinancialDocumentPaymentTotals(id);
         await replaceCashFlowForDocument(id);
         await syncCheckPaymentsForDocument(id);
+        if (ie.kind === "income" || ie.kind === "expense") {
+          await archiveSourceDocumentForFinancialDoc({
+            financialDocumentId: id,
+            documentType: ie.kind,
+            payload: ie,
+            uploadedById: session?.sub ?? null,
+          });
+        }
         if (category === "הוצאה" && ie.kind === "expense") {
           await recordSupplierPriceHistoryFromExpense(ie);
           await syncExpenseDocumentLedgerEntry(id);

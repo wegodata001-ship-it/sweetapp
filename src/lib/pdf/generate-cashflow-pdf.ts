@@ -61,7 +61,7 @@ export async function generateCashFlowPdfBytes(entryId: string): Promise<Uint8Ar
     CONTENT_W,
   );
 
-  drawFooter(page, { en: fonts.en });
+  drawFooter(page, { en: fonts.en, enBold: fonts.enBold });
   return pdfDoc.save();
 }
 

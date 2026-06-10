@@ -29,6 +29,7 @@ export type ZReportTableGroupProps = {
   detailStatus: string | null;
   detailCashier: string | null;
   loadingDetail: boolean;
+  canViewSource?: boolean;
   pdfBusy?: boolean;
   onMenuAction: (action: CashflowMenuAction) => void;
   renderDesktopRow: (row: CashFlowRow, nested: boolean) => ReactNode;
@@ -45,6 +46,7 @@ export function CashflowZReportTableGroupDesktop({
   detailStatus,
   detailCashier,
   loadingDetail,
+  canViewSource = false,
   pdfBusy,
   onMenuAction,
   renderDesktopRow,
@@ -125,6 +127,7 @@ export function CashflowZReportTableGroupDesktop({
             variant="zReport"
             onAction={onMenuAction}
             pdfBusy={pdfBusy}
+            canViewSource={canViewSource}
             canView
             canAddPayment={false}
             canGenerateDocument={false}
@@ -153,6 +156,7 @@ export function CashflowZReportTableGroupMobile({
   detailTime,
   detailStatus,
   loadingDetail,
+  canViewSource = false,
   pdfBusy,
   onMenuAction,
   renderMobileRow,
@@ -215,6 +219,7 @@ export function CashflowZReportTableGroupMobile({
               variant="zReport"
               onAction={onMenuAction}
               pdfBusy={pdfBusy}
+              canViewSource={canViewSource}
               canView
               canAddPayment={false}
               canGenerateDocument={false}

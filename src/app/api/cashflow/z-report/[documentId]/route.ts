@@ -6,6 +6,7 @@ import {
   type ZReportDetailPayload,
 } from "@/lib/finance/cashflow-z-report";
 import { parsePayload } from "@/lib/finance/document-payload";
+import { getSourceDocumentForFinancialDoc } from "@/lib/finance/source-documents";
 import { requireDb } from "@/lib/api-route";
 import { prisma } from "@/lib/prisma";
 
@@ -59,6 +60,7 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ documentId
       orderBy: [{ entryDate: "asc" }, { createdAt: "asc" }],
     });
     const lines = entries.map((e) => prismaCashFlowToRow(e));
+    const sourceDoc = await getSourceDocumentForFinancialDoc(id);
     const baseSummary = buildZReportSummary(id, lines);
     const created = doc.createdAt;
     const time = `${String(created.getHours()).padStart(2, "0")}:${String(created.getMinutes()).padStart(2, "0")}`;
@@ -80,6 +82,7 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ documentId
         docDate: doc.docDate ? doc.docDate.toISOString().slice(0, 10) : null,
         createdAt: doc.createdAt.toISOString(),
         notes: doc.notes,
+        hasSourceDocument: Boolean(sourceDoc?.storagePath?.trim()),
       },
       payload: meta,
       lines,

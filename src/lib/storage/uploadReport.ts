@@ -1,5 +1,10 @@
 import { buildReportStoragePath, reportsBucket } from "@/lib/pdf/constants";
-import { getPublicStorageUrl, getSupabaseServiceClient } from "@/lib/supabase/server";
+import {
+  assertUploadBucketsReady,
+  normalizeStorageError,
+  reportsBucketName,
+} from "@/lib/storage/buckets";
+import { createSignedStorageUrl, getSupabaseServiceClient } from "@/lib/supabase/server";
 
 export type UploadReportToStorageInput = {
   /** תוכן PDF */
@@ -12,16 +17,21 @@ export type UploadReportToStorageInput = {
 
 export type UploadReportToStorageResult = {
   path: string;
+  /** Signed URL — field name kept for DB/API compatibility */
   publicUrl: string;
 };
 
+const REPORT_SIGNED_TTL_SEC = 3600;
+
 /**
- * העלאת דוח PDF ל-Storage — שירות role בלבד, ללא חשיפה ללקוח.
+ * העלאת דוח PDF ל-wego-reports — גישה רק דרך signed URL.
  */
 export async function uploadReportToStorage(
   input: UploadReportToStorageInput,
 ): Promise<UploadReportToStorageResult> {
   const bucket = reportsBucket();
+  await assertUploadBucketsReady();
+
   const path = buildReportStoragePath(input.type, input.filename);
 
   const supabase = getSupabaseServiceClient();
@@ -34,16 +44,20 @@ export async function uploadReportToStorage(
     upsert: true,
   });
   if (error) {
-    throw new Error(error.message || "העלאת PDF ל-Storage נכשלה");
+    throw new Error(normalizeStorageError(error.message || "העלאת PDF ל-Storage נכשלה"));
   }
 
-  const publicUrl = getPublicStorageUrl(bucket, path);
-  return { path, publicUrl };
+  const signed = await createSignedStorageUrl(bucket, path, REPORT_SIGNED_TTL_SEC);
+  if (!signed) {
+    throw new Error("לא ניתן ליצור קישור גישה ל-PDF");
+  }
+
+  return { path, publicUrl: signed };
 }
 
 /** מחיקת אובייקט דוח לפי נתיב מלא בבאקט הדוחות */
 export async function removeReportFromStorage(filePath: string): Promise<void> {
-  const bucket = reportsBucket();
+  const bucket = reportsBucketName();
   const supabase = getSupabaseServiceClient();
   if (!supabase || !filePath?.trim()) return;
   await supabase.storage.from(bucket).remove([filePath]);

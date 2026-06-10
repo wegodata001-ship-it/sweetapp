@@ -9,41 +9,29 @@ export const REPORT_TYPES = {
 
 export type ReportTypeValue = (typeof REPORT_TYPES)[keyof typeof REPORT_TYPES];
 
-/**
- * באקט Storage לדוחות PDF / ארכיון — רק בשרת (עם SUPABASE_SERVICE_ROLE_KEY).
- * חובה להגדיר ב-.env: SUPABASE_STORAGE_BUCKET
- * (אופציונלי: NEXT_PUBLIC_SUPABASE_STORAGE_BUCKET אם צריך תאימות לקוד ישן).
- */
+export {
+  REPORTS_BUCKET,
+  SOURCE_FILES_BUCKET,
+  STORAGE_BUCKET_MISSING,
+  bucketForStoragePath,
+  checkBucketExists,
+  assertBucketExists,
+  assertUploadBucketsReady,
+  reportsBucketName,
+  sourceFilesBucketName,
+  resolveSourceFilesBucket,
+} from "@/lib/storage/buckets";
+
+import { reportsBucketName } from "@/lib/storage/buckets";
+
+/** PDF reports bucket — wego-reports */
 export function reportsBucket(): string {
-  const b =
-    process.env.SUPABASE_STORAGE_BUCKET?.trim() ||
-    process.env.NEXT_PUBLIC_SUPABASE_STORAGE_BUCKET?.trim() ||
-    process.env.NEXT_PUBLIC_SUPABASE_REPORTS_BUCKET?.trim();
-  if (!b) {
-    throw new Error(
-      "חסר SUPABASE_STORAGE_BUCKET ב-.env — צרו ב-Supabase Storage באקט public (למשל wego-reports) והגדירו את השם",
-    );
-  }
-  return b;
+  return reportsBucketName();
 }
 
-/** באקט לקבצים ישנים / צירופים שלא תחת reports/ — בדרך כלל אותו באקט אחרי מיגרציה */
+/** @deprecated use reportsBucket() — legacy alias */
 export function attachmentsBucket(): string {
-  return (
-    process.env.NEXT_PUBLIC_SUPABASE_STORAGE_BUCKET?.trim() ||
-    process.env.SUPABASE_STORAGE_BUCKET?.trim() ||
-    ""
-  );
-}
-
-/** בחירת באקט למחיקה לפי נתיח האחסון (דוחות מול קבצים ישנים) */
-export function bucketForStoragePath(storagePath: string): string {
-  if (storagePath.startsWith("reports/")) {
-    return reportsBucket();
-  }
-  const legacy = attachmentsBucket();
-  if (legacy) return legacy;
-  return reportsBucket();
+  return reportsBucketName();
 }
 
 export function companyStorageSlug(): string {

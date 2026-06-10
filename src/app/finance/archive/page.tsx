@@ -12,6 +12,7 @@ import {
   FileStack,
   History,
   Loader2,
+  Mail,
   MoreVertical,
   PackageCheck,
   PencilLine,
@@ -25,12 +26,14 @@ import {
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { PdfPreviewModal } from "@/components/pdf-preview-modal";
+import { AccountantEmailModal } from "@/components/finance/accountant-email-modal";
 import { useI18n } from "@/components/i18n-provider";
 import {
   bulkSetDocumentsAccountantSent,
   deleteFinanceDocument,
   fetchAccountantTransferLog,
   fetchFinanceDocumentsWithCounts,
+  sendAccountantDocumentsByEmail,
   setDocumentAccountantSent,
 } from "@/lib/finance/db";
 import { REPORT_TYPES } from "@/lib/pdf/constants";
@@ -117,7 +120,9 @@ function buildSentStatusTooltip(
       when: formatDateTime(row.sent_to_cpa_at, locale),
     }),
   ];
-  if (accountantEmail) {
+  if (row.sent_to_cpa_email) {
+    lines.push(translate("archive.statusSentTooltipTo", { email: row.sent_to_cpa_email }));
+  } else if (accountantEmail) {
     lines.push(translate("archive.statusSentTooltipTo", { email: accountantEmail }));
   }
   return lines.join("\n");
@@ -136,6 +141,8 @@ export default function FinanceArchivePage() {
   const [accountantNotice, setAccountantNotice] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkBusy, setBulkBusy] = useState(false);
+  const [emailModalOpen, setEmailModalOpen] = useState(false);
+  const [emailSending, setEmailSending] = useState(false);
   const [auditOpenId, setAuditOpenId] = useState<string | null>(null);
   const [auditRows, setAuditRows] = useState<AccountantTransferLogRow[]>([]);
   const [auditLoading, setAuditLoading] = useState(false);
@@ -277,6 +284,41 @@ export default function FinanceArchivePage() {
       await refresh();
     } finally {
       setBulkBusy(false);
+    }
+  };
+
+  const sendSelectedByEmail = async (params: {
+    recipients: string[];
+    subject: string;
+    message: string;
+  }) => {
+    if (selectedIds.size === 0) return;
+    setEmailSending(true);
+    setAccountantNotice(null);
+    try {
+      const res = await sendAccountantDocumentsByEmail({
+        documentIds: [...selectedIds],
+        recipients: params.recipients,
+        subject: params.subject || undefined,
+        message: params.message || undefined,
+      });
+      if (!res.ok) {
+        setAccountantNotice(res.error ?? t("archive.emailModal.sendFailed"));
+        return;
+      }
+      const zipNote = res.zipped ? ` ${t("archive.emailModal.sentAsZip")}` : "";
+      setAccountantNotice(
+        (res.message ??
+          t("archive.emailModal.sendSuccessMany", {
+            docs: String(res.sentCount ?? selectedIds.size),
+            recipients: String(res.recipientCount ?? params.recipients.length),
+          })) + zipNote,
+      );
+      setEmailModalOpen(false);
+      clearSelection();
+      await refresh();
+    } finally {
+      setEmailSending(false);
     }
   };
 
@@ -633,6 +675,15 @@ export default function FinanceArchivePage() {
                 <div className="flex flex-wrap gap-2">
                   <button
                     type="button"
+                    disabled={emailSending}
+                    onClick={() => setEmailModalOpen(true)}
+                    className="inline-flex items-center gap-1 rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-black text-slate-900 hover:bg-slate-50 disabled:opacity-50"
+                  >
+                    <Mail className="h-3.5 w-3.5" aria-hidden />
+                    {t("archive.sendByEmail")}
+                  </button>
+                  <button
+                    type="button"
                     disabled={bulkBusy}
                     onClick={() => void bulkAction(true)}
                     className="inline-flex items-center gap-1 rounded-xl border border-emerald-300 bg-emerald-50 px-3 py-2 text-xs font-black text-emerald-800 hover:bg-emerald-100 disabled:opacity-50"
@@ -654,6 +705,7 @@ export default function FinanceArchivePage() {
                     onClick={clearSelection}
                     className="inline-flex items-center gap-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-700 hover:bg-slate-50"
                   >
+                    <Trash2 className="h-3.5 w-3.5" aria-hidden />
                     {t("archive.clearSelection")}
                   </button>
                 </div>
@@ -698,7 +750,8 @@ export default function FinanceArchivePage() {
                         <th className="px-4 py-3 font-bold text-slate-600">{t("archive.thType")}</th>
                         <th className="px-4 py-3 font-bold text-slate-600">{t("archive.thDate")}</th>
                         <th className="px-4 py-3 font-bold text-slate-600">{t("archive.thStatusAccountant")}</th>
-                        <th className="px-4 py-3 font-bold text-slate-600">{t("archive.thTransferDate")}</th>
+                        <th className="px-4 py-3 font-bold text-slate-600">{t("archive.thSentTo")}</th>
+                        <th className="px-4 py-3 font-bold text-slate-600">{t("archive.thLastSentAt")}</th>
                         <th className="px-4 py-3 font-bold text-slate-600">{t("archive.thDeposit")}</th>
                         <th className="px-4 py-3 font-bold text-slate-600">{t("archive.thActions")}</th>
                       </tr>
@@ -742,6 +795,13 @@ export default function FinanceArchivePage() {
                                   {t("archive.statusNotSent")}
                                 </span>
                               )}
+                            </td>
+                            <td className="px-4 py-3 align-top">
+                              <span className="text-xs font-semibold text-slate-700">
+                                {row.sent_to_cpa && row.sent_to_cpa_email
+                                  ? row.sent_to_cpa_email
+                                  : "—"}
+                              </span>
                             </td>
                             <td className="px-4 py-3 align-top">
                               {row.sent_to_cpa ? (
@@ -923,6 +983,12 @@ export default function FinanceArchivePage() {
                               : t("archive.sentTransferAt", { when: formatDateTime(row.sent_to_cpa_at, bcp47) })}
                           </p>
                         ) : null}
+                        {row.sent_to_cpa && row.sent_to_cpa_email ? (
+                          <p className="flex items-center gap-1 text-[11px] font-semibold text-slate-600">
+                            <Mail className="h-3 w-3" aria-hidden />
+                            {row.sent_to_cpa_email}
+                          </p>
+                        ) : null}
                         <div className="flex flex-wrap gap-2">
                           {row.sent_to_cpa ? (
                             <button
@@ -1072,7 +1138,7 @@ export default function FinanceArchivePage() {
                         <li
                           key={log.id}
                           className={`rounded-xl border px-3 py-2 ${
-                            log.action === "marked_sent"
+                            log.action === "marked_sent" || log.action === "email_sent"
                               ? "border-emerald-200 bg-emerald-50"
                               : "border-amber-200 bg-amber-50"
                           }`}
@@ -1080,13 +1146,20 @@ export default function FinanceArchivePage() {
                           <div className="flex items-center justify-between gap-2">
                             <span
                               className={`inline-flex items-center gap-1 text-xs font-black ${
-                                log.action === "marked_sent" ? "text-emerald-900" : "text-amber-900"
+                                log.action === "marked_sent" || log.action === "email_sent"
+                                  ? "text-emerald-900"
+                                  : "text-amber-900"
                               }`}
                             >
                               {log.action === "marked_sent" ? (
                                 <>
                                   <Send className="h-3.5 w-3.5" aria-hidden />
                                   {t("archive.actionMarkedSent")}
+                                </>
+                              ) : log.action === "email_sent" ? (
+                                <>
+                                  <Mail className="h-3.5 w-3.5" aria-hidden />
+                                  {t("archive.actionEmailSent")}
                                 </>
                               ) : (
                                 <>
@@ -1103,6 +1176,20 @@ export default function FinanceArchivePage() {
                             <Users className="h-3 w-3" aria-hidden />
                             {log.performed_by?.full_name ?? "—"}
                           </p>
+                          {log.action === "email_sent" && log.sent_to ? (
+                            <p className="mt-1 text-[11px] font-semibold text-slate-700">
+                              {t("archive.emailLogSentTo", { email: log.sent_to })}
+                              {log.documents_count
+                                ? ` · ${t("archive.emailLogDocuments", { count: String(log.documents_count) })}`
+                                : ""}
+                              {log.attachments_count
+                                ? ` · ${t("archive.emailLogAttachments", { count: String(log.attachments_count) })}`
+                                : ""}
+                              {log.attachment_mode === "zip"
+                                ? ` · ${t("archive.emailLogZip")}`
+                                : ""}
+                            </p>
+                          ) : null}
                         </li>
                       ))}
                     </ul>
@@ -1155,6 +1242,18 @@ export default function FinanceArchivePage() {
           </div>
         </div>
       ) : null}
+
+      <AccountantEmailModal
+        open={emailModalOpen}
+        selectedCount={selectedIds.size}
+        defaultEmail={accountantRecipientEmail ?? ""}
+        defaultSubject={t("archive.emailModal.defaultSubject")}
+        sending={emailSending}
+        onClose={() => {
+          if (!emailSending) setEmailModalOpen(false);
+        }}
+        onSend={(params) => void sendSelectedByEmail(params)}
+      />
     </div>
   );
 }

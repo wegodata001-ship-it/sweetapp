@@ -83,6 +83,8 @@ export const API_ACCESS_RULES: { prefix: string; permission: PermissionKey | "SU
   { prefix: "/api/admin/users", permission: "SUPER_ADMIN_ONLY" },
   { prefix: "/api/procurement", permission: "financial_registration" },
   { prefix: "/api/documents", permission: "financial_registration" },
+  { prefix: "/api/z-reports", permission: "financial_registration" },
+  { prefix: "/api/source-documents", permission: "financial_registration" },
   { prefix: "/api/payments", permission: "financial_registration" },
   { prefix: "/api/pdfs", permission: "financial_registration" },
   { prefix: "/api/product-history", permission: "financial_registration" },

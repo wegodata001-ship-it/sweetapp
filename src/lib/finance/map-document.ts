@@ -7,6 +7,7 @@ type PrismaFinancialDocumentWithCustomer = PrismaFinancialDocument & {
   payments?: { amount: number }[];
   sentToCpaBy?: { id: string; fullName: string } | null;
   sentToCpaAt?: Date | null;
+  sentToCpaEmail?: string | null;
 };
 
 export function prismaDocToFinanceRow(row: PrismaFinancialDocumentWithCustomer): FinanceDocumentRow {
@@ -53,6 +54,7 @@ export function prismaDocToFinanceRow(row: PrismaFinancialDocumentWithCustomer):
     pdf_storage_path: row.pdfStoragePath,
     sent_to_cpa: row.sentToCpa,
     sent_to_cpa_at: row.sentToCpaAt ? row.sentToCpaAt.toISOString() : null,
+    sent_to_cpa_email: row.sentToCpaEmail ?? null,
     sent_to_cpa_by: row.sentToCpaBy
       ? { id: row.sentToCpaBy.id, full_name: row.sentToCpaBy.fullName }
       : null,

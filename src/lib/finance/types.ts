@@ -82,6 +82,7 @@ export type FinanceDocumentRow = {
   pdf_storage_path: string | null;
   sent_to_cpa: boolean;
   sent_to_cpa_at: string | null;
+  sent_to_cpa_email: string | null;
   sent_to_cpa_by: { id: string; full_name: string } | null;
   created_at: string;
   payload: FinanceDocumentPayload | null;
@@ -90,8 +91,13 @@ export type FinanceDocumentRow = {
 export type AccountantTransferLogRow = {
   id: string;
   document_id: string;
-  /** marked_sent | marked_not_sent */
-  action: "marked_sent" | "marked_not_sent";
+  /** marked_sent | marked_not_sent | email_sent */
+  action: "marked_sent" | "marked_not_sent" | "email_sent";
   performed_by: { id: string; full_name: string } | null;
   created_at: string;
+  /** present for email_sent entries */
+  sent_to?: string | null;
+  attachments_count?: number | null;
+  documents_count?: number | null;
+  attachment_mode?: string | null;
 };

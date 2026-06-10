@@ -31,7 +31,7 @@ import { prisma, prismaAny } from "@/lib/prisma";
 import { requireDb } from "@/lib/api-route";
 import { getSessionFromCookie } from "@/lib/auth/get-session";
 import { logActivity } from "@/lib/activity-log";
-import { parseNum } from "@/lib/format-shekel";
+import { archiveSourceDocumentForFinancialDoc } from "@/lib/finance/source-documents";
 import { getAccountantRecipientEmail } from "@/lib/finance/accountant-config";
 import type { Prisma } from "@prisma/client";
 
@@ -136,6 +136,12 @@ export async function POST(req: NextRequest) {
       });
       await replaceCashFlowForDocument(doc.id);
       if (session) await logActivity(session.sub, "document_create");
+      await archiveSourceDocumentForFinancialDoc({
+        financialDocumentId: doc.id,
+        documentType: "z_report",
+        payload: z,
+        uploadedById: session?.sub ?? null,
+      });
       return NextResponse.json({ ok: true, id: doc.id });
     }
 
@@ -257,6 +263,14 @@ export async function POST(req: NextRequest) {
         : Promise.resolve(),
     ]);
     if (session) void logActivity(session.sub, "document_create");
+    if (ie.kind === "income" || ie.kind === "expense") {
+      await archiveSourceDocumentForFinancialDoc({
+        financialDocumentId: doc.id,
+        documentType: ie.kind,
+        payload: ie,
+        uploadedById: session?.sub ?? null,
+      });
+    }
     return NextResponse.json({ ok: true, id: doc.id });
   } catch (e) {
     return NextResponse.json(

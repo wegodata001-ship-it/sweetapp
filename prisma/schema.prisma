@@ -150,11 +150,14 @@ model FinancialDocument {
   sentToCpaAt            DateTime?
   /// המשתמש שסימן/ביטל את ההעברה האחרונה
   sentToCpaById          String?
+  /// כתובת המייל אליה נשלחו המסמכים (שליחה במייל)
+  sentToCpaEmail         String?
   /// תשלום ספק — קישור לכרטסת ספק
   supplierId             String?
   /// תשלום עובד — קישור לכרטסת עובד
   employeeId             String?
   accountantTransferLogs AccountantTransferLog[]
+  accountantEmailLogs    AccountantEmailLog[]
   zReportCashFlowEntries CashFlowEntry[]         @relation("CashFlowZReportFinancialDocument")
   checks                 CheckPayment[]          @relation("FinancialDocumentChecks")
   customer               Customer?               @relation(fields: [customerId], references: [id])
@@ -164,6 +167,7 @@ model FinancialDocument {
   items                  FinancialDocumentItem[]
   expenseLedgerEntry     LedgerEntry?            @relation("ExpenseDocLedger")
   payments               Payment[]
+  sourceDocument         DocumentUpload?
 
   @@index([customerId])
   @@index([supplierId])
@@ -171,6 +175,29 @@ model FinancialDocument {
   @@index([createdAt])
   @@index([sentToCpa])
   @@index([sentToCpaAt])
+}
+
+/// קובץ מקור שהועלה (סריקה או צירוף ידני) — pdf_photo (private)
+model DocumentUpload {
+  id                  String             @id @default(cuid())
+  tenantId            String             @default("default")
+  /// income | expense
+  documentType        String
+  fileName            String
+  storageBucket       String             @default("pdf_photo")
+  storagePath         String
+  /// MIME type — e.g. application/pdf, image/jpeg
+  fileType            String?
+  mimeType            String?
+  publicUrl           String?
+  uploadedAt          DateTime           @default(now())
+  uploadedById        String?
+  financialDocumentId String?            @unique
+  financialDocument   FinancialDocument? @relation(fields: [financialDocumentId], references: [id], onDelete: SetNull)
+
+  @@index([documentType])
+  @@index([uploadedAt])
+  @@map("documents")
 }
 
 /// יומן העברות לרואה חשבון — מי, מתי, ופעולה
@@ -187,6 +214,49 @@ model AccountantTransferLog {
   @@index([documentId])
   @@index([performedById])
   @@index([createdAt])
+}
+
+/// יומן שליחת מסמכים במייל לרו״ח
+model AccountantEmailLog {
+  id               String            @id @default(cuid())
+  documentId       String
+  sentAt           DateTime          @default(now())
+  sentTo           String
+  /// כל הנמענים בשליחה (מופרד בפסיקים)
+  recipientEmails  String?
+  sentById         String?
+  attachmentsCount Int
+  /// מספר מסמכים בשליחה (batch)
+  documentsCount   Int               @default(1)
+  /// files | zip
+  attachmentMode   String?
+  batchId          String?
+  subject          String?
+  message          String?
+  resendId         String?
+  document         FinancialDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  sentBy           User?             @relation("AccountantEmailLogSentBy", fields: [sentById], references: [id])
+
+  @@index([documentId])
+  @@index([sentById])
+  @@index([sentAt])
+  @@index([batchId])
+}
+
+/// אנשי קשר לשליחת מסמכים במייל (רו״ח, הנהלת חשבונות וכו׳)
+model DocumentEmailContact {
+  id         String    @id @default(cuid())
+  businessId String    @default("default")
+  name       String?
+  email      String
+  isFavorite Boolean   @default(false)
+  lastUsedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@unique([businessId, email])
+  @@index([businessId, isFavorite])
+  @@index([businessId, lastUsedAt])
+  @@map("document_email_contacts")
 }
 
 model FinancialDocumentItem {
@@ -886,6 +956,7 @@ model User {
   employeeTasksAssigned        EmployeeTask[]          @relation("EmployeeTaskAssignee")
   employeeTaskGroupsAssigned   EmployeeTaskGroup[]     @relation("EmployeeTaskGroupAssignee")
   financialDocumentsMarkedSent FinancialDocument[]     @relation("FinancialDocumentSentToCpaBy")
+  accountantEmailLogs          AccountantEmailLog[]    @relation("AccountantEmailLogSentBy")
   generatedReports             GeneratedReport[]       @relation("GeneratedReportCreatedBy")
   inventoryCountsRecorded      InventoryCount[]        @relation("InventoryCountCountedBy")
   inventoryMovements           InventoryMovement[]

@@ -1,4 +1,4 @@
-import { PDFDocument, rgb } from "pdf-lib";
+import { PDFDocument } from "pdf-lib";
 import { prisma } from "@/lib/prisma";
 import {
   parsePayload,
@@ -19,7 +19,7 @@ import {
   drawLabeledSection,
   drawOpenBalanceBox,
   drawRtlText,
-  drawSummaryBoxes,
+  drawSummaryLines,
   drawTwoColPaymentTable,
   type ItemColumn,
 } from "@/lib/pdf/invoice-pdf-draw";
@@ -82,7 +82,6 @@ export async function generateFinancialDocumentPdfBytes(documentId: string): Pro
       ? parseNum(String((payload as IncomeExpensePayload).depositAmount ?? ""))
       : 0);
 
-  const counterpartyLabel = isExpense ? "ספק / גורם" : "לקוח";
   const counterpartyName =
     doc.customer?.name ??
     (payload && payload.kind !== "zreport" ? (payload as IncomeExpensePayload).counterpartyName : "") ??
@@ -90,42 +89,32 @@ export async function generateFinancialDocumentPdfBytes(documentId: string): Pro
   const phone = doc.customer?.phone?.trim() || "—";
 
   const docDate = doc.docDate ?? doc.createdAt;
-  const metaLines = [
-    `תאריך: ${formatDateIL(docDate)}`,
-    `מספר מסמך: ${doc.id.slice(0, 8)}…`,
-    `משתמש: —`,
-  ];
+  const counterpartyMetaLabel = isExpense ? "ספק" : "לקוח";
+  const docNumber = doc.id.slice(0, 8).toUpperCase();
 
   y = drawHeader(page, { he: fonts.he, heBold: fonts.heBold, enBold: fonts.enBold }, {
     reportTitleHe: reportTitleHe(doc.category, payload?.kind, doc.documentType),
-    metaLines,
+    metaFields: [
+      { label: "מספר מסמך", value: docNumber },
+      { label: "תאריך", value: formatDateIL(docDate) },
+      { label: counterpartyMetaLabel, value: counterpartyName || "—" },
+      { label: "סטטוס", value: paymentStatusLabelHe(paymentStatus) },
+    ],
   });
 
+  const itemCount = doc.items.length;
+  const singlePageMode = !isZ && itemCount > 0 && itemCount < 20;
+
   const ensureSpace = (need: number) => {
+    if (singlePageMode) return;
     if (y - need < PDF_MARGIN + FOOTER_RESERVE) {
       page = pdfDoc.addPage([PDF_PAGE_W, PDF_PAGE_H]);
       y = PDF_PAGE_H - PDF_MARGIN;
     }
   };
 
-  ensureSpace(120);
-  y = drawLabeledSection(
-    page,
-    fonts,
-    "פרטי מסמך",
-    [
-      { label: "סוג מסמך", value: doc.documentType || "—" },
-      { label: "כותרת", value: doc.title || "—" },
-      { label: "תאריך מסמך", value: formatDateIL(docDate) },
-      { label: "סטטוס תשלום", value: paymentStatusLabelHe(paymentStatus) },
-    ],
-    PDF_MARGIN,
-    y,
-    CONTENT_W,
-  );
-
   if (!isZ) {
-    ensureSpace(100);
+    ensureSpace(80);
     const firstPay = doc.payments[0];
     const firstPayloadPay =
       payload?.kind === "income" || payload?.kind === "expense"
@@ -137,11 +126,23 @@ export async function generateFinancialDocumentPdfBytes(documentId: string): Pro
         : firstPayloadPay
           ? paymentMethodLabel(firstPayloadPay.instrument ?? null)
           : "—";
-    y = drawLabeledSection(page, fonts, isExpense ? "פרטי ספק" : "פרטי לקוח", [
-      { label: counterpartyLabel, value: counterpartyName || "—" },
-      { label: "טלפון", value: phone !== "" ? phone : "—" },
-      { label: "אמצעי תשלום (ראשון)", value: payInstr },
-    ], PDF_MARGIN, y, CONTENT_W);
+    const detailRows = [
+      { label: "סוג מסמך", value: doc.documentType || "—" },
+      ...(doc.title?.trim() ? [{ label: "כותרת", value: doc.title.trim() }] : []),
+      ...(phone !== "—" ? [{ label: "טלפון", value: phone }] : []),
+      ...(payInstr !== "—" ? [{ label: "אמצעי תשלום", value: payInstr }] : []),
+    ];
+    if (detailRows.length > 0) {
+      y = drawLabeledSection(
+        page,
+        fonts,
+        isExpense ? "פרטי ספק" : "פרטי לקוח",
+        detailRows,
+        PDF_MARGIN,
+        y,
+        CONTENT_W,
+      );
+    }
   }
 
   if (isZ && payload?.kind === "zreport") {
@@ -179,10 +180,8 @@ export async function generateFinancialDocumentPdfBytes(documentId: string): Pro
     }));
     const headerH = 30;
     const rowH = 28;
-    const tableH = headerH + dataRows.length * rowH + 44;
+    const tableH = headerH + dataRows.length * rowH + 16;
     ensureSpace(tableH);
-    drawRtlText(page, fonts.heBold, "טבלת פריטים", PDF_MARGIN + CONTENT_W - 18, y - 6, 13, C.text);
-    y -= 28;
     y = drawDataTable(page, { he: fonts.he, num: fonts.num }, cols, dataRows, PDF_MARGIN, y, CONTENT_W);
   }
 
@@ -194,14 +193,14 @@ export async function generateFinancialDocumentPdfBytes(documentId: string): Pro
     }, 0);
     const productTotal = doc.items.reduce((sum, it) => sum + it.total, 0);
     const netAmount = productTotal - vatAmount;
-    ensureSpace(110);
-    y = drawSummaryBoxes(
+    ensureSpace(90);
+    y = drawSummaryLines(
       page,
       fonts,
       [
-        { label: "לפני מע״מ", amount: formatCurrencyILS(netAmount), bg: C.summaryNetBg, fg: C.text },
-        { label: 'מע״מ', amount: formatCurrencyILS(vatAmount), bg: C.summaryVatBg, fg: C.white },
-        { label: "סה״כ", amount: formatCurrencyILS(doc.totalAmount), bg: C.summaryTotalBg, fg: C.white },
+        { label: "לפני מע״מ", amount: formatCurrencyILS(netAmount) },
+        { label: "מע״מ", amount: formatCurrencyILS(vatAmount) },
+        { label: "סה״כ", amount: formatCurrencyILS(doc.totalAmount), emphasize: true },
       ],
       PDF_MARGIN,
       y,
@@ -239,13 +238,11 @@ export async function generateFinancialDocumentPdfBytes(documentId: string): Pro
   }
 
   if (!isZ) {
-    ensureSpace(70);
-    drawRtlText(page, fonts.he, `סה״כ מסמך: ${formatCurrencyILS(doc.totalAmount)}`, PDF_MARGIN + CONTENT_W - 18, y, 11, C.text);
-    y -= 18;
-    drawRtlText(page, fonts.he, `שולם: ${formatCurrencyILS(paidAmount)}`, PDF_MARGIN + CONTENT_W - 18, y, 11, rgb(5 / 255, 150 / 255, 105 / 255));
-    y -= 18;
-    drawRtlText(page, fonts.he, `יתרה פתוחה: ${formatCurrencyILS(remainingAmount)}`, PDF_MARGIN + CONTENT_W - 18, y, 11, C.text);
-    y -= 22;
+    ensureSpace(54);
+    drawRtlText(page, fonts.he, `שולם: ${formatCurrencyILS(paidAmount)}`, PDF_MARGIN + CONTENT_W - 18, y, 10, C.navy);
+    y -= 16;
+    drawRtlText(page, fonts.he, `יתרה פתוחה: ${formatCurrencyILS(remainingAmount)}`, PDF_MARGIN + CONTENT_W - 18, y, 10, C.text);
+    y -= 20;
 
     if (remainingAmount > 1e-6) {
       ensureSpace(54);
@@ -258,7 +255,7 @@ export async function generateFinancialDocumentPdfBytes(documentId: string): Pro
     y = drawLabeledSection(page, fonts, "הערות", [{ label: "מסמך", value: doc.notes.trim() }], PDF_MARGIN, y, CONTENT_W);
   }
 
-  drawFooter(page, { en: fonts.en });
+  drawFooter(page, { en: fonts.en, enBold: fonts.enBold });
 
   return pdfDoc.save();
 }

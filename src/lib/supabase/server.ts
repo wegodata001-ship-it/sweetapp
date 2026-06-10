@@ -16,3 +16,29 @@ export function getPublicStorageUrl(bucket: string, path: string): string {
   const safePath = encodeURIComponent(path).replace(/%2F/g, "/");
   return `${base}/storage/v1/object/public/${bucket}/${safePath}`;
 }
+
+/** Signed URL for private buckets — access only via authenticated API routes. */
+export async function createSignedStorageUrl(
+  bucket: string,
+  path: string,
+  expiresInSec = 3600,
+): Promise<string | null> {
+  const supabase = getSupabaseServiceClient();
+  if (!supabase) return null;
+  try {
+    const { data, error } = await supabase.storage
+      .from(bucket)
+      .createSignedUrl(path, expiresInSec);
+    if (error) {
+      console.error("[createSignedStorageUrl]", error.message);
+      return null;
+    }
+    return data?.signedUrl ?? null;
+  } catch (e) {
+    console.error(
+      "[createSignedStorageUrl] failed",
+      e instanceof Error ? e.message : String(e),
+    );
+    return null;
+  }
+}

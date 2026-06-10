@@ -161,6 +161,11 @@ export type IncomeExpensePayload = {
   /** When the form was filled via the OCR scanner: link to the uploaded file. */
   receiptFileUrl?: string | null;
   receiptFileName?: string | null;
+  receiptStoragePath?: string | null;
+  receiptStorageBucket?: string | null;
+  receiptMimeType?: string | null;
+  /** true — הנתונים מולאו אוטומטית מסריקה; יש לאשר לפני שמירה */
+  ocrAutoFilled?: boolean;
 };
 
 export type ZReportPayload = {
@@ -172,6 +177,13 @@ export type ZReportPayload = {
   creditTaxable: number;
   creditExempt: number;
   transfers: number;
+  receiptFileUrl?: string | null;
+  receiptFileName?: string | null;
+  receiptStoragePath?: string | null;
+  receiptStorageBucket?: string | null;
+  receiptMimeType?: string | null;
+  /** true — הנתונים מולאו אוטומטית מסריקה; יש לאשר לפני שמירה */
+  ocrAutoFilled?: boolean;
 };
 
 export type FinanceDocumentPayload = IncomeExpensePayload | ZReportPayload;
@@ -334,6 +346,12 @@ export function parsePayload(raw: unknown): FinanceDocumentPayload | null {
       creditTaxable: Number(o.creditTaxable) || 0,
       creditExempt: Number(o.creditExempt) || 0,
       transfers: Number(o.transfers) || 0,
+      receiptFileUrl: typeof o.receiptFileUrl === "string" ? o.receiptFileUrl : null,
+      receiptFileName: typeof o.receiptFileName === "string" ? o.receiptFileName : null,
+      receiptStoragePath: typeof o.receiptStoragePath === "string" ? o.receiptStoragePath : null,
+      receiptStorageBucket: typeof o.receiptStorageBucket === "string" ? o.receiptStorageBucket : null,
+      receiptMimeType: typeof o.receiptMimeType === "string" ? o.receiptMimeType : null,
+      ocrAutoFilled: o.ocrAutoFilled === true,
     };
   }
   if (o.kind === "income" || o.kind === "expense") {
@@ -438,6 +456,13 @@ export function parsePayload(raw: unknown): FinanceDocumentPayload | null {
         typeof o.receiptFileUrl === "string" ? o.receiptFileUrl : null,
       receiptFileName:
         typeof o.receiptFileName === "string" ? o.receiptFileName : null,
+      receiptStoragePath:
+        typeof o.receiptStoragePath === "string" ? o.receiptStoragePath : null,
+      receiptStorageBucket:
+        typeof o.receiptStorageBucket === "string" ? o.receiptStorageBucket : null,
+      receiptMimeType:
+        typeof o.receiptMimeType === "string" ? o.receiptMimeType : null,
+      ocrAutoFilled: Boolean(o.ocrAutoFilled),
     };
   }
   return null;

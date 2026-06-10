@@ -8,6 +8,10 @@ import {
   ExpenseScanDialog,
   type ScannedDocumentDto,
 } from "@/components/expense-scan-dialog";
+import { ZReportScanDialog } from "@/components/z-report-scan-dialog";
+import type { ScannedZReportDto } from "@/lib/document-scan/z-report-types";
+import { RegisterEntryModeBar } from "@/components/finance/register-entry-mode-bar";
+import { RegisterReceiptPanel } from "@/components/finance/register-receipt-panel";
 import {
   fetchFinanceDocumentById,
   insertFinanceDocument,
@@ -144,6 +148,10 @@ function FinanceRegisterPageInner() {
   const [docPdfPreview, setDocPdfPreview] = useState<{ url: string; title: string } | null>(null);
   const [openingDocPdf, setOpeningDocPdf] = useState(false);
   const [scanDialogOpen, setScanDialogOpen] = useState(scanParam === "1");
+  const [zScanDialogOpen, setZScanDialogOpen] = useState(false);
+  const [scanTarget, setScanTarget] = useState<"income" | "expense">("expense");
+  const [incomeEntryMode, setIncomeEntryMode] = useState<"manual" | "scan">("manual");
+  const [expenseEntryMode, setExpenseEntryMode] = useState<"manual" | "scan">("manual");
 
   useEffect(() => {
     if (tabParam === "expenses") {
@@ -151,7 +159,14 @@ function FinanceRegisterPageInner() {
     }
   }, [tabParam]);
 
-  const applyScannedDocument = useCallback((doc: ScannedDocumentDto) => {
+  const applyScannedDocument = useCallback((doc: ScannedDocumentDto, target: "income" | "expense") => {
+    const sf = doc.scanFields;
+    const supplier =
+      sf?.supplier.detected ? (sf.supplier.value ?? "") : (doc.supplierRawName?.trim() || doc.supplierName?.trim() || "");
+    const docDate = sf?.date.detected ? (sf.date.value ?? "") : (doc.date?.trim() || "");
+    const totalAmount = sf?.total.detected ? sf.total.value : doc.total;
+    const documentType = sf?.documentType.detected ? (sf.documentType.value ?? "") : (doc.documentType || "");
+
     const fallbackId = () => newLineId();
     const lines: FinanceLineItemPayload[] =
       doc.items.length > 0
@@ -161,7 +176,7 @@ function FinanceRegisterPageInner() {
             quantity: String(it.quantity || 1),
             price: String(it.unitPrice || 0),
             supplierProductId: it.supplierProductId ?? null,
-            vatMode: "includes_vat",
+            vatMode: "includes_vat" as const,
             priceFlag:
               it.priceFlagKey && it.priceFlagKey !== null
                 ? {
@@ -171,26 +186,87 @@ function FinanceRegisterPageInner() {
                   }
                 : null,
           }))
-        : [
-            {
-              id: fallbackId(),
-              itemName: "",
-              quantity: "1",
-              price: doc.total ? String(doc.total) : "",
-              vatMode: "includes_vat",
-            },
-          ];
+        : totalAmount != null && totalAmount > 0
+          ? [
+              {
+                id: fallbackId(),
+                itemName: "",
+                quantity: "1",
+                price: String(totalAmount),
+                vatMode: "includes_vat" as const,
+              },
+            ]
+          : [
+              {
+                id: fallbackId(),
+                itemName: "",
+                quantity: "1",
+                price: "",
+                vatMode: "includes_vat" as const,
+              },
+            ];
+
+    const receiptFields = {
+      receiptFileUrl: doc.receiptFileUrl ?? null,
+      receiptFileName: doc.receiptFileName ?? null,
+      receiptStoragePath: doc.receiptStoragePath ?? null,
+      receiptStorageBucket: doc.receiptStorageBucket ?? null,
+      receiptMimeType: doc.receiptMimeType ?? null,
+      ocrAutoFilled: true,
+    };
+
+    if (target === "income") {
+      setIncomeForm((prev) => ({
+        ...prev,
+        counterpartyName: supplier || prev.counterpartyName,
+        docDate: docDate || prev.docDate,
+        documentType: documentType || prev.documentType,
+        lines,
+        ...receiptFields,
+      }));
+      setIncomeEntryMode("manual");
+      setActiveTab("income");
+      return;
+    }
+
     setExpenseForm((prev) => ({
       ...prev,
       supplierId: doc.supplierId ?? prev.supplierId ?? null,
-      counterpartyName: doc.supplierName || doc.supplierRawName || prev.counterpartyName,
-      docDate: doc.date || prev.docDate,
-      documentType: doc.documentType || prev.documentType,
+      counterpartyName: doc.supplierId
+        ? doc.supplierName || supplier || prev.counterpartyName
+        : supplier || prev.counterpartyName,
+      docDate: docDate || prev.docDate,
+      documentType: documentType || prev.documentType,
       lines,
-      receiptFileUrl: doc.receiptFileUrl ?? prev.receiptFileUrl ?? null,
-      receiptFileName: doc.receiptFileName ?? prev.receiptFileName ?? null,
+      ...receiptFields,
     }));
+    setExpenseEntryMode("manual");
     setActiveTab("expenses");
+  }, []);
+
+  const applyScannedZReport = useCallback((doc: ScannedZReportDto) => {
+    const sf = doc.scanFields;
+    if (sf?.zNumber.detected && sf.zNumber.value) setZNumber(sf.zNumber.value);
+    else if (doc.zNumber) setZNumber(doc.zNumber);
+    if (sf?.date.detected && sf.date.value) setZDate(sf.date.value);
+    else if (doc.date) setZDate(doc.date);
+    if (sf?.cashTaxable.detected) setCashTaxable(String(sf.cashTaxable.value ?? 0));
+    else setCashTaxable(doc.cashTaxable ? String(doc.cashTaxable) : "");
+    if (sf?.cashExempt.detected) setCashExempt(String(sf.cashExempt.value ?? 0));
+    else setCashExempt(doc.cashExempt ? String(doc.cashExempt) : "");
+    if (sf?.creditTaxable.detected) setCreditTaxable(String(sf.creditTaxable.value ?? 0));
+    else setCreditTaxable(doc.creditTaxable ? String(doc.creditTaxable) : "");
+    if (sf?.creditExempt.detected) setCreditExempt(String(sf.creditExempt.value ?? 0));
+    else setCreditExempt(doc.creditExempt ? String(doc.creditExempt) : "");
+    if (sf?.transfers.detected) setTransfers(String(sf.transfers.value ?? 0));
+    else setTransfers(doc.transfers ? String(doc.transfers) : "");
+    setZReceiptFileUrl(doc.receiptFileUrl ?? null);
+    setZReceiptFileName(doc.receiptFileName ?? null);
+    setZReceiptStoragePath(doc.receiptStoragePath ?? null);
+    setZReceiptStorageBucket(doc.receiptStorageBucket ?? null);
+    setZReceiptMimeType(doc.receiptMimeType ?? null);
+    setZOcrAutoFilled(true);
+    setActiveTab("zreport");
   }, []);
 
   const [zDate, setZDate] = useState("");
@@ -200,6 +276,12 @@ function FinanceRegisterPageInner() {
   const [creditTaxable, setCreditTaxable] = useState("");
   const [creditExempt, setCreditExempt] = useState("");
   const [transfers, setTransfers] = useState("");
+  const [zReceiptFileUrl, setZReceiptFileUrl] = useState<string | null>(null);
+  const [zReceiptFileName, setZReceiptFileName] = useState<string | null>(null);
+  const [zReceiptStoragePath, setZReceiptStoragePath] = useState<string | null>(null);
+  const [zReceiptStorageBucket, setZReceiptStorageBucket] = useState<string | null>(null);
+  const [zReceiptMimeType, setZReceiptMimeType] = useState<string | null>(null);
+  const [zOcrAutoFilled, setZOcrAutoFilled] = useState(false);
 
   const fixIncomeExpense = useCallback((p: IncomeExpensePayload): IncomeExpensePayload => {
     return {
@@ -262,6 +344,12 @@ function FinanceRegisterPageInner() {
         setCreditTaxable(z.creditTaxable ? String(z.creditTaxable) : "");
         setCreditExempt(z.creditExempt ? String(z.creditExempt) : "");
         setTransfers(z.transfers ? String(z.transfers) : "");
+        setZReceiptFileUrl(z.receiptFileUrl ?? null);
+        setZReceiptFileName(z.receiptFileName ?? null);
+        setZReceiptStoragePath(z.receiptStoragePath ?? null);
+        setZReceiptStorageBucket(z.receiptStorageBucket ?? null);
+        setZReceiptMimeType(z.receiptMimeType ?? null);
+        setZOcrAutoFilled(z.ocrAutoFilled === true);
         setActiveTab("zreport");
         return;
       }
@@ -537,8 +625,28 @@ function FinanceRegisterPageInner() {
       creditTaxable: parseNum(creditTaxable),
       creditExempt: parseNum(creditExempt),
       transfers: parseNum(transfers),
+      receiptFileUrl: zReceiptFileUrl,
+      receiptFileName: zReceiptFileName,
+      receiptStoragePath: zReceiptStoragePath,
+      receiptStorageBucket: zReceiptStorageBucket,
+      receiptMimeType: zReceiptMimeType,
+      ocrAutoFilled: zOcrAutoFilled,
     };
-  }, [cashTaxable, cashExempt, creditTaxable, creditExempt, transfers, zDate, zNumber]);
+  }, [
+    cashTaxable,
+    cashExempt,
+    creditTaxable,
+    creditExempt,
+    transfers,
+    zDate,
+    zNumber,
+    zReceiptFileUrl,
+    zReceiptFileName,
+    zReceiptStoragePath,
+    zReceiptStorageBucket,
+    zReceiptMimeType,
+    zOcrAutoFilled,
+  ]);
 
   const openOrCreateDocumentPdf = (documentId: string) => {
     setOpeningDocPdf(true);
@@ -965,6 +1073,12 @@ function FinanceRegisterPageInner() {
     setCreditTaxable("");
     setCreditExempt("");
     setTransfers("");
+    setZReceiptFileUrl(null);
+    setZReceiptFileName(null);
+    setZReceiptStoragePath(null);
+    setZReceiptStorageBucket(null);
+    setZReceiptMimeType(null);
+    setZOcrAutoFilled(false);
   };
 
   return (
@@ -1261,6 +1375,26 @@ function FinanceRegisterPageInner() {
 
       {activeTab === "income" && (
         <>
+          <RegisterEntryModeBar
+            mode={incomeEntryMode}
+            disabled={publishing}
+            onManual={() => setIncomeEntryMode("manual")}
+            onScan={() => {
+              setScanTarget("income");
+              setIncomeEntryMode("scan");
+              setScanDialogOpen(true);
+            }}
+          />
+          <RegisterReceiptPanel
+            form={incomeForm}
+            onChange={(next) => setIncomeForm(next.kind === "income" ? next : { ...next, kind: "income" })}
+            documentCategory="income"
+            disabled={publishing}
+            showOcrBanner={Boolean(incomeForm.ocrAutoFilled)}
+            onClearOcrFlag={() =>
+              setIncomeForm((prev) => ({ ...prev, ocrAutoFilled: false }))
+            }
+          />
           <IncomeExpenseFields
             heading={t(LK.tabEvent)}
             intro={t(LK.incomeIntro)}
@@ -1320,6 +1454,15 @@ function FinanceRegisterPageInner() {
             <h2 className="text-[22px] font-extrabold text-slate-950">{t("register.zreport.title")}</h2>
           </div>
           <p className="mt-1 text-[13px] text-slate-600 opacity-70">{t("register.zreport.intro")}</p>
+
+          {zOcrAutoFilled ? (
+            <div
+              className="mt-3 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-950"
+              role="status"
+            >
+              {t("scan.reviewHint")}
+            </div>
+          ) : null}
 
           <div className="mt-3 grid gap-3 md:grid-cols-2">
             <label className={labelClass}>
@@ -1428,6 +1571,15 @@ function FinanceRegisterPageInner() {
             <button
               type="button"
               disabled={publishing}
+              onClick={() => setZScanDialogOpen(true)}
+              className={`${btnPrimary} gap-2 border border-rose-200 bg-rose-50 text-rose-900 hover:bg-rose-100`}
+            >
+              <ScanLine className="h-4 w-4" aria-hidden />
+              {t("scan.zReport.openButton")}
+            </button>
+            <button
+              type="button"
+              disabled={publishing}
               onClick={() => void publishZDoc()}
               className={`${btnPrimary} bg-luxury-gold text-luxury-charcoal shadow-sm hover:bg-luxury-gold-hover`}
             >
@@ -1448,50 +1600,26 @@ function FinanceRegisterPageInner() {
 
       {activeTab === "expenses" && (
         <>
-          <div className="flex flex-wrap items-center justify-end gap-2 px-0">
-            <button
-              type="button"
-              onClick={() => setScanDialogOpen(true)}
-              disabled={publishing}
-              className="inline-flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 py-2 text-sm font-black text-rose-800 shadow-sm transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              <ScanLine className="h-4 w-4" aria-hidden />
-              {t("scan.invoiceButton")}
-            </button>
-          </div>
-          {expenseForm.receiptFileUrl ? (
-            <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
-              <span className="inline-flex items-center gap-2">
-                <FileText className="h-4 w-4" aria-hidden />
-                <span className="font-bold">
-                  {expenseForm.receiptFileName || t("scan.attachedReceipt")}
-                </span>
-              </span>
-              <div className="flex flex-wrap items-center gap-2">
-                <a
-                  href={expenseForm.receiptFileUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="rounded-lg bg-white px-2 py-1 text-xs font-bold text-emerald-700 hover:bg-emerald-100"
-                >
-                  {t("scan.viewReceipt")}
-                </a>
-                <button
-                  type="button"
-                  onClick={() =>
-                    setExpenseForm((prev) => ({
-                      ...prev,
-                      receiptFileUrl: null,
-                      receiptFileName: null,
-                    }))
-                  }
-                  className="rounded-lg bg-white px-2 py-1 text-xs font-bold text-rose-700 hover:bg-rose-100"
-                >
-                  {t("scan.removeReceipt")}
-                </button>
-              </div>
-            </div>
-          ) : null}
+          <RegisterEntryModeBar
+            mode={expenseEntryMode}
+            disabled={publishing}
+            onManual={() => setExpenseEntryMode("manual")}
+            onScan={() => {
+              setScanTarget("expense");
+              setExpenseEntryMode("scan");
+              setScanDialogOpen(true);
+            }}
+          />
+          <RegisterReceiptPanel
+            form={expenseForm}
+            onChange={(next) => setExpenseForm(next.kind === "expense" ? next : { ...next, kind: "expense" })}
+            documentCategory="expense"
+            disabled={publishing}
+            showOcrBanner={Boolean(expenseForm.ocrAutoFilled)}
+            onClearOcrFlag={() =>
+              setExpenseForm((prev) => ({ ...prev, ocrAutoFilled: false }))
+            }
+          />
           <IncomeExpenseFields
             heading={t(LK.expenseHeading)}
             headingClass="text-slate-950"
@@ -1568,8 +1696,19 @@ function FinanceRegisterPageInner() {
 
       <ExpenseScanDialog
         open={scanDialogOpen}
-        onClose={() => setScanDialogOpen(false)}
-        onApply={applyScannedDocument}
+        documentKind={scanTarget}
+        onClose={() => {
+          setScanDialogOpen(false);
+          setIncomeEntryMode("manual");
+          setExpenseEntryMode("manual");
+        }}
+        onApply={(doc) => applyScannedDocument(doc, scanTarget)}
+      />
+
+      <ZReportScanDialog
+        open={zScanDialogOpen}
+        onClose={() => setZScanDialogOpen(false)}
+        onApply={applyScannedZReport}
       />
     </div>
   );

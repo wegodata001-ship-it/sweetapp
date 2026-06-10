@@ -1,28 +1,28 @@
 import { NextRequest } from "next/server";
 import { requireDb } from "@/lib/api-route";
-import { scanJsonError, scanJsonSuccess } from "@/lib/ocr/api-response";
 import {
-  isSupportedMimeType,
+  scanJsonError,
+  scanJsonSuccess,
   scanDocument,
-  OcrServiceError,
-  getOcrProvider,
-  logOcrFlow,
-} from "@/lib/ocr";
-import { hashFileBuffer } from "@/lib/ocr/ocr-cache";
-import {
-  bufferFromUploadFile,
-  logOcrFileIntegrity,
+  ScanServiceError,
+  SCAN_TIMEOUT_USER_MESSAGE,
+  hashFileBuffer,
+  isSupportedMimeType,
   resolveUploadMimeType,
-} from "@/lib/ocr/original-file-integrity";
+  bufferFromUploadFile,
+} from "@/lib/document-scan";
+import { logScanEnv } from "@/lib/document-scan/scan-env";
+import { scanStreamResponse } from "@/lib/document-scan/scan-stream";
+import type { ScanProgressPhase } from "@/lib/document-scan/scan-progress";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
-export const maxDuration = 60;
+export const maxDuration = 45;
 
 const MAX_BYTES = 12 * 1024 * 1024;
 
 function isTimeoutError(e: unknown): boolean {
-  if (e instanceof OcrServiceError && e.code === "OCR_TIMEOUT") return true;
+  if (e instanceof ScanServiceError && e.code === "SCAN_TIMEOUT") return true;
   if (!(e instanceof Error)) return false;
   const m = e.message.toLowerCase();
   return (
@@ -33,13 +33,71 @@ function isTimeoutError(e: unknown): boolean {
   );
 }
 
-/**
- * POST /api/expenses/scan — OCR על הקובץ המקורי בלבד (ללא resize/compress).
- */
+function scanErrorResponse(scanError: unknown) {
+  console.error(scanError);
+  const timedOut = isTimeoutError(scanError);
+
+  if (scanError instanceof ScanServiceError) {
+    const status =
+      scanError.code === "FILE_TOO_LARGE"
+        ? 413
+        : scanError.code === "SCAN_NOT_CONFIGURED"
+          ? 503
+          : scanError.code === "SCAN_PROVIDER_BUSY"
+            ? 503
+            : timedOut
+              ? 504
+              : 502;
+    const userMessage =
+      scanError.code === "SCAN_NOT_CONFIGURED"
+        ? "שירות הסריקה החכמה אינו מוגדר — בדוק GEMINI_API_KEY ב-.env"
+        : scanError.code === "SCAN_PROVIDER_BUSY"
+          ? "שרת ה-AI עמוס — נסה שוב בעוד מספר רגעים"
+          : scanError.code === "SCAN_TIMEOUT"
+            ? SCAN_TIMEOUT_USER_MESSAGE
+            : scanError.message;
+    return scanJsonError(userMessage, status, scanError.code);
+  }
+
+  return scanJsonError(
+    scanError instanceof Error ? scanError.message : "שגיאה בסריקה",
+    timedOut ? 504 : 500,
+    timedOut ? "SCAN_TIMEOUT" : "SCAN_PROVIDER_ERROR",
+  );
+}
+
+async function runExpenseScan(params: {
+  buffer: Buffer;
+  fileName: string;
+  mimeType: string;
+  hash: string;
+  intakeMode: "quick" | "full";
+  compareSupplierPrices?: boolean;
+  onProgress?: (phase: ScanProgressPhase) => void;
+}) {
+  const { debug, partial, ...data } = await scanDocument({
+    buffer: params.buffer,
+    fileName: params.fileName,
+    mimeType: params.mimeType,
+    fileHash: params.hash,
+    intakeMode: params.intakeMode,
+    compareSupplierPrices: params.compareSupplierPrices,
+    onProgress: params.onProgress,
+  });
+
+  if (data.error === "SCAN_READ_FAILED") {
+    throw Object.assign(new ScanServiceError("SCAN_READ_FAILED", "פענוח נכשל\nנא להעלות צילום חד יותר"), {
+      httpStatus: 422,
+    });
+  }
+
+  return { data: { ...data, partial }, debug };
+}
+
+/** POST /api/expenses/scan — ניתוח מסמכים באמצעות Gemini AI בלבד */
 export async function POST(req: NextRequest) {
-  const started = Date.now();
-  console.log("[OCR PROVIDER]", getOcrProvider());
-  logOcrFlow({ route: "expenses/scan" });
+  console.log("SCAN_START");
+  logScanEnv();
 
   try {
     const block = await requireDb();
@@ -47,10 +105,15 @@ export async function POST(req: NextRequest) {
 
     const formData = await req.formData();
     const file = formData.get("file");
+    const intakeModeRaw = formData.get("intakeMode");
+    const intakeMode = intakeModeRaw === "full" ? "full" : "quick";
+    const documentKind = formData.get("documentKind") === "income" ? "income" : "expense";
+    const compareSupplierPrices = documentKind === "expense";
+    const useStream = formData.get("stream") === "1";
+
     if (!(file instanceof File)) {
       return scanJsonError("Invalid file — expected multipart field 'file'", 400, "VALIDATION");
     }
-
     if (file.size === 0) {
       return scanJsonError("uploaded file is empty", 400, "VALIDATION");
     }
@@ -63,8 +126,6 @@ export async function POST(req: NextRequest) {
     }
 
     const mimeType = resolveUploadMimeType(file);
-    console.log("[OCR] upload mime from client:", file.type, "→ resolved:", mimeType);
-
     if (!isSupportedMimeType(mimeType)) {
       return scanJsonError(
         `unsupported file type "${mimeType}" — use PNG, JPEG, or PDF`,
@@ -77,52 +138,55 @@ export async function POST(req: NextRequest) {
     const hash = hashFileBuffer(originalBuffer);
     const fileName = file.name || `upload.${mimeType.split("/")[1] ?? "bin"}`;
 
-    logOcrFileIntegrity({
-      size: originalBuffer.length,
-      mime: mimeType,
-      hash,
-      fileName,
-      route: "expenses/scan",
-    });
+    if (useStream) {
+      return scanStreamResponse(async (onProgress) => {
+        try {
+          const { data, debug } = await runExpenseScan({
+            buffer: originalBuffer,
+            fileName,
+            mimeType,
+            hash,
+            intakeMode,
+            compareSupplierPrices,
+            onProgress,
+          });
+          return {
+            type: "result",
+            success: true,
+            ok: true,
+            data,
+            provider: debug?.provider ?? "gemini_vision",
+            debug,
+          };
+        } catch (e) {
+          if (e instanceof ScanServiceError && e.code === "SCAN_READ_FAILED") {
+            return {
+              type: "error",
+              success: false,
+              ok: false,
+              error: e.message,
+              code: "SCAN_READ_FAILED",
+              provider: "gemini_vision",
+            };
+          }
+          throw e;
+        }
+      });
+    }
 
-    const { debug, partial, ...data } = await scanDocument({
+    const { data, debug } = await runExpenseScan({
       buffer: originalBuffer,
       fileName,
       mimeType,
-      fileHash: hash,
+      hash,
+      intakeMode,
+      compareSupplierPrices,
     });
-
-    console.log("[OCR] scan complete ms:", Date.now() - started);
-    console.log("[OCR PARSED RESULT] items:", data.items.length, "partial:", partial);
-
-    return scanJsonSuccess({ ...data, partial }, debug);
-  } catch (e) {
-    const timedOut = isTimeoutError(e);
-
-    if (e instanceof OcrServiceError) {
-      console.error("[OCR] OCR errors:", e.code, e.message);
-      const status =
-        e.code === "FILE_TOO_LARGE"
-          ? 413
-          : e.code === "OCR_NOT_CONFIGURED"
-            ? 503
-            : timedOut
-              ? 504
-              : 502;
-      const userMessage =
-        e.code === "OCR_NOT_CONFIGURED"
-          ? "Google Vision not configured — הוסף GOOGLE_CLOUD_VISION_API_KEY ל-.env"
-          : e.code === "OCR_PROVIDER_ERROR" || e.code === "OCR_TIMEOUT"
-            ? "שירות OCR זמנית לא זמין"
-            : e.message;
-      return scanJsonError(userMessage, status, e.code);
+    return scanJsonSuccess(data, debug);
+  } catch (scanError) {
+    if (scanError instanceof ScanServiceError && scanError.code === "SCAN_READ_FAILED") {
+      return scanJsonError(scanError.message, 422, "SCAN_READ_FAILED");
     }
-
-    console.error("[OCR] OCR errors:", e instanceof Error ? e.stack ?? e.message : e);
-    return scanJsonError(
-      "שירות OCR זמנית לא זמין",
-      timedOut ? 504 : 500,
-      timedOut ? "OCR_TIMEOUT" : "OCR_PROVIDER_ERROR",
-    );
+    return scanErrorResponse(scanError);
   }
 }

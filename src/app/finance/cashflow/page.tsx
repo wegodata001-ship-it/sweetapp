@@ -201,6 +201,7 @@ export default function CashflowPage() {
       detailStatus: detail?.summary.status ?? null,
       detailCashier: detail?.summary.cashierLabel ?? null,
       loadingDetail: zDetailLoadingIds.has(summary.zReportId),
+      canViewSource: detail ? detail.document.hasSourceDocument : true,
     };
   };
   const totalBalance = useMemo(() => totalIn - totalOut, [totalIn, totalOut]);
@@ -377,9 +378,29 @@ export default function CashflowPage() {
     }
   };
 
+  const openZSourceDocument = async (documentId: string) => {
+    try {
+      const q = new URLSearchParams({ financialDocumentId: documentId });
+      const res = await fetch(`/api/source-documents/access?${q.toString()}`, {
+        credentials: "same-origin",
+      });
+      const json = (await res.json()) as { ok?: boolean; data?: { url: string }; error?: string };
+      if (!res.ok || !json.ok || !json.data?.url) {
+        setNotice(json.error ?? t("scan.viewSourceError"));
+        return;
+      }
+      window.open(json.data.url, "_blank", "noopener,noreferrer");
+    } catch {
+      setNotice(t("scan.viewSourceError"));
+    }
+  };
+
   const handleZReportMenuAction = (summary: ZReportCashflowSummary, action: CashflowMenuAction) => {
     const docId = summary.documentId;
     switch (action) {
+      case "viewSource":
+        void openZSourceDocument(docId);
+        break;
       case "edit":
         router.push(`/finance/register?edit=${encodeURIComponent(docId)}`);
         break;

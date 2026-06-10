@@ -40,7 +40,7 @@ export function ScanSupplierPanel({ ocrName, onLinked }: Props) {
     setLoadingSuggestions(true);
     try {
       const res = await fetch(
-        `/api/ocr/supplier-suggestions?q=${encodeURIComponent(ocrName)}`,
+        `/api/document-scan/supplier-suggestions?q=${encodeURIComponent(ocrName)}`,
         { credentials: "same-origin" },
       );
       const json = (await res.json()) as { ok: boolean; data?: SupplierSuggestion[] };
@@ -72,11 +72,11 @@ export function ScanSupplierPanel({ ocrName, onLinked }: Props) {
       });
       const json = (await res.json()) as { ok: boolean; data?: { id: string; name: string }; error?: string };
       if (!json.ok || !json.data) throw new Error(json.error ?? "failed");
-      await fetch("/api/ocr/supplier-link", {
+      await fetch("/api/document-scan/supplier-link", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "same-origin",
-        body: JSON.stringify({ supplierId: json.data.id, ocrName }),
+        body: JSON.stringify({ supplierId: json.data.id, scannedName: ocrName }),
       });
       setCreateOpen(false);
       setToast(t("scan.supplierAddedToast"));
@@ -91,11 +91,11 @@ export function ScanSupplierPanel({ ocrName, onLinked }: Props) {
   const linkExisting = async (s: SupplierSuggestion) => {
     setLinking(true);
     try {
-      const res = await fetch("/api/ocr/supplier-link", {
+      const res = await fetch("/api/document-scan/supplier-link", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "same-origin",
-        body: JSON.stringify({ supplierId: s.id, ocrName }),
+        body: JSON.stringify({ supplierId: s.id, scannedName: ocrName }),
       });
       const json = (await res.json()) as { ok: boolean; data?: { id: string; name: string }; error?: string };
       if (!json.ok || !json.data) throw new Error(json.error ?? "failed");

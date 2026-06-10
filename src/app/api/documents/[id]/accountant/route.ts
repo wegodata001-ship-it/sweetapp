@@ -45,11 +45,18 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
     if (!noop) {
       await prismaAny.financialDocument.update({
         where: { id },
-        data: {
-          sentToCpa: body.sent,
-          sentToCpaAt: body.sent ? new Date() : null,
-          sentToCpaById: body.sent ? session.sub : null,
-        },
+        data: body.sent
+          ? {
+              sentToCpa: true,
+              sentToCpaAt: new Date(),
+              sentToCpaById: session.sub,
+            }
+          : {
+              sentToCpa: false,
+              sentToCpaAt: null,
+              sentToCpaById: null,
+              sentToCpaEmail: null,
+            },
       });
 
       await prismaAny.accountantTransferLog.create({

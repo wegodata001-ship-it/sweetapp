@@ -1,7 +1,7 @@
 import type { IncomeExpensePayload } from "@/lib/finance/document-payload";
 import { parseNum } from "@/lib/format-shekel";
 import { prisma } from "@/lib/prisma";
-import { stringSimilarity } from "@/lib/ocr/similarity";
+import { stringSimilarity } from "@/lib/document-scan/similarity";
 
 /** שומר / מעדכן מחירון ספק מהוצאה (OCR-ready). */
 export async function recordSupplierPriceHistoryFromExpense(ie: IncomeExpensePayload): Promise<void> {

@@ -23,6 +23,7 @@ import {
 
 export type CashflowMenuAction =
   | "view"
+  | "viewSource"
   | "edit"
   | "pdf"
   | "print"
@@ -46,6 +47,7 @@ type Props = {
   canView?: boolean;
   canAddPayment?: boolean;
   canGenerateDocument?: boolean;
+  canViewSource?: boolean;
   /** דוח Z — תפריט מצומצם */
   variant?: "default" | "zReport";
 };
@@ -64,6 +66,7 @@ export function CashflowRowActionsMenu({
   canView = true,
   canAddPayment = true,
   canGenerateDocument = true,
+  canViewSource = false,
   variant = "default",
 }: Props) {
   const { t, dir } = useI18n();
@@ -78,6 +81,7 @@ export function CashflowRowActionsMenu({
   const items: MenuItem[] =
     variant === "zReport"
       ? [
+          { id: "viewSource", icon: Eye, labelKey: "cashflow.menuViewSource", disabled: !canViewSource },
           { id: "pdf", icon: FileText, labelKey: "cashflow.menuPdf", disabled: pdfBusy },
           { id: "print", icon: Printer, labelKey: "cashflow.menuPrint", disabled: pdfBusy },
           { id: "edit", icon: Pencil, labelKey: "cashflow.menuEdit" },

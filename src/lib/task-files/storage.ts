@@ -1,5 +1,6 @@
-import { getPublicStorageUrl, getSupabaseServiceClient } from "@/lib/supabase/server";
-import { attachmentsBucket, companyStorageSlug, reportsBucket } from "@/lib/pdf/constants";
+import { createSignedStorageUrl, getSupabaseServiceClient } from "@/lib/supabase/server";
+import { assertBucketExists, normalizeStorageError, reportsBucketName } from "@/lib/storage/buckets";
+import { companyStorageSlug, reportsBucket } from "@/lib/pdf/constants";
 
 /**
  * MIME types accepted for task-group file uploads.
@@ -46,12 +47,9 @@ export function safeStorageFileName(fileName: string): string {
 }
 
 /**
- * Upload a task-group attachment to Supabase Storage.
+ * Upload a task-group attachment to Supabase Storage (wego-reports).
  *
  * Layout: `<bucket>/task-files/<companySlug>/<groupId>/<timestamp>-<safeName>`
- *
- * Returns null when Supabase isn't configured so the caller can fall back to
- * an error response.
  */
 export async function uploadTaskFile(input: {
   buffer: Buffer;
@@ -62,13 +60,12 @@ export async function uploadTaskFile(input: {
   const supabase = getSupabaseServiceClient();
   if (!supabase) return null;
 
-  let bucket = "";
+  const bucket = reportsBucket();
   try {
-    bucket = attachmentsBucket() || reportsBucket();
+    await assertBucketExists(bucket);
   } catch {
     return null;
   }
-  if (!bucket) return null;
 
   const safe = safeStorageFileName(input.fileName);
   const path = `task-files/${companyStorageSlug()}/${input.groupId}/${Date.now()}-${safe}`;
@@ -80,10 +77,10 @@ export async function uploadTaskFile(input: {
       upsert: false,
     });
     if (error) {
-      console.error("[uploadTaskFile] supabase error", error.message);
+      console.error("[uploadTaskFile] supabase error", normalizeStorageError(error.message));
       return null;
     }
-    const url = getPublicStorageUrl(bucket, path);
+    const url = await createSignedStorageUrl(bucket, path, 3600);
     return url ? { url, path, bucket } : null;
   } catch (e) {
     console.error(
@@ -102,13 +99,7 @@ export async function deleteTaskFileFromStorage(storagePath: string): Promise<vo
   if (!storagePath) return;
   const supabase = getSupabaseServiceClient();
   if (!supabase) return;
-  let bucket = "";
-  try {
-    bucket = attachmentsBucket() || reportsBucket();
-  } catch {
-    return;
-  }
-  if (!bucket) return;
+  const bucket = reportsBucketName();
   try {
     await supabase.storage.from(bucket).remove([storagePath]);
   } catch (e) {

@@ -8,21 +8,20 @@ export const PDF_MARGIN = 40;
 export const CONTENT_W = PDF_PAGE_W - PDF_MARGIN * 2;
 
 export const C = {
-  text: rgb(15 / 255, 23 / 255, 42 / 255),
+  navy: rgb(3 / 255, 20 / 255, 47 / 255),
+  gold: rgb(212 / 255, 175 / 255, 55 / 255),
+  grayBg: rgb(243 / 255, 244 / 255, 246 / 255),
+  text: rgb(3 / 255, 20 / 255, 47 / 255),
   muted: rgb(71 / 255, 85 / 255, 105 / 255),
   white: rgb(1, 1, 1),
-  cardBg: rgb(248 / 255, 250 / 255, 252 / 255),
+  cardBg: rgb(243 / 255, 244 / 255, 246 / 255),
   cardBorder: rgb(226 / 255, 232 / 255, 240 / 255),
-  gold: rgb(212 / 255, 175 / 255, 55 / 255),
-  tableHeader: rgb(15 / 255, 23 / 255, 42 / 255),
+  tableHeader: rgb(3 / 255, 20 / 255, 47 / 255),
   zebraA: rgb(1, 1, 1),
   zebraB: rgb(248 / 255, 250 / 255, 252 / 255),
-  summaryNetBg: rgb(241 / 255, 245 / 255, 249 / 255),
-  summaryVatBg: rgb(234 / 255, 88 / 255, 12 / 255),
-  summaryTotalBg: rgb(16 / 255, 185 / 255, 129 / 255),
-  danger: rgb(220 / 255, 38 / 255, 38 / 255),
-  dangerBg: rgb(254 / 255, 242 / 255, 242 / 255),
-  footerLine: rgb(226 / 255, 232 / 255, 240 / 255),
+  danger: rgb(3 / 255, 20 / 255, 47 / 255),
+  dangerBg: rgb(243 / 255, 244 / 255, 246 / 255),
+  footerLine: rgb(212 / 255, 175 / 255, 55 / 255),
 };
 
 export function drawRtlText(
@@ -83,47 +82,67 @@ export function drawCard(
   });
 }
 
+export type HeaderMetaField = { label: string; value: string };
+
+function parseMetaFields(params: {
+  metaFields?: HeaderMetaField[];
+  metaLines?: string[];
+}): HeaderMetaField[] {
+  if (params.metaFields?.length) return params.metaFields;
+  return (params.metaLines ?? []).map((line) => {
+    const idx = line.indexOf(":");
+    if (idx > 0) {
+      return { label: line.slice(0, idx).trim(), value: line.slice(idx + 1).trim() };
+    }
+    return { label: "", value: line };
+  });
+}
+
 export function drawHeader(
   page: PDFPage,
   fonts: { he: PDFFont; heBold: PDFFont; enBold: PDFFont },
-  params: { reportTitleHe: string; metaLines: string[] },
+  params: { reportTitleHe: string; metaFields?: HeaderMetaField[]; metaLines?: string[] },
 ): number {
   const top = PDF_PAGE_H - PDF_MARGIN;
-  const bandH = 108;
+  const bandH = 92;
   const yBandBottom = top - bandH;
+  const fields = parseMetaFields(params);
 
   page.drawRectangle({
     x: PDF_MARGIN,
     y: yBandBottom,
     width: CONTENT_W,
     height: bandH,
-    color: C.white,
-    borderColor: C.gold,
-    borderWidth: 2,
+    color: C.grayBg,
+  });
+  page.drawRectangle({
+    x: PDF_MARGIN,
+    y: yBandBottom,
+    width: CONTENT_W,
+    height: 2,
+    color: C.gold,
   });
 
-  const metaW = 210;
-  const metaPad = 14;
-  const metaX = PDF_MARGIN + 14;
-  const metaInnerH = bandH - 28;
-  const metaY = yBandBottom + 14;
-  drawCard(page, metaX, metaY, metaW, metaInnerH, C.cardBg, C.cardBorder);
+  const titleRight = PDF_MARGIN + CONTENT_W - 18;
+  const brand = "WEGO ERP";
+  const brandW = fonts.enBold.widthOfTextAtSize(brand, 12);
+  drawLtrText(page, fonts.enBold, brand, titleRight - brandW, yBandBottom + bandH - 24, 12, C.navy);
+  drawRtlText(page, fonts.heBold, params.reportTitleHe, titleRight, yBandBottom + bandH - 46, 18, C.navy);
 
-  let my = metaY + metaInnerH - metaPad - 11;
-  const metaRight = metaX + metaW - metaPad;
-  for (const line of params.metaLines) {
-    drawRtlText(page, fonts.he, line, metaRight, my, 10, C.text);
-    my -= 16;
+  const metaW = 250;
+  const metaX = PDF_MARGIN + 18;
+  const labelRight = metaX + metaW - 12;
+  const valueRight = labelRight - 88;
+  let my = yBandBottom + bandH - 24;
+  for (const field of fields) {
+    if (field.label) {
+      drawRtlText(page, fonts.heBold, field.label, labelRight, my, 9, C.muted);
+    }
+    drawRtlText(page, fonts.he, field.value, valueRight, my, 9, C.text);
+    my -= 15;
   }
 
-  const brand = "WEGO BUSINESS";
-  const bw = fonts.enBold.widthOfTextAtSize(brand, 9);
-  drawLtrText(page, fonts.enBold, brand, PDF_MARGIN + CONTENT_W - 14 - bw, yBandBottom + bandH - 26, 9, C.muted);
-  const titleRight = PDF_MARGIN + CONTENT_W - 14;
-  drawRtlText(page, fonts.heBold, params.reportTitleHe, titleRight, yBandBottom + bandH - 48, 22, C.text);
-  drawRtlText(page, fonts.he, "מסמך פיננסי · WEGO ERP", titleRight, yBandBottom + bandH - 74, 11, C.muted);
-
-  return yBandBottom - 14;
+  return yBandBottom - 16;
 }
 
 /** כרטיס סעיף: כותרת + שורות תווית | ערך (RTL) */
@@ -211,44 +230,44 @@ export function drawDataTable(
   return yBottom - 12;
 }
 
-export function drawSummaryBoxes(
+export function drawSummaryLines(
   page: PDFPage,
   fonts: { he: PDFFont; bold: PDFFont },
-  items: { label: string; amount: string; bg: typeof C.text; fg: typeof C.text }[],
+  items: { label: string; amount: string; emphasize?: boolean }[],
   x: number,
   yTop: number,
   width: number,
 ): number {
-  const gap = 12;
-  const n = items.length;
-  const boxW = (width - gap * (n - 1)) / n;
-  const boxH = 76;
-  const yBottom = yTop - boxH;
+  const rowH = 22;
+  const padTop = 10;
+  const padBottom = 8;
+  const blockH = padTop + 1 + items.length * rowH + 1 + padBottom;
+  const yBottom = yTop - blockH;
+  const rightEdge = x + width - 18;
+  const lineLeft = x + width * 0.52;
+  const amountRight = x + width * 0.38;
 
-  items.forEach((it, i) => {
-    const bx = x + i * (boxW + gap);
-    page.drawRectangle({
-      x: bx,
-      y: yBottom,
-      width: boxW,
-      height: boxH,
-      color: it.bg,
-      borderColor: C.cardBorder,
-      borderWidth: 1,
+  const drawRule = (ruleY: number) => {
+    page.drawLine({
+      start: { x: lineLeft, y: ruleY },
+      end: { x: rightEdge, y: ruleY },
+      thickness: 0.75,
+      color: C.gold,
     });
-    drawRtlText(page, fonts.he, it.label, bx + boxW - 16, yBottom + boxH - 24, 10, it.fg);
-    const amt = it.amount;
-    // סכומים תמיד ב־`he` (VF עם ספרות + ₪). `bold` הוא Noto עברי צר וללא ספרות ASCII → □
-    const tw = fonts.he.widthOfTextAtSize(amt, 17);
-    page.drawText(amt, {
-      x: bx + boxW - 16 - tw,
-      y: yBottom + 20,
-      size: 17,
-      font: fonts.he,
-      color: it.fg,
-    });
-  });
-  return yBottom - 18;
+  };
+
+  drawRule(yTop - padTop);
+  let cy = yTop - padTop - 16;
+  for (const item of items) {
+    const fg = item.emphasize ? C.navy : C.text;
+    const size = item.emphasize ? 11 : 10;
+    drawRtlText(page, item.emphasize ? fonts.bold : fonts.he, item.label, rightEdge, cy, size, fg);
+    drawAmountInCell(page, fonts.he, item.amount, amountRight, cy, size, fg);
+    cy -= rowH;
+  }
+  drawRule(cy + 10);
+
+  return yBottom - 14;
 }
 
 export function drawTwoColPaymentTable(
@@ -311,16 +330,20 @@ export function drawOpenBalanceBox(
   return yb - 14;
 }
 
-export function drawFooter(page: PDFPage, fonts: { en: PDFFont }) {
-  const lineY = PDF_MARGIN + 44;
+export function drawFooter(page: PDFPage, fonts: { en: PDFFont; enBold?: PDFFont }) {
+  const lineY = PDF_MARGIN + 36;
   page.drawLine({
     start: { x: PDF_MARGIN, y: lineY },
     end: { x: PDF_PAGE_W - PDF_MARGIN, y: lineY },
-    thickness: 1,
+    thickness: 0.75,
     color: C.footerLine,
   });
-  drawLtrText(page, fonts.en, "Generated by WEGO ERP", PDF_MARGIN, PDF_MARGIN + 22, 9, C.muted);
-  const site = process.env.WEGO_SITE_URL?.trim() || "www.wegobusiness.com";
-  const sw = fonts.en.widthOfTextAtSize(site, 9);
-  drawLtrText(page, fonts.en, site, PDF_PAGE_W - PDF_MARGIN - sw, PDF_MARGIN + 22, 9, C.muted);
+  const brandFont = fonts.enBold ?? fonts.en;
+  const brand = "WEGO ERP";
+  const brandW = brandFont.widthOfTextAtSize(brand, 8);
+  const centerX = PDF_PAGE_W / 2;
+  drawLtrText(page, brandFont, brand, centerX - brandW / 2, PDF_MARGIN + 18, 8, C.navy);
+  const tagline = "Financial Management System";
+  const tagW = fonts.en.widthOfTextAtSize(tagline, 7);
+  drawLtrText(page, fonts.en, tagline, centerX - tagW / 2, PDF_MARGIN + 6, 7, C.muted);
 }

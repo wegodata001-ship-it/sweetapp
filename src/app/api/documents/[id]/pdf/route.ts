@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { requireDb } from "@/lib/api-route";
 import { getSessionFromCookie } from "@/lib/auth/get-session";
 import { runDocumentPdfJob } from "@/lib/pdf/run-document-pdf-job";
+import { resolveReportPdfUrl } from "@/lib/storage/report-access";
 
 export const dynamic = "force-dynamic";
 
@@ -17,10 +18,11 @@ async function resolvePdfStatus(documentId: string): Promise<{
   const report = await prisma.generatedReport.findFirst({
     where: { relatedId: documentId },
     orderBy: { createdAt: "desc" },
-    select: { id: true, publicUrl: true },
+    select: { id: true, filePath: true, publicUrl: true },
   });
-  if (report?.publicUrl) {
-    return { status: "ready", pdfUrl: report.publicUrl, reportId: report.id };
+  const pdfUrl = await resolveReportPdfUrl(report);
+  if (pdfUrl) {
+    return { status: "ready", pdfUrl, reportId: report!.id };
   }
 
   const doc = await prisma.financialDocument.findUnique({

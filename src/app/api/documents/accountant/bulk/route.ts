@@ -50,11 +50,18 @@ export async function POST(req: NextRequest) {
 
     await prismaAny.financialDocument.updateMany({
       where: { id: { in: changeIds } },
-      data: {
-        sentToCpa: sent,
-        sentToCpaAt: sent ? new Date() : null,
-        sentToCpaById: sent ? session.sub : null,
-      },
+      data: sent
+        ? {
+            sentToCpa: true,
+            sentToCpaAt: new Date(),
+            sentToCpaById: session.sub,
+          }
+        : {
+            sentToCpa: false,
+            sentToCpaAt: null,
+            sentToCpaById: null,
+            sentToCpaEmail: null,
+          },
     });
 
     await prismaAny.accountantTransferLog.createMany({

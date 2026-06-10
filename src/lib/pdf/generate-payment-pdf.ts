@@ -54,7 +54,7 @@ export async function generatePaymentPdfBytes(paymentId: string): Promise<Uint8A
     CONTENT_W,
   );
 
-  drawFooter(page, { en: fonts.en });
+  drawFooter(page, { en: fonts.en, enBold: fonts.enBold });
   return pdfDoc.save();
 }
 
