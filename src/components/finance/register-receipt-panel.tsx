@@ -75,9 +75,9 @@ async function fetchSignedViewUrl(params: {
 
   });
 
-  const parsed = await parseApiJson<{ ok?: boolean; data?: { url: string }; error?: string }>(res);
-
-  return parsed.ok && parsed.data?.url ? parsed.data.url : null;
+  const parsed = await parseApiJson<{ ok: boolean; data?: { url: string }; error?: string }>(res);
+  if (!parsed.ok || !parsed.data.ok || !parsed.data.data?.url) return null;
+  return parsed.data.data.url;
 
 }
 
@@ -140,51 +140,35 @@ export function RegisterReceiptPanel({
       });
 
       const parsed = await parseApiJson<{
-
-        ok?: boolean;
-
+        ok: boolean;
         data?: {
-
           fileName: string;
-
           fileType: string;
-
           storageBucket: string;
-
           storagePath: string;
-
           viewUrl: string | null;
-
         };
-
         error?: string;
-
       }>(res);
 
-      if (!parsed.ok || !parsed.data) {
-
+      if (!parsed.ok) {
         setUploadError(parsed.error ?? t("scan.attachError"));
-
         return;
-
+      }
+      const body = parsed.data;
+      if (!body.ok || !body.data) {
+        setUploadError(body.error ?? t("scan.attachError"));
+        return;
       }
 
       onChange({
-
         ...form,
-
-        receiptFileUrl: parsed.data.viewUrl,
-
-        receiptFileName: parsed.data.fileName,
-
-        receiptStoragePath: parsed.data.storagePath,
-
-        receiptStorageBucket: parsed.data.storageBucket,
-
-        receiptMimeType: parsed.data.fileType,
-
+        receiptFileUrl: body.data.viewUrl,
+        receiptFileName: body.data.fileName,
+        receiptStoragePath: body.data.storagePath,
+        receiptStorageBucket: body.data.storageBucket,
+        receiptMimeType: body.data.fileType,
         ocrAutoFilled: false,
-
       });
 
     } catch {

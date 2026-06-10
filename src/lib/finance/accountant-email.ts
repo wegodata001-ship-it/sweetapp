@@ -157,9 +157,13 @@ export async function sendAccountantDocumentsEmail(params: {
   const zipped = shouldZipAttachments(attachments);
   const attachmentMode: "files" | "zip" = zipped ? "zip" : "files";
 
-  const emailAttachments: { filename: string; content: Buffer }[] = zipped
-    ? [await zipDocumentAttachments(attachments)]
-    : attachments.map((file) => ({ filename: file.fileName, content: file.buffer }));
+  let emailAttachments: { filename: string; content: Buffer }[];
+  if (zipped) {
+    const zip = await zipDocumentAttachments(attachments);
+    emailAttachments = [{ filename: zip.fileName, content: zip.buffer }];
+  } else {
+    emailAttachments = attachments.map((file) => ({ filename: file.fileName, content: file.buffer }));
+  }
 
   const subject = params.subject?.trim() || DEFAULT_SUBJECT;
   const html = buildEmailHtml({

@@ -33,6 +33,7 @@ import { getSessionFromCookie } from "@/lib/auth/get-session";
 import { logActivity } from "@/lib/activity-log";
 import { archiveSourceDocumentForFinancialDoc } from "@/lib/finance/source-documents";
 import { getAccountantRecipientEmail } from "@/lib/finance/accountant-config";
+import { parseNum } from "@/lib/format-shekel";
 import type { Prisma } from "@prisma/client";
 
 export const dynamic = "force-dynamic";

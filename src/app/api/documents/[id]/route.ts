@@ -32,6 +32,7 @@ import { requireDb } from "@/lib/api-route";
 import { getSessionFromCookie } from "@/lib/auth/get-session";
 import { logActivity } from "@/lib/activity-log";
 import { parseNum } from "@/lib/format-shekel";
+import { prismaDocToFinanceRow } from "@/lib/finance/map-document";
 import { getSupabaseServiceClient } from "@/lib/supabase/server";
 import { bucketForStoragePath } from "@/lib/pdf/constants";
 import type { Prisma } from "@prisma/client";

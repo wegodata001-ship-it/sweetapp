@@ -1,3 +1,5 @@
+import sharp from "sharp";
+
 const COMPRESS_THRESHOLD_BYTES = 1024 * 1024; // 1MB
 const TARGET_MIN_BYTES = 300 * 1024; // 300KB
 const TARGET_MAX_BYTES = 900 * 1024; // 900KB
@@ -12,11 +14,7 @@ function isJpegMime(mimeType: string): boolean {
 }
 
 /** דחיסה אוטומטית ליעד 300KB–900KB */
-async function compressImageToTarget(
-  sharpMod: typeof import("sharp"),
-  input: Buffer,
-): Promise<Buffer> {
-  const sharp = sharpMod.default;
+async function compressImageToTarget(input: Buffer): Promise<Buffer> {
   let quality = 85;
   let out = await sharp(input).jpeg({ quality, mozjpeg: true }).toBuffer();
 
@@ -50,8 +48,6 @@ export async function preprocessImageForScan(
   mimeType: string,
 ): Promise<PreprocessedImage> {
   const start = Date.now();
-  const sharpMod = await import("sharp");
-  const sharp = sharpMod.default;
   const before = buffer.length;
 
   const meta = await sharp(buffer).metadata();
@@ -81,7 +77,7 @@ export async function preprocessImageForScan(
   }
 
   if (out.length > COMPRESS_THRESHOLD_BYTES) {
-    const compressed = await compressImageToTarget(sharpMod, out);
+    const compressed = await compressImageToTarget(out);
     console.log("OCR_PREPROCESS_MS", Date.now() - start, {
       before,
       after: compressed.length,
