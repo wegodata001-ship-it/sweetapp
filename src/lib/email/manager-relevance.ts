@@ -22,9 +22,16 @@ export async function isManagerNotificationRelevant(
   if (manager.role === "SUPER_ADMIN") {
     return [
       "SHIFT_LATE",
+      "CLOCK_IN_LATE",
       "TASK_COMPLETED",
+      "TASK_OVERDUE",
+      "TASK_LATE",
       "CHECK_DEPOSIT",
+      "CHECK_DUE",
+      "CHECK_DEPOSITED",
+      "CHECK_BOUNCED",
       "FUTURE_ORDER",
+      "CASHFLOW_SHORTAGE",
       "SYSTEM_ALERT",
       "NEW_UPDATE",
       "MISSED_CLOCK_IN",
@@ -38,9 +45,16 @@ export async function isManagerNotificationRelevant(
 
   switch (type) {
     case "SHIFT_LATE":
+    case "CLOCK_IN_LATE":
     case "TASK_COMPLETED":
+    case "TASK_OVERDUE":
+    case "TASK_LATE":
     case "CHECK_DEPOSIT":
+    case "CHECK_DUE":
+    case "CHECK_DEPOSITED":
+    case "CHECK_BOUNCED":
     case "FUTURE_ORDER":
+    case "CASHFLOW_SHORTAGE":
       return true;
     case "SYSTEM_ALERT":
       return true;

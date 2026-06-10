@@ -32,6 +32,7 @@ import { requireDb } from "@/lib/api-route";
 import { getSessionFromCookie } from "@/lib/auth/get-session";
 import { logActivity } from "@/lib/activity-log";
 import { parseNum } from "@/lib/format-shekel";
+import { getAccountantRecipientEmail } from "@/lib/finance/accountant-config";
 import type { Prisma } from "@prisma/client";
 
 export const dynamic = "force-dynamic";
@@ -69,6 +70,7 @@ export async function GET(req: NextRequest) {
       ok: true,
       data,
       counts: { total: totalCount, sent: sentCount, notSent: notSentCount },
+      accountantRecipientEmail: getAccountantRecipientEmail(),
     });
   } catch (e) {
     return NextResponse.json(

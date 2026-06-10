@@ -61,6 +61,14 @@ function prefsAllowImportance(
       return prefs.emailNotifyLate;
     case "NEW_UPDATE":
       return prefs.emailNotifyUpdates;
+    case "CHECK_DEPOSIT":
+    case "CHECK_DUE":
+    case "CHECK_DEPOSITED":
+    case "CHECK_BOUNCED":
+    case "CASHFLOW_SHORTAGE":
+    case "FUTURE_ORDER":
+    case "SYSTEM_ALERT":
+      return true;
     default:
       return true;
   }

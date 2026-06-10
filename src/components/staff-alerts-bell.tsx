@@ -58,6 +58,7 @@ function iconForType(type: string): LucideIcon {
     case "CHECK_DEPOSIT":
     case "CHECK_DUE":
     case "CHECK_DEPOSITED":
+    case "CASHFLOW_SHORTAGE":
       return Banknote;
     case "FUTURE_ORDER":
     case "NEW_ORDER":

@@ -25,7 +25,7 @@ export function titleForReportType(type: ReportTypeValue, extra?: string): strin
     case REPORT_TYPES.Z_REPORT:
       return extra ? `דוח Z — ${extra}` : "דוח Z";
     case REPORT_TYPES.CASHFLOW:
-      return extra ? `תזרים — ${extra}` : "דוח תזרים מזומנים";
+      return extra ? `תנועה כספית — ${extra}` : "דוח תנועות כספיות";
     case REPORT_TYPES.PAYMENT:
       return extra ? `תשלום — ${extra}` : "קבלת תשלום";
     default:

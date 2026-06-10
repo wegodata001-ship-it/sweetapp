@@ -1,5 +1,5 @@
 import { prisma, prismaAny } from "@/lib/prisma";
-import { isDeliverableEmail } from "@/lib/email/config";
+import { getEmailConfig, isDeliverableEmail } from "@/lib/email/config";
 import { resolveEmailImportance } from "@/lib/email/importance";
 import { evaluateNotificationEmail } from "@/lib/email/rules";
 import { queueEmailBatch, shouldBatchEmail } from "@/lib/email/batching";
@@ -9,9 +9,17 @@ import {
 } from "@/lib/email/notification-bridge";
 import { sendSystemEmailAwaitable } from "@/lib/email/send";
 import { getUserEmailPreferences } from "@/lib/email/preferences";
-import { logEmailError } from "@/lib/email/audit";
+import { logEmailError, logEmailFailed, logEmailSending, logEmailSkipped } from "@/lib/email/audit";
+import { resolveOutboundEmail } from "@/lib/email/test-config";
 import type { NotificationPriorityLevel } from "@/lib/notifications/priority";
 import { isManagerRole } from "@/lib/notifications/me-inbox";
+
+export type ProcessNotificationEmailOptions = {
+  /** דילוג על אצווה — שליחה מיידית (retry / cron) */
+  forceImmediate?: boolean;
+  skipDedupe?: boolean;
+  isRetry?: boolean;
+};
 
 async function patchNotificationEmailState(
   notificationId: string,
@@ -27,15 +35,46 @@ async function patchNotificationEmailState(
       where: { id: notificationId },
       data: patch,
     });
-  } catch {
-    /* עמודות עדיין לא במיגרציה */
+  } catch (e) {
+    logEmailError({
+      step: "patch_notification",
+      notificationId,
+      error: String(e),
+    });
   }
 }
 
 export async function processNotificationEmail(
   payload: NotificationEmailPayload,
   priority?: NotificationPriorityLevel | string | null,
+  options: ProcessNotificationEmailOptions = {},
 ): Promise<void> {
+  const cfg = getEmailConfig();
+
+  logEmailSending({
+    notificationId: payload.notificationId,
+    userId: payload.recipientUserId,
+    type: payload.type,
+    subject: payload.title,
+    provider: "resend",
+    status: "PENDING",
+    isRetry: options.isRetry ?? false,
+  });
+
+  if (!cfg.enabled) {
+    await patchNotificationEmailState(payload.notificationId, {
+      emailStatus: "failed",
+      emailSkippedReason: "RESEND_API_KEY missing",
+    });
+    logEmailFailed({
+      notificationId: payload.notificationId,
+      userId: payload.recipientUserId,
+      reason: "RESEND_API_KEY missing",
+      provider: "resend",
+    });
+    return;
+  }
+
   const user = await prisma.user.findUnique({
     where: { id: payload.recipientUserId },
     select: { id: true, email: true, role: true, isActive: true },
@@ -46,13 +85,25 @@ export async function processNotificationEmail(
       emailStatus: "skipped",
       emailSkippedReason: "user_inactive",
     });
+    logEmailSkipped({
+      notificationId: payload.notificationId,
+      userId: payload.recipientUserId,
+      reason: "user_inactive",
+    });
     return;
   }
 
-  if (!isDeliverableEmail(user.email)) {
+  const outbound = resolveOutboundEmail(user.email);
+  if (!outbound || !isDeliverableEmail(outbound)) {
     await patchNotificationEmailState(payload.notificationId, {
       emailStatus: "skipped",
       emailSkippedReason: "no_deliverable_email",
+    });
+    logEmailSkipped({
+      notificationId: payload.notificationId,
+      userId: user.id,
+      email: user.email,
+      reason: "no_deliverable_email",
     });
     return;
   }
@@ -77,18 +128,42 @@ export async function processNotificationEmail(
   );
 
   if (!decision.send) {
+    if (decision.reason === "quiet_hours") {
+      await patchNotificationEmailState(payload.notificationId, {
+        emailImportance: decision.importance,
+        emailStatus: "pending",
+        emailSkippedReason: "quiet_hours",
+      });
+      logEmailSkipped({
+        notificationId: payload.notificationId,
+        userId: user.id,
+        to: outbound,
+        reason: "quiet_hours — יישלח מחדש אוטומטית",
+      });
+      return;
+    }
+
     await patchNotificationEmailState(payload.notificationId, {
       emailImportance: decision.importance,
       emailStatus: "skipped",
       emailSkippedReason: decision.reason,
     });
+    logEmailSkipped({
+      notificationId: payload.notificationId,
+      userId: user.id,
+      to: outbound,
+      reason: decision.reason,
+    });
     return;
   }
 
   const prefs = await getUserEmailPreferences(user.id);
-  const to = user.email.trim().toLowerCase();
+  const to = outbound;
 
-  if (shouldBatchEmail(decision.importance, prefs.emailMode, payload.type)) {
+  if (
+    !options.forceImmediate &&
+    shouldBatchEmail(decision.importance, prefs.emailMode, payload.type)
+  ) {
     await patchNotificationEmailState(payload.notificationId, {
       emailImportance: decision.importance,
       emailStatus: "queued",
@@ -106,17 +181,39 @@ export async function processNotificationEmail(
         importance: decision.importance,
       },
     });
+    logEmailSending({
+      notificationId: payload.notificationId,
+      userId: user.id,
+      to,
+      status: "PENDING",
+      reason: "queued_for_digest",
+    });
     return;
   }
 
   const built = await buildEmailForNotification(payload, to);
   if (!built) {
     await patchNotificationEmailState(payload.notificationId, {
-      emailStatus: "skipped",
+      emailStatus: "failed",
       emailSkippedReason: "no_template",
+    });
+    logEmailFailed({
+      notificationId: payload.notificationId,
+      userId: user.id,
+      to,
+      reason: "no_template",
     });
     return;
   }
+
+  logEmailSending({
+    notificationId: payload.notificationId,
+    userId: user.id,
+    to,
+    subject: built.subject,
+    type: payload.type,
+    provider: "resend",
+  });
 
   const result = await sendSystemEmailAwaitable({
     to,
@@ -126,6 +223,7 @@ export async function processNotificationEmail(
     userId: user.id,
     notificationId: payload.notificationId,
     type: payload.type,
+    skipDedupe: options.skipDedupe ?? false,
   });
 
   await patchNotificationEmailState(payload.notificationId, {
@@ -136,11 +234,15 @@ export async function processNotificationEmail(
   });
 
   if (!result.ok) {
-    logEmailError({
+    logEmailFailed({
       notificationId: payload.notificationId,
       recipientUserId: user.id,
+      to,
+      subject: built.subject,
+      type: payload.type,
       role: isManagerRole(user.role) ? "admin" : "employee",
-      error: result.error,
+      reason: result.error ?? "send_failed",
+      logId: result.logId,
     });
   }
 }
@@ -153,6 +255,10 @@ export function scheduleNotificationEmail(
     logEmailError({
       notificationId: payload.notificationId,
       error: String(e),
+    });
+    void patchNotificationEmailState(payload.notificationId, {
+      emailStatus: "failed",
+      emailSkippedReason: String(e),
     });
   });
 }

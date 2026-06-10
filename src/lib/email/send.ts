@@ -7,8 +7,10 @@ import {
   logEmailError,
   logEmailFailed,
   logEmailRetry,
+  logEmailSending,
   logEmailSent,
 } from "@/lib/email/audit";
+import { resolveOutboundEmail } from "@/lib/email/test-config";
 import type { EmailSendResult, SendSystemEmailInput } from "@/lib/email/types";
 
 const MAX_ATTEMPTS = 3;
@@ -53,7 +55,13 @@ async function updateEmailLog(
   }
 }
 
-async function sendViaResend(input: SendSystemEmailInput, html: string): Promise<{ ok: true; id?: string } | { ok: false; error: string }> {
+async function sendViaResend(
+  input: SendSystemEmailInput,
+  html: string,
+): Promise<
+  | { ok: true; id?: string; providerResponse?: unknown }
+  | { ok: false; error: string; providerResponse?: unknown }
+> {
   const cfg = getEmailConfig();
   if (!cfg.enabled || !cfg.apiKey) {
     return { ok: false, error: "RESEND_API_KEY missing" };
@@ -68,17 +76,37 @@ async function sendViaResend(input: SendSystemEmailInput, html: string): Promise
   });
 
   if (result.error) {
-    return { ok: false, error: result.error.message };
+    return {
+      ok: false,
+      error: result.error.message,
+      providerResponse: result.error,
+    };
   }
-  return { ok: true, id: result.data?.id };
+  return { ok: true, id: result.data?.id, providerResponse: result.data };
 }
 
 async function sendSystemEmailAsync(input: SendSystemEmailInput): Promise<EmailSendResult> {
-  const to = input.to.trim().toLowerCase();
+  const resolved = resolveOutboundEmail(input.to) ?? input.to.trim().toLowerCase();
+  const to = resolved.trim().toLowerCase();
   if (!isDeliverableEmail(to)) {
-    logEmailFailed({ reason: "undeliverable", to, type: input.type });
+    logEmailFailed({
+      reason: "undeliverable",
+      to,
+      type: input.type,
+      notificationId: input.notificationId,
+      userId: input.userId,
+    });
     return { ok: false, error: "undeliverable email" };
   }
+
+  logEmailSending({
+    notificationId: input.notificationId,
+    userId: input.userId,
+    to,
+    subject: input.subject,
+    type: input.type,
+    provider: "resend",
+  });
 
   if (!input.skipDedupe) {
     const dup = await hasRecentEmailLog({
@@ -114,7 +142,7 @@ async function sendSystemEmailAsync(input: SendSystemEmailInput): Promise<EmailS
       await new Promise((r) => setTimeout(r, attempt * 400));
     }
 
-    const sent = await sendViaResend(input, html);
+    const sent = await sendViaResend({ ...input, to }, html);
     if (sent.ok) {
       await updateEmailLog(logId, { status: "sent", error: null, sentAt: new Date() });
       logEmailSent({
@@ -123,15 +151,39 @@ async function sendSystemEmailAsync(input: SendSystemEmailInput): Promise<EmailS
         type: input.type,
         template: input.template,
         notificationId: input.notificationId,
+        userId: input.userId,
         resendId: sent.id,
+        logId,
+        provider: "resend",
+        providerResponse: sent.providerResponse,
       });
       return { ok: true, logId, resendId: sent.id };
     }
     lastError = sent.error;
+    logEmailFailed({
+      to,
+      subject: input.subject,
+      type: input.type,
+      notificationId: input.notificationId,
+      userId: input.userId,
+      attempt,
+      reason: sent.error,
+      provider: "resend",
+      providerResponse: sent.providerResponse,
+    });
   }
 
   await updateEmailLog(logId, { status: "failed", error: lastError });
-  logEmailFailed({ to, subject: input.subject, type: input.type, error: lastError });
+  logEmailFailed({
+    to,
+    subject: input.subject,
+    type: input.type,
+    notificationId: input.notificationId,
+    userId: input.userId,
+    reason: lastError,
+    logId,
+    provider: "resend",
+  });
   return { ok: false, error: lastError, logId };
 }
 

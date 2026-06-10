@@ -30,7 +30,10 @@ export async function GET() {
       isRead: true,
       actionUrl: true,
       createdAt: true,
-      recipient: { select: { id: true, fullName: true, role: true } },
+      emailStatus: true,
+      emailSkippedReason: true,
+      emailSentAt: true,
+      recipient: { select: { id: true, fullName: true, role: true, email: true } },
     },
   });
 
@@ -48,7 +51,10 @@ export async function GET() {
       isRead: boolean;
       actionUrl: string | null;
       createdAt: Date;
-      recipient: { id: string; fullName: string | null; role: string };
+      emailStatus: string | null;
+      emailSkippedReason: string | null;
+      emailSentAt: Date | null;
+      recipient: { id: string; fullName: string | null; role: string; email: string };
     }) => ({
       id: r.id,
       type: r.type,
@@ -57,7 +63,11 @@ export async function GET() {
       priority: r.priority ?? "MEDIUM",
       recipientUserId: r.recipientUserId,
       recipientName: r.recipient.fullName,
+      recipientEmail: r.recipient.email,
       recipientRole: r.recipient.role,
+      emailStatus: r.emailStatus,
+      emailSkippedReason: r.emailSkippedReason,
+      emailSentAt: r.emailSentAt?.toISOString() ?? null,
       subjectUserId: r.subjectUserId,
       roleTarget: r.roleTarget,
       isRead: r.isRead,

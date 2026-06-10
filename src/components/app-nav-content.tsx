@@ -14,6 +14,7 @@ import {
   Package,
   PackageCheck,
   ReceiptText,
+  LineChart,
   TrendingUp,
   Truck,
   UserCircle2,
@@ -55,6 +56,12 @@ export const financeNav: NavItem[] = [
     href: "/finance/cashflow",
     permission: "cash_flow",
     icon: TrendingUp,
+  },
+  {
+    labelKey: "nav.cashflowForecast",
+    href: "/finance/cashflow-forecast",
+    permission: "cash_flow",
+    icon: LineChart,
   },
   {
     labelKey: "nav.checks",

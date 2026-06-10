@@ -59,7 +59,7 @@ export async function POST(req: NextRequest) {
       const bytes = await generateCashFlowPdfBytes(relatedId);
       const fileName = erpReportFileName(REPORT_TYPES.CASHFLOW, new Date(entry.entryDate), new Date());
       const title =
-        (entry.description?.trim() || "תנועת תזרים") +
+        (entry.description?.trim() || "תנועה כספית") +
         " · " +
         entry.entryDate.toISOString().slice(0, 10);
 

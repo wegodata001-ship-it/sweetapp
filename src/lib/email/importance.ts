@@ -46,7 +46,11 @@ export function resolveEmailImportance(params: {
       return "NORMAL";
     case "TASK_COMPLETED":
     case "CHECK_DEPOSIT":
+    case "CHECK_DUE":
+    case "CHECK_DEPOSITED":
+    case "CHECK_BOUNCED":
     case "FUTURE_ORDER":
+    case "CASHFLOW_SHORTAGE":
       if (p === "CRITICAL") return "CRITICAL";
       if (p === "HIGH") return "HIGH";
       return "NORMAL";

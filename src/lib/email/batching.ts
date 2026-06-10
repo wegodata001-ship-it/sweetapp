@@ -2,6 +2,7 @@ import { getEmailConfig } from "@/lib/email/config";
 import { sendSystemEmailAwaitable } from "@/lib/email/send";
 import { emailImportanceMeetsThreshold, type EmailImportance } from "@/lib/email/importance";
 import { prismaAny } from "@/lib/prisma";
+import { logEmailFailed, logEmailSent } from "@/lib/email/audit";
 
 const BATCH_MS = 60_000;
 
@@ -76,8 +77,22 @@ async function flushBatch(key: string): Promise<void> {
     }
   }
 
-  if (!result.ok) {
-    console.error("[EMAIL BATCH FAILED]", result.error);
+  if (result.ok) {
+    logEmailSent({
+      to: batch.email,
+      userId: batch.userId,
+      subject: `יש לך ${count} עדכונים חדשים במערכת`,
+      type: "EMAIL_DIGEST",
+      provider: "resend",
+    });
+  } else {
+    logEmailFailed({
+      to: batch.email,
+      userId: batch.userId,
+      type: "EMAIL_DIGEST",
+      reason: result.error ?? "batch_send_failed",
+      provider: "resend",
+    });
   }
 }
 
@@ -113,6 +128,6 @@ export function shouldBatchEmail(
 ): boolean {
   if (importance === "CRITICAL" || importance === "HIGH") return false;
   if (notificationType === "TASK_ASSIGNED") return false;
-  if (emailMode === "daily_digest") return true;
-  return importance === "NORMAL";
+  /** רק מצב daily_digest — לא לאגד NORMAL בזיכרון (נשבר ב-serverless) */
+  return emailMode === "daily_digest";
 }

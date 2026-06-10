@@ -15,7 +15,7 @@ import { loadInvoicePdfFonts, paymentMethodLabel, safeFilePart } from "@/lib/pdf
 
 export async function generateCashFlowPdfBytes(entryId: string): Promise<Uint8Array> {
   const entry = await prisma.cashFlowEntry.findUnique({ where: { id: entryId } });
-  if (!entry) throw new Error("תנועת תזרים לא נמצאה");
+  if (!entry) throw new Error("תנועה כספית לא נמצאה");
 
   const row = prismaCashFlowToRow(entry);
   const pdfDoc = await PDFDocument.create();
@@ -29,7 +29,7 @@ export async function generateCashFlowPdfBytes(entryId: string): Promise<Uint8Ar
     page,
     { he: fonts.he, heBold: fonts.heBold, enBold: fonts.enBold },
     {
-      reportTitleHe: "תזרים מזומנים",
+      reportTitleHe: "יומן תנועות כספיות",
       metaLines: [
         `תאריך: ${formatDateIL(entryD)}`,
         `מזהה תנועה: ${row.id.slice(0, 8)}…`,

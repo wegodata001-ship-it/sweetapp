@@ -224,6 +224,7 @@ export async function insertDirectCashFlow(params: {
 export type FinanceDocumentsResponse = {
   rows: FinanceDocumentRow[];
   counts: { total: number; sent: number; notSent: number };
+  accountantRecipientEmail: string | null;
 };
 
 export async function fetchFinanceDocuments(): Promise<FinanceDocumentRow[]> {
@@ -251,16 +252,18 @@ export async function fetchFinanceDocumentsWithCounts(params: {
       ok?: boolean;
       data?: FinanceDocumentRow[];
       counts?: { total: number; sent: number; notSent: number };
+      accountantRecipientEmail?: string | null;
     };
     if (!j.ok) {
-      return { rows: [], counts: { total: 0, sent: 0, notSent: 0 } };
+      return { rows: [], counts: { total: 0, sent: 0, notSent: 0 }, accountantRecipientEmail: null };
     }
     return {
       rows: j.data ?? [],
       counts: j.counts ?? { total: 0, sent: 0, notSent: 0 },
+      accountantRecipientEmail: j.accountantRecipientEmail ?? null,
     };
   } catch {
-    return { rows: [], counts: { total: 0, sent: 0, notSent: 0 } };
+    return { rows: [], counts: { total: 0, sent: 0, notSent: 0 }, accountantRecipientEmail: null };
   }
 }
 

@@ -27,6 +27,7 @@ function detailForAlert(alert: DashboardAlert, t: (k: string, p?: Record<string,
   if (alert.id === "pending-checks") return t("dashboard.widgetPendingChecksDetail", params);
   if (alert.id === "upcoming-orders") return t("dashboard.widgetUpcomingOrdersDetail", params);
   if (alert.id === "open-invoices") return t("dashboard.openInvoicesDetail", params);
+  if (alert.id.startsWith("cashflow-shortage-")) return alert.detail;
   if (alert.id === "inventory-shortage") {
     return t("dashboard.redesign.shortageCount", { count: alert.detail });
   }

@@ -1,6 +1,8 @@
 import { prisma } from "@/lib/prisma";
 import { normalizeExpenseType, type ExpenseType } from "@/lib/finance/expense-types";
 import { getAdminNotificationWidgets } from "@/lib/notifications/admin-widgets";
+import { buildCashflowForecast } from "@/lib/finance/cashflow-forecast/build-forecast";
+import { formatShekel } from "@/lib/format-shekel";
 import { countOpenInvoices } from "@/lib/finance/open-invoices";
 import { isSystemCleanMode } from "@/lib/system/clean-mode";
 import { ORDER_CATEGORY_DAILY, ORDER_CATEGORY_WEDDING } from "@/lib/future-orders/helpers";
@@ -583,6 +585,24 @@ async function loadSummary(locale: string): Promise<DashboardSummary> {
       href: "/finance/checks",
       titleParams: { count: notifyWidgets.pendingChecks },
     });
+  }
+
+  try {
+    const cashflowForecast = await buildCashflowForecast();
+    for (const s of cashflowForecast.shortages.slice(0, 5)) {
+      const [y, m, d] = s.date.split("-");
+      const dateLabel = y && m && d ? `${d}/${m}/${y}` : s.date;
+      push({
+        id: `cashflow-shortage-${s.id}`,
+        severity: "critical",
+        titleKey: "cashflowForecast.alertShortageTitle",
+        detail: `${dateLabel} · ${formatShekel(s.shortageAmount)}`,
+        href: "/finance/cashflow-forecast",
+        titleParams: { date: dateLabel, amount: formatShekel(s.shortageAmount) },
+      });
+    }
+  } catch {
+    /* תחזית תזרים — לא לשבור דשבורד */
   }
 
   const shortageRows = shortageProducts.map((item) => ({

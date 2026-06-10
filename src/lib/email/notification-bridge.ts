@@ -146,17 +146,54 @@ export async function buildEmailForNotification(
       };
     }
     case "CHECK_DEPOSIT":
+    case "CHECK_DUE":
+    case "CHECK_DEPOSITED":
+    case "CHECK_BOUNCED": {
+      const subjects: Record<string, string> = {
+        CHECK_DEPOSIT: "💰 יש צ'ק להפקדה",
+        CHECK_DUE: "📅 תזכורת: צ'ק מתקרב לפירעון",
+        CHECK_DEPOSITED: "✅ צ'ק הופקד",
+        CHECK_BOUNCED: "⚠️ צ'ק חזר",
+      };
       return {
         template: "check-deposit",
-        subject: "💰 יש צ'ק להפקדה",
+        subject: subjects[payload.type] ?? "💰 התראת צ'ק",
         data: {
           ...entities,
           appUrl,
           customerName: payload.message.split("·")[0]?.trim() || "לקוח",
           amount: payload.message,
           dueDate: String(m.dueDate ?? "—"),
-          status: "ממתין להפקדה",
-          actionUrl: absoluteUrl(payload.actionUrl),
+          status: payload.title,
+          actionUrl: absoluteUrl(payload.actionUrl ?? "/finance/checks"),
+        },
+      };
+    }
+    case "CASHFLOW_SHORTAGE":
+      return {
+        template: "system-alert",
+        subject: payload.title,
+        data: {
+          ...entities,
+          appUrl,
+          title: payload.title,
+          message: payload.message,
+          actionUrl: absoluteUrl(payload.actionUrl ?? "/finance/cashflow-forecast"),
+        },
+      };
+    case "TASK_OVERDUE":
+    case "TASK_LATE":
+      return {
+        template: "task-assigned",
+        subject: payload.type === "TASK_OVERDUE" ? "⚠️ משימה באיחור" : "⏰ משימה מתקרבת ליעד",
+        data: {
+          ...entities,
+          appUrl,
+          taskTitle: payload.message || payload.title,
+          managerName: "מנהל המערכת",
+          deadline: "באיחור",
+          priority: "גבוהה",
+          actionUrl: absoluteUrl(payload.actionUrl ?? "/admin/tasks"),
         },
       };
     case "FUTURE_ORDER":
@@ -199,6 +236,16 @@ export async function buildEmailForNotification(
         },
       };
     default:
-      return null;
+      return {
+        template: "system-alert",
+        subject: payload.title,
+        data: {
+          ...entities,
+          appUrl,
+          title: payload.title,
+          message: payload.message,
+          actionUrl: absoluteUrl(payload.actionUrl),
+        },
+      };
   }
 }

@@ -106,12 +106,30 @@ function formatDateTime(iso: string | null | undefined, bcp47: string): string {
   }
 }
 
+function buildSentStatusTooltip(
+  row: FinanceDocumentRow,
+  accountantEmail: string | null,
+  translate: (key: string, params?: Record<string, string>) => string,
+  locale: string,
+): string {
+  const lines = [
+    translate("archive.statusSentTooltipDate", {
+      when: formatDateTime(row.sent_to_cpa_at, locale),
+    }),
+  ];
+  if (accountantEmail) {
+    lines.push(translate("archive.statusSentTooltipTo", { email: accountantEmail }));
+  }
+  return lines.join("\n");
+}
+
 export default function FinanceArchivePage() {
   const { t, bcp47 } = useI18n();
   const [tab, setTab] = useState<(typeof TAB_OPTIONS)[number]["id"]>("pdf");
 
   const [rows, setRows] = useState<FinanceDocumentRow[]>([]);
   const [counts, setCounts] = useState<DocCounts>({ total: 0, sent: 0, notSent: 0 });
+  const [accountantRecipientEmail, setAccountantRecipientEmail] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [accountantFilter, setAccountantFilter] = useState<AccountantFilter>("all");
   const [accountantBusyIds, setAccountantBusyIds] = useState<Set<string>>(new Set());
@@ -136,9 +154,11 @@ export default function FinanceArchivePage() {
 
   const refresh = useCallback(async () => {
     setLoading(true);
-    const { rows: list, counts: c } = await fetchFinanceDocumentsWithCounts({ accountant: accountantFilter });
+    const { rows: list, counts: c, accountantRecipientEmail: recipientEmail } =
+      await fetchFinanceDocumentsWithCounts({ accountant: accountantFilter });
     setRows(list);
     setCounts(c);
+    setAccountantRecipientEmail(recipientEmail);
     setLoading(false);
   }, [accountantFilter]);
 
@@ -709,7 +729,10 @@ export default function FinanceArchivePage() {
                             </td>
                             <td className="px-4 py-3 align-top">
                               {row.sent_to_cpa ? (
-                                <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-100 px-2.5 py-1 text-[11px] font-black text-emerald-900">
+                                <span
+                                  className="inline-flex cursor-help items-center gap-1.5 rounded-full bg-emerald-100 px-2.5 py-1 text-[11px] font-black text-emerald-900"
+                                  title={buildSentStatusTooltip(row, accountantRecipientEmail, t, bcp47)}
+                                >
                                   <CheckCircle2 className="h-3.5 w-3.5" aria-hidden />
                                   {t("archive.statusSent")}
                                 </span>
@@ -872,7 +895,10 @@ export default function FinanceArchivePage() {
                             <span className="font-black text-slate-950">{row.title}</span>
                           </label>
                           {row.sent_to_cpa ? (
-                            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-black text-emerald-900">
+                            <span
+                              className="inline-flex cursor-help items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-black text-emerald-900"
+                              title={buildSentStatusTooltip(row, accountantRecipientEmail, t, bcp47)}
+                            >
                               <CheckCircle2 className="h-3 w-3" aria-hidden />
                               {t("archive.statusSent")}
                             </span>

@@ -837,8 +837,12 @@ model DynamicFormField {
 }
 
 model FinanceSettings {
-  id                 Int   @id @default(1)
-  cashOpeningBalance Float @default(0)
+  id                   Int   @id @default(1)
+  cashOpeningBalance   Float @default(0)
+  /// יתרת בנק לתחזית תזרים — ערך ידני אחד לעסק, לא מחושב מהכנסות/הוצאות
+  forecastBankBalance     Float @default(0)
+  /// הכנסות/הלוואות ידניות לתחזית — מערך JSON
+  forecastManualEntries   Json  @default("[]")
 }
 
 model User {
@@ -1242,4 +1246,5 @@ enum NotificationType {
   FUTURE_ORDER
   NEW_UPDATE
   SYSTEM_ALERT
+  CASHFLOW_SHORTAGE
 }

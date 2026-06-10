@@ -16,6 +16,9 @@ type DebugRow = {
   isRead: boolean;
   actionUrl: string | null;
   createdAt: string;
+  recipientEmail?: string;
+  emailStatus?: string | null;
+  emailSkippedReason?: string | null;
 };
 
 export default function NotificationsDebugPage() {
@@ -79,6 +82,7 @@ export default function NotificationsDebugPage() {
               <th className="px-2 py-2">נמען</th>
               <th className="px-2 py-2">תפקיד</th>
               <th className="px-2 py-2">כותרת</th>
+              <th className="px-2 py-2">מייל</th>
               <th className="px-2 py-2">נקרא</th>
             </tr>
           </thead>
@@ -96,6 +100,12 @@ export default function NotificationsDebugPage() {
                 <td className="px-2 py-2">{r.roleTarget}</td>
                 <td className="max-w-[240px] truncate px-2 py-2" title={r.message}>
                   {r.title}
+                </td>
+                <td className="px-2 py-2" title={r.emailSkippedReason ?? ""}>
+                  <span className="font-mono">{r.emailStatus ?? "—"}</span>
+                  {r.emailSkippedReason ? (
+                    <span className="block text-[10px] text-red-500">{r.emailSkippedReason}</span>
+                  ) : null}
                 </td>
                 <td className="px-2 py-2">{r.isRead ? "✓" : "●"}</td>
               </tr>

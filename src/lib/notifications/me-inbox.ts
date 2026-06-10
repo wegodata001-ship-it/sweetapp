@@ -48,6 +48,7 @@ export function sectionForNotificationType(type: string): NotificationInboxSecti
     case "CHECK_DEPOSIT":
     case "CHECK_DEPOSITED":
     case "CHECK_BOUNCED":
+    case "CASHFLOW_SHORTAGE":
       return "finance";
     case "INVENTORY_LOW":
     case "INVENTORY_COUNT_INCOMPLETE":
