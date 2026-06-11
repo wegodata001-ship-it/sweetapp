@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
-import { KeyRound } from "lucide-react";
+import Link from "next/link";
+import { KeyRound, StickyNote } from "lucide-react";
 import { useAuth } from "@/components/auth-provider";
 import { useI18n } from "@/components/i18n-provider";
 import { LanguageSwitcher } from "@/components/language-switcher";
@@ -19,8 +20,30 @@ export function SessionBar({ className }: SessionBarProps) {
   const { user, loading, logout, refresh } = useAuth();
   const { t } = useI18n();
   const [pwOpen, setPwOpen] = useState(false);
+  const [openNotesCount, setOpenNotesCount] = useState(0);
 
   const forced = Boolean(user?.mustChangePassword);
+
+  useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+    void fetch("/api/me/employee-notes?status=open&preview=1", {
+      credentials: "same-origin",
+      cache: "no-store",
+    })
+      .then((res) => res.json())
+      .then((json: { ok?: boolean; data?: { openCount?: number } }) => {
+        if (!cancelled && json.ok && json.data) {
+          setOpenNotesCount(json.data.openCount ?? 0);
+        }
+      })
+      .catch(() => {
+        /* ignore */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [user]);
 
   useEffect(() => {
     if (!forced) return;
@@ -62,6 +85,19 @@ export function SessionBar({ className }: SessionBarProps) {
       </div>
       <div className="flex flex-wrap items-center gap-3">
         <LanguageSwitcher />
+        <Link
+          href="/my-notes"
+          className="relative inline-flex min-h-[36px] items-center gap-1 rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs font-bold text-slate-700 hover:bg-slate-50"
+          title={t("nav.myNotes")}
+        >
+          <StickyNote className="h-3.5 w-3.5 text-[#c9a227]" aria-hidden />
+          <span className="hidden sm:inline">{t("nav.myNotes")}</span>
+          {openNotesCount > 0 ? (
+            <span className="absolute -top-1.5 -end-1.5 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-rose-600 px-1 text-[10px] font-black text-white">
+              {openNotesCount > 9 ? "9+" : openNotesCount}
+            </span>
+          ) : null}
+        </Link>
         <StaffAlertsBell />
         <button
           type="button"

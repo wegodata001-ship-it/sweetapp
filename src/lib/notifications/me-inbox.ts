@@ -18,6 +18,7 @@ export const EMPLOYEE_INBOX_TYPES = new Set<string>([
   "CLOCK_OUT",
   "CHECK_DEPOSITED",
   "NEW_UPDATE",
+  "PERSONAL_NOTE",
 ]);
 
 export type NotificationInboxSection =
@@ -58,7 +59,7 @@ export function sectionForNotificationType(type: string): NotificationInboxSecti
     case "FUTURE_ORDER":
       return "orders";
     case "NEW_UPDATE":
-    case "SYSTEM_ALERT":
+    case "PERSONAL_NOTE":
       return "other";
     default:
       return "other";

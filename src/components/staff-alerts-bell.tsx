@@ -9,6 +9,7 @@ import {
   Clock,
   Info,
   Megaphone,
+  StickyNote,
   UserX,
   type LucideIcon,
 } from "lucide-react";
@@ -65,6 +66,8 @@ function iconForType(type: string): LucideIcon {
       return CalendarClock;
     case "NEW_UPDATE":
       return Megaphone;
+    case "PERSONAL_NOTE":
+      return StickyNote;
     case "OVERTIME":
       return Clock;
     default:

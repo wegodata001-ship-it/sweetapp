@@ -245,6 +245,9 @@ export async function middleware(request: NextRequest) {
     if (apiPath === "/api/me/language" && request.method === "PATCH") {
       return NextResponse.next();
     }
+    if (apiPath === "/api/me/employee-notes" || apiPath.startsWith("/api/me/employee-notes/")) {
+      return NextResponse.next();
+    }
     if (apiPath === "/api/work-status/heartbeat" && request.method === "POST") {
       if (!canAccessMyTasksPage) {
         return NextResponse.json({ ok: false, error: t("toasts.noPermission") }, { status: 403 });

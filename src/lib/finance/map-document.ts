@@ -60,5 +60,7 @@ export function prismaDocToFinanceRow(row: PrismaFinancialDocumentWithCustomer):
       : null,
     created_at: row.createdAt.toISOString(),
     payload,
+    supplier_id: row.supplierId ?? null,
+    employee_id: row.employeeId ?? null,
   };
 }

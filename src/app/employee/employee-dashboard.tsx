@@ -25,6 +25,7 @@ import { EmployeeGreetingHeader } from "@/components/employee/employee-greeting-
 import { EmployeeLiveStatus } from "@/components/employee/employee-live-status";
 import { EmployeeMotivationCard } from "@/components/employee/employee-motivation-card";
 import { EmployeeProfileStrip } from "@/components/employee/employee-profile-strip";
+import { MyNotesWidget } from "@/components/my-notes/my-notes-widget";
 import type { SerializedWorkEmployeeTask } from "@/lib/work-tasks/serialize-work-task";
 import { WorkflowRunCard } from "@/components/workflows/workflow-run-card";
 import type { WorkflowRunDetailDto } from "@/lib/workflows/serialize";
@@ -239,6 +240,8 @@ export function EmployeeDashboard() {
           </button>
         }
       />
+
+      <MyNotesWidget />
 
       <div className="space-y-3">
         <EmployeeLiveStatus activeTask={activeWorkTask} />

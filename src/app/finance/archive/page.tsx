@@ -28,6 +28,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { PdfPreviewModal } from "@/components/pdf-preview-modal";
 import { AccountantEmailModal } from "@/components/finance/accountant-email-modal";
+import { ExpenseCounterpartyFilter } from "@/components/finance/expense-counterparty-filter";
 import { useI18n } from "@/components/i18n-provider";
 import {
   bulkSetDocumentsAccountantSent,
@@ -40,6 +41,10 @@ import {
 import { REPORT_TYPES } from "@/lib/pdf/constants";
 import { DEPOSIT_STATUS_LABELS, DEPOSIT_TYPE_LABELS } from "@/lib/finance/document-payload";
 import type { AccountantTransferLogRow, FinanceDocumentRow } from "@/lib/finance/types";
+import {
+  documentMatchesExpenseCounterparty,
+  type ExpenseCounterpartyKind,
+} from "@/lib/finance/counterparty-filter";
 
 type GeneratedReportRow = {
   id: string;
@@ -188,6 +193,10 @@ export default function FinanceArchivePage() {
   const [accountantBusyIds, setAccountantBusyIds] = useState<Set<string>>(new Set());
   const [accountantNotice, setAccountantNotice] = useState<string | null>(null);
   const [partyFilter, setPartyFilter] = useState("");
+  const [counterpartyKind, setCounterpartyKind] = useState<ExpenseCounterpartyKind>("");
+  const [counterpartyId, setCounterpartyId] = useState("");
+  const [suppliers, setSuppliers] = useState<{ id: string; name: string }[]>([]);
+  const [employees, setEmployees] = useState<{ id: string; name: string }[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkBusy, setBulkBusy] = useState(false);
   const [emailModalOpen, setEmailModalOpen] = useState(false);
@@ -237,6 +246,29 @@ export default function FinanceArchivePage() {
   useEffect(() => {
     queueMicrotask(() => void refresh());
   }, [refresh]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const [supRes, empRes] = await Promise.all([
+          fetch("/api/procurement/suppliers", { credentials: "same-origin" }),
+          fetch("/api/employees", { credentials: "same-origin" }),
+        ]);
+        const supJson = (await supRes.json()) as { data?: { id: string; name: string }[] };
+        const empJson = (await empRes.json()) as { data?: { id: string; name: string }[] };
+        if (!cancelled) {
+          setSuppliers(supJson.data ?? []);
+          setEmployees(empJson.data ?? []);
+        }
+      } catch {
+        /* ignore */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     queueMicrotask(() => void loadReports());
@@ -425,10 +457,15 @@ export default function FinanceArchivePage() {
   const filteredReports = useMemo(() => sortReportsNewestFirst(reports), [reports]);
   const filteredRows = useMemo(() => {
     const q = partyFilter.trim().toLowerCase();
-    const base = sortFinanceDocumentsNewestFirst(rows);
+    let base = sortFinanceDocumentsNewestFirst(rows);
+    if (counterpartyKind && counterpartyId) {
+      base = base.filter((row) =>
+        documentMatchesExpenseCounterparty(row, counterpartyKind, counterpartyId),
+      );
+    }
     if (!q) return base;
     return base.filter((row) => documentPartySearchText(row).includes(q));
-  }, [rows, partyFilter]);
+  }, [rows, partyFilter, counterpartyKind, counterpartyId]);
 
   return (
     <div className="mx-auto max-w-7xl space-y-4">
@@ -836,6 +873,26 @@ export default function FinanceArchivePage() {
                 className="mt-1 h-[42px] w-full rounded-xl border border-slate-300 bg-white px-3 text-right text-sm font-semibold outline-none focus:border-cyan-600 focus:ring-1 focus:ring-cyan-600/25"
               />
             </label>
+
+            <ExpenseCounterpartyFilter
+              kind={counterpartyKind}
+              onKindChange={(kind) => {
+                setCounterpartyKind(kind);
+                clearSelection();
+              }}
+              partyId={counterpartyId}
+              onPartyIdChange={(id) => {
+                setCounterpartyId(id);
+                clearSelection();
+              }}
+              suppliers={suppliers}
+              employees={employees}
+            />
+            {counterpartyKind && counterpartyId ? (
+              <p className="text-[11px] font-semibold text-slate-500">
+                {t("financeCounterparty.archiveExpenseFilterHint")}
+              </p>
+            ) : null}
 
             {selectedIds.size > 0 ? (
               <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-luxury-navy-rich/15 bg-luxury-navy-rich/5 px-4 py-3">

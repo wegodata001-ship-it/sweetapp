@@ -50,6 +50,51 @@ export async function enrichCashFlowRowsWithExpenseType(
   });
 }
 
+/** ממלא supplier_id / employee_id מתוך מסמך מקושר */
+export async function enrichCashFlowRowsWithCounterparty(
+  entries: CashFlowEntry[],
+  rows: CashFlowRow[],
+): Promise<CashFlowRow[]> {
+  const docIds = [
+    ...new Set(
+      entries
+        .map((e) => e.documentId)
+        .filter((id): id is string => Boolean(id)),
+    ),
+  ];
+  if (!docIds.length) return rows;
+
+  const docs = await prisma.financialDocument.findMany({
+    where: { id: { in: docIds } },
+    select: { id: true, supplierId: true, employeeId: true, metadata: true },
+  });
+
+  const byDoc = new Map(
+    docs.map((d) => {
+      const meta = parsePayload(d.metadata as unknown);
+      const supplierId =
+        d.supplierId?.trim() ||
+        (meta?.kind === "expense" && meta.supplierId?.trim() ? meta.supplierId.trim() : null);
+      const employeeId =
+        d.employeeId?.trim() ||
+        (meta?.kind === "expense" && meta.employeeId?.trim() ? meta.employeeId.trim() : null);
+      return [d.id, { supplierId, employeeId }] as const;
+    }),
+  );
+
+  return rows.map((row, index) => {
+    const docId = entries[index]?.documentId ?? row.document_id;
+    if (!docId) return row;
+    const cp = byDoc.get(docId);
+    if (!cp) return row;
+    return {
+      ...row,
+      supplier_id: cp.supplierId,
+      employee_id: cp.employeeId,
+    };
+  });
+}
+
 export function applyCashflowListFilters(rows: CashFlowRow[], filters: CashflowListFilters): CashFlowRow[] {
   let data = rows;
   const entryType = filters.entryType;
@@ -83,5 +128,6 @@ export async function listCashFlowRows(filters: CashflowListFilters): Promise<Ca
   });
   let mapped = rows.map((row) => prismaCashFlowToRow(row));
   mapped = await enrichCashFlowRowsWithExpenseType(rows, mapped);
+  mapped = await enrichCashFlowRowsWithCounterparty(rows, mapped);
   return applyCashflowListFilters(mapped, filters);
 }

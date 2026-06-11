@@ -15,6 +15,7 @@ import {
   PackageCheck,
   ReceiptText,
   LineChart,
+  StickyNote,
   TrendingUp,
   Truck,
   UserCircle2,
@@ -316,6 +317,13 @@ export function AppNavContent({ onNavigate, variant = "sidebar" }: AppNavContent
     },
     { labelKey: "nav.myHours", href: "/employee/hours", permission: "employee_clock", icon: Clock3 },
     {
+      labelKey: "nav.myNotes",
+      href: "/my-notes",
+      permission: "employee_clock",
+      icon: StickyNote,
+      showForAllAuthenticated: true,
+    },
+    {
       labelKey: "nav.profile",
       href: "/employee/profile",
       permission: "employee_clock",
@@ -414,6 +422,17 @@ export function AppNavContent({ onNavigate, variant = "sidebar" }: AppNavContent
               href: "/",
               permission: "financial_registration",
               icon: LayoutDashboard,
+            }}
+            onNavigate={onNavigate}
+            compact={compact}
+          />
+          <NavLink
+            item={{
+              labelKey: "nav.myNotes",
+              href: "/my-notes",
+              permission: "financial_registration",
+              icon: StickyNote,
+              showForAllAuthenticated: true,
             }}
             onNavigate={onNavigate}
             compact={compact}

@@ -147,6 +147,7 @@
     "recipes": "الوصفات",
     "users": "إدارة المستخدمين",
     "myTasks": "مهامي",
+    "myNotes": "ملاحظاتي",
     "myWorkflows": "ترتيب العمل",
     "workStatus": "حالة العمل",
     "myAttendance": "الحضور والساعات",
@@ -1354,6 +1355,16 @@
       "bulkMarked": "تم تعليم {{count}} مستندات كمُرسَلة إلى المحاسب.",
       "bulkUnmarked": "تم إلغاء الإرسال لـ {{count}} مستندات."
     }
+  },
+  "financeCounterparty": {
+    "kind": "الجهة (مصروفات)",
+    "allParties": "كل الجهات",
+    "supplier": "مورد",
+    "employee": "موظف",
+    "selectSupplier": "اختر مورد…",
+    "selectEmployee": "اختر موظف…",
+    "expenseFilterHint": "تُعرض مصروفات الجهة المختارة؛ الإيرادات وتقارير Z تبقى ظاهرة.",
+    "archiveExpenseFilterHint": "تُعرض فقط مستندات المصروفات للجهة المختارة."
   },
   "cashflow": {
     "title": "يومية الحركات المالية",
@@ -3580,5 +3591,46 @@
       "nextTask": "المهمة التالية",
       "noTask": "لا مهام معلقة لهذا اليوم"
     }
+  },
+  "myNotes": {
+    "eyebrow": "شخصي",
+    "title": "ملاحظاتي",
+    "subtitle": "تذكيرات ومهام شخصية — تبقى مفتوحة حتى تُعلَّم كمكتملة",
+    "addNote": "ملاحظة جديدة",
+    "tabOpen": "مفتوحة",
+    "tabCompleted": "مكتملة",
+    "emptyOpen": "لا ملاحظات مفتوحة — أضف تذكيرًا جديدًا",
+    "emptyCompleted": "لا ملاحظات مكتملة بعد",
+    "createdAt": "تاريخ الإنشاء",
+    "createdBy": "أنشأها",
+    "completedAt": "اكتملت",
+    "completeBtn": "انتهيت",
+    "editBtn": "تعديل",
+    "deleteBtn": "حذف",
+    "doneBadge": "مكتمل",
+    "newTitle": "ملاحظة جديدة",
+    "editTitle": "تعديل الملاحظة",
+    "fieldTitle": "العنوان",
+    "fieldTitlePlaceholder": "مثال: الاتصال بالعميل غدًا",
+    "fieldContent": "المحتوى",
+    "fieldContentPlaceholder": "تفاصيل إضافية، سياق، رقم هاتف…",
+    "fieldPriority": "الأولوية",
+    "priorityNormal": "عادية",
+    "priorityHigh": "عالية",
+    "priorityUrgent": "عاجلة",
+    "loadError": "فشل تحميل الملاحظات",
+    "saveError": "فشل حفظ الملاحظة",
+    "completeError": "فشل التعليم كمكتمل",
+    "deleteError": "فشل حذف الملاحظة",
+    "titleRequired": "العنوان مطلوب",
+    "created": "تم إنشاء الملاحظة",
+    "updated": "تم تحديث الملاحظة",
+    "completed": "تم تعليم الملاحظة كمكتملة",
+    "deleted": "تم حذف الملاحظة",
+    "deleteConfirm": "حذف هذه الملاحظة؟",
+    "widgetTitle": "📌 ملاحظاتي",
+    "widgetEmpty": "لا ملاحظات مفتوحة",
+    "widgetOpenCount": "لديك {count} ملاحظات مفتوحة",
+    "showAll": "عرض الكل"
   }
 }

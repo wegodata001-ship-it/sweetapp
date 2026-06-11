@@ -25,6 +25,7 @@ import {
   zReportMatchesPaymentFilter,
 } from "@/lib/finance/cashflow-z-report";
 import { PdfPreviewModal } from "@/components/pdf-preview-modal";
+import { ExpenseCounterpartyFilter } from "@/components/finance/expense-counterparty-filter";
 import { useI18n } from "@/components/i18n-provider";
 import {
   deleteCashFlowEntry,
@@ -34,6 +35,10 @@ import {
 } from "@/lib/finance/db";
 import { EXPENSE_TYPE_I18N, EXPENSE_TYPE_VALUES } from "@/lib/finance/expense-types";
 import type { CashFlowRow } from "@/lib/finance/types";
+import {
+  cashflowRowMatchesExpenseCounterparty,
+  type ExpenseCounterpartyKind,
+} from "@/lib/finance/counterparty-filter";
 import { formatShekel, parseNum } from "@/lib/format-shekel";
 
 const thClass = "text-xs font-semibold text-slate-500";
@@ -52,6 +57,10 @@ export default function CashflowPage() {
   const [filterDateFrom, setFilterDateFrom] = useState("");
   const [filterDateTo, setFilterDateTo] = useState("");
   const [filterPaymentMethod, setFilterPaymentMethod] = useState("");
+  const [filterCounterpartyKind, setFilterCounterpartyKind] = useState<ExpenseCounterpartyKind>("");
+  const [filterCounterpartyId, setFilterCounterpartyId] = useState("");
+  const [suppliers, setSuppliers] = useState<{ id: string; name: string }[]>([]);
+  const [employees, setEmployees] = useState<{ id: string; name: string }[]>([]);
 
   const [editingRowId, setEditingRowId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<{
@@ -105,6 +114,29 @@ export default function CashflowPage() {
   }, [loadAll]);
 
   useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const [supRes, empRes] = await Promise.all([
+          fetch("/api/procurement/suppliers", { credentials: "same-origin" }),
+          fetch("/api/employees", { credentials: "same-origin" }),
+        ]);
+        const supJson = (await supRes.json()) as { data?: { id: string; name: string }[] };
+        const empJson = (await empRes.json()) as { data?: { id: string; name: string }[] };
+        if (!cancelled) {
+          setSuppliers(supJson.data ?? []);
+          setEmployees(empJson.data ?? []);
+        }
+      } catch {
+        /* ignore */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
     if (filterType !== "expense") setFilterExpenseType("");
   }, [filterType]);
 
@@ -134,9 +166,24 @@ export default function CashflowPage() {
       if (filterDateFrom.trim() && row.entry_date < filterDateFrom.trim()) return false;
       if (filterDateTo.trim() && row.entry_date > filterDateTo.trim()) return false;
       if (filterPaymentMethod && (row.payment_method ?? "").trim() !== filterPaymentMethod) return false;
+      if (
+        filterCounterpartyKind &&
+        filterCounterpartyId &&
+        !cashflowRowMatchesExpenseCounterparty(row, filterCounterpartyKind, filterCounterpartyId)
+      ) {
+        return false;
+      }
       return true;
     });
-  }, [rows, filterCustomer, filterDateFrom, filterDateTo, filterPaymentMethod]);
+  }, [
+    rows,
+    filterCustomer,
+    filterDateFrom,
+    filterDateTo,
+    filterPaymentMethod,
+    filterCounterpartyKind,
+    filterCounterpartyId,
+  ]);
 
   const zGroups = useMemo(() => groupCashflowByZReport(filteredRows), [filteredRows]);
 
@@ -872,6 +919,23 @@ export default function CashflowPage() {
             </option>
           ))}
         </select>
+      </div>
+
+      <div className="mt-2 rounded-[18px] border border-slate-100 bg-white p-3 shadow-sm">
+        <ExpenseCounterpartyFilter
+          kind={filterCounterpartyKind}
+          onKindChange={setFilterCounterpartyKind}
+          partyId={filterCounterpartyId}
+          onPartyIdChange={setFilterCounterpartyId}
+          suppliers={suppliers}
+          employees={employees}
+          selectClassName={`${filterInputClass} mt-1 h-[42px]`}
+        />
+        {filterCounterpartyKind && filterCounterpartyId ? (
+          <p className="mt-2 text-[11px] font-semibold text-slate-500">
+            {t("financeCounterparty.expenseFilterHint")}
+          </p>
+        ) : null}
       </div>
 
       {/* Desktop table — שורות רגילות + דוחות Z מקובצים */}

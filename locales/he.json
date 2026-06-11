@@ -147,6 +147,7 @@
     "recipes": "מתכונים",
     "users": "ניהול משתמשים",
     "myTasks": "המשימות שלי",
+    "myNotes": "ההודעות שלי",
     "myWorkflows": "סדר עבודה",
     "workStatus": "מצב עבודה",
     "myAttendance": "נוכחות ושעות",
@@ -1354,6 +1355,16 @@
       "bulkMarked": "סומנו {{count}} מסמכים כנשלחו לרואה חשבון.",
       "bulkUnmarked": "בוטלה העברה ל־{{count}} מסמכים."
     }
+  },
+  "financeCounterparty": {
+    "kind": "גורם (הוצאות)",
+    "allParties": "כל הגורמים",
+    "supplier": "ספק",
+    "employee": "עובד",
+    "selectSupplier": "בחר ספק…",
+    "selectEmployee": "בחר עובד…",
+    "expenseFilterHint": "מוצגות הוצאות של הגורם שנבחר; הכנסות ודוחות Z נשארים בתצוגה.",
+    "archiveExpenseFilterHint": "מוצגים רק מסמכי הוצאה של הגורם שנבחר."
   },
   "cashflow": {
     "title": "יומן תנועות כספיות",
@@ -3576,5 +3587,46 @@
       "nextTask": "המשימה הבאה",
       "noTask": "אין משימות ממתינות להיום"
     }
+  },
+  "myNotes": {
+    "eyebrow": "אזור אישי",
+    "title": "ההודעות שלי",
+    "subtitle": "תזכורות ומשימות אישיות — נשארות פתוחות עד שמסמנים שהושלמו",
+    "addNote": "הודעה חדשה",
+    "tabOpen": "פתוחות",
+    "tabCompleted": "הושלמו",
+    "emptyOpen": "אין הודעות פתוחות — זמן לרשום תזכורת חדשה",
+    "emptyCompleted": "אין הודעות שהושלמו עדיין",
+    "createdAt": "נוצר",
+    "createdBy": "נוצר על ידי",
+    "completedAt": "הושלם",
+    "completeBtn": "סיימתי",
+    "editBtn": "עריכה",
+    "deleteBtn": "מחק",
+    "doneBadge": "הושלם",
+    "newTitle": "הודעה חדשה",
+    "editTitle": "עריכת הודעה",
+    "fieldTitle": "כותרת",
+    "fieldTitlePlaceholder": "למשל: להתקשר ללקוח מחר",
+    "fieldContent": "תוכן",
+    "fieldContentPlaceholder": "פרטים נוספים, הקשר, מספר טלפון…",
+    "fieldPriority": "עדיפות",
+    "priorityNormal": "רגילה",
+    "priorityHigh": "גבוהה",
+    "priorityUrgent": "דחופה",
+    "loadError": "טעינת ההודעות נכשלה",
+    "saveError": "שמירת ההודעה נכשלה",
+    "completeError": "סימון כהושלם נכשל",
+    "deleteError": "מחיקת ההודעה נכשלה",
+    "titleRequired": "חובה להזין כותרת",
+    "created": "ההודעה נוצרה",
+    "updated": "ההודעה עודכנה",
+    "completed": "ההודעה סומנה כהושלמה",
+    "deleted": "ההודעה נמחקה",
+    "deleteConfirm": "למחוק את ההודעה?",
+    "widgetTitle": "📌 ההודעות שלי",
+    "widgetEmpty": "אין הודעות פתוחות",
+    "widgetOpenCount": "יש לך {count} הודעות פתוחות",
+    "showAll": "הצג הכל"
   }
 }

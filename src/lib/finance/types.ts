@@ -60,6 +60,10 @@ export type CashFlowRow = {
   is_direct: boolean;
   /** סוג הוצאה — ממסמך הרשמה (SUPPLIER_PAYMENTS וכו׳) */
   expense_type?: string | null;
+  /** ספק — ממסמך מקושר */
+  supplier_id?: string | null;
+  /** עובד — ממסמך מקושר */
+  employee_id?: string | null;
 };
 
 export type FinanceDocumentRow = {
@@ -86,6 +90,8 @@ export type FinanceDocumentRow = {
   sent_to_cpa_by: { id: string; full_name: string } | null;
   created_at: string;
   payload: FinanceDocumentPayload | null;
+  supplier_id?: string | null;
+  employee_id?: string | null;
 };
 
 export type AccountantTransferLogRow = {

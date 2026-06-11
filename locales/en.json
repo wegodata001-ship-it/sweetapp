@@ -147,6 +147,7 @@
     "recipes": "Recipes",
     "users": "User management",
     "myTasks": "My tasks",
+    "myNotes": "My notes",
     "myWorkflows": "Work order",
     "workStatus": "Work status",
     "myAttendance": "Attendance & hours",
@@ -1354,6 +1355,16 @@
       "bulkMarked": "Marked {{count}} documents as sent to the accountant.",
       "bulkUnmarked": "Cancelled transfer for {{count}} documents."
     }
+  },
+  "financeCounterparty": {
+    "kind": "Counterparty (expenses)",
+    "allParties": "All parties",
+    "supplier": "Supplier",
+    "employee": "Employee",
+    "selectSupplier": "Select supplier…",
+    "selectEmployee": "Select employee…",
+    "expenseFilterHint": "Shows expenses for the selected party; income and Z reports stay visible.",
+    "archiveExpenseFilterHint": "Shows only expense documents for the selected party."
   },
   "cashflow": {
     "title": "Financial movements journal",
@@ -3580,5 +3591,46 @@
       "nextTask": "Next task",
       "noTask": "No pending tasks for today"
     }
+  },
+  "myNotes": {
+    "eyebrow": "Personal",
+    "title": "My notes",
+    "subtitle": "Personal reminders and tasks — stay open until you mark them done",
+    "addNote": "New note",
+    "tabOpen": "Open",
+    "tabCompleted": "Completed",
+    "emptyOpen": "No open notes — add a new reminder",
+    "emptyCompleted": "No completed notes yet",
+    "createdAt": "Created",
+    "createdBy": "Created by",
+    "completedAt": "Completed",
+    "completeBtn": "Done",
+    "editBtn": "Edit",
+    "deleteBtn": "Delete",
+    "doneBadge": "Done",
+    "newTitle": "New note",
+    "editTitle": "Edit note",
+    "fieldTitle": "Title",
+    "fieldTitlePlaceholder": "e.g. Call client tomorrow",
+    "fieldContent": "Content",
+    "fieldContentPlaceholder": "Details, context, phone number…",
+    "fieldPriority": "Priority",
+    "priorityNormal": "Normal",
+    "priorityHigh": "High",
+    "priorityUrgent": "Urgent",
+    "loadError": "Failed to load notes",
+    "saveError": "Failed to save note",
+    "completeError": "Failed to mark as done",
+    "deleteError": "Failed to delete note",
+    "titleRequired": "Title is required",
+    "created": "Note created",
+    "updated": "Note updated",
+    "completed": "Note marked as done",
+    "deleted": "Note deleted",
+    "deleteConfirm": "Delete this note?",
+    "widgetTitle": "📌 My notes",
+    "widgetEmpty": "No open notes",
+    "widgetOpenCount": "You have {count} open notes",
+    "showAll": "Show all"
   }
 }

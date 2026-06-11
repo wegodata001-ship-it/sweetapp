@@ -9,6 +9,7 @@ import { ExpenseCategoryCards } from "@/components/dashboard/expense-category-ca
 import { ZReportCards } from "@/components/dashboard/z-report-cards";
 import { WeddingOverviewCards } from "@/components/dashboard/wedding-overview-cards";
 import { AlertsPanel } from "@/components/dashboard/alerts-panel";
+import { MyNotesWidget } from "@/components/my-notes/my-notes-widget";
 import { FinancialAnalyticsChart } from "@/components/dashboard/financial-analytics-chart";
 import { TasksPerformanceChart } from "@/components/dashboard/tasks-performance-chart";
 import { SupplierPaymentsChart } from "@/components/dashboard/supplier-payments-chart";
@@ -184,8 +185,9 @@ export function DashboardShell() {
             <WeddingOverviewCards dataByRange={data.weddingsByRange} />
           </section>
 
-          <section className="grid grid-cols-1 gap-2 xl:grid-cols-[minmax(260px,300px)_1fr]">
+          <section className="grid grid-cols-1 gap-2 xl:grid-cols-[minmax(260px,300px)_minmax(260px,300px)_1fr]">
             <AlertsPanel alerts={data.alerts} />
+            <MyNotesWidget />
             <div className="flex min-w-0 flex-col gap-2">
               <FinancialAnalyticsChart data={data.dailyChart} />
               <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
