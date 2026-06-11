@@ -287,7 +287,7 @@ export function InventoryWarehouseDashboard() {
             style={{ background: "#6c4cff" }}
           >
             <Plus className="h-4 w-4" />
-            {tW("addShelf")}
+            {t("ops.inventory.addStorageLocation")}
           </button>
         </div>
       </header>
