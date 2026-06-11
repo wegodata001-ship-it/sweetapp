@@ -99,7 +99,89 @@ export function ExpenseSupplierLines({
         </button>
       </div>
 
-      <div className="mt-2 overflow-x-auto rounded-xl border border-slate-200">
+      <div className="mt-2 space-y-3 sm:hidden">
+        {value.lines.map((row, index) => {
+          const lineTotal = lineGrossTotal(row.quantity, row.price, row.vatMode);
+          return (
+            <div key={row.id} className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+              <div className="mb-3 flex items-center justify-between gap-2">
+                <p className="text-[13px] font-black text-slate-800">
+                  {t("register.lines.itemPlaceholder", { n: index + 1 })}
+                </p>
+                <button
+                  type="button"
+                  disabled={disabled || value.lines.length <= 1}
+                  onClick={() => removeLine(row.id)}
+                  className="rounded-lg p-2 text-rose-600 hover:bg-rose-50 disabled:opacity-30"
+                  aria-label={t("register.lines.deleteLine")}
+                >
+                  <Trash2 className="h-4 w-4" />
+                </button>
+              </div>
+              <ProductLinePicker
+                value={row.itemName}
+                supplierId={supplierId}
+                disabled={disabled}
+                autoOpen={focusLineId === row.id}
+                onAutoOpenDone={() => setFocusLineId(null)}
+                placeholder={t("register.lines.itemPlaceholder", { n: index + 1 })}
+                onFocusLine={() => setFocusLineId(row.id)}
+                onChange={(name) => {
+                  setFocusLineId(row.id);
+                  updateLine(row.id, {
+                    itemName: name,
+                    ...(name.trim() ? {} : { supplierProductId: null, priceFlag: null }),
+                  });
+                }}
+                onSelect={(picked) => onApplyProductPick(row.id, picked)}
+              />
+              <div className="mt-3 grid grid-cols-2 gap-2">
+                <label className="block text-[12px] font-bold text-slate-600">
+                  {t("register.fields.quantity")}
+                  <input
+                    type="number"
+                    min={0}
+                    step="0.001"
+                    disabled={disabled}
+                    value={row.quantity}
+                    onChange={(e) => updateLine(row.id, { quantity: e.target.value })}
+                    className="mt-1 h-11 min-h-[44px] w-full rounded-lg border border-slate-200 px-3 text-right text-sm tabular-nums outline-none focus:border-luxury-gold focus:ring-1 focus:ring-luxury-gold/25"
+                  />
+                </label>
+                <label className="block text-[12px] font-bold text-slate-600">
+                  {t("register.fields.unitPrice")}
+                  <input
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    disabled={disabled}
+                    value={row.price}
+                    onChange={(e) => updateLine(row.id, { price: e.target.value })}
+                    className="mt-1 h-11 min-h-[44px] w-full rounded-lg border border-slate-200 px-3 text-right text-sm tabular-nums outline-none focus:border-luxury-gold focus:ring-1 focus:ring-luxury-gold/25"
+                  />
+                </label>
+              </div>
+              <label className="mt-2 block text-[12px] font-bold text-slate-600">
+                {t("register.lines.lineNote")}
+                <input
+                  type="text"
+                  disabled={disabled}
+                  value={row.lineNote ?? ""}
+                  onChange={(e) => updateLine(row.id, { lineNote: e.target.value })}
+                  className="mt-1 h-11 min-h-[44px] w-full rounded-lg border border-slate-200 px-3 text-right text-sm outline-none focus:border-luxury-gold focus:ring-1 focus:ring-luxury-gold/25"
+                  placeholder={t("register.lines.lineNotePlaceholder")}
+                />
+              </label>
+              <div className="mt-3 rounded-lg bg-slate-50 p-2 text-center">
+                <p className="text-[10px] font-bold text-slate-500">{t("register.fields.lineTotal")}</p>
+                <p className="mt-0.5 text-[16px] font-black tabular-nums text-slate-950">{formatShekel(lineTotal)}</p>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="mt-2 hidden overflow-x-auto rounded-xl border border-slate-200 sm:block">
         <table className="min-w-[720px] w-full divide-y divide-slate-100 text-right text-[13px]">
           <thead className="bg-slate-50/90">
             <tr className="text-[11px] font-bold uppercase tracking-wide text-slate-500">

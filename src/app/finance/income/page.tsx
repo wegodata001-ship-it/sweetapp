@@ -32,14 +32,14 @@ export default function IncomeDocumentPage() {
   const sampleInvoice = docs[0];
 
   return (
-    <div className="mx-auto max-w-7xl space-y-8">
-      <section className="app-panel p-8">
+    <div className="mx-auto max-w-7xl space-y-4 sm:space-y-8">
+      <section className="app-panel p-4 sm:p-8">
         <p className="text-sm font-bold uppercase tracking-[0.2em] text-cyan-600">
           {t("incomePage.kicker")}
         </p>
         <div className="mt-4 flex flex-col justify-between gap-6 lg:flex-row lg:items-end">
           <div>
-            <h1 className="text-4xl font-black tracking-tight text-slate-950">
+            <h1 className="text-2xl font-black tracking-tight text-slate-950 sm:text-4xl">
               {t("incomePage.title")}
             </h1>
             <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-500">
@@ -52,8 +52,8 @@ export default function IncomeDocumentPage() {
         </div>
       </section>
 
-      <div className="grid gap-6 xl:grid-cols-[1fr_360px]">
-        <form className="app-panel p-6">
+      <div className="grid gap-4 sm:gap-6 xl:grid-cols-[1fr_360px]">
+        <form className="app-panel p-4 sm:p-6">
           <div className="grid gap-5 md:grid-cols-2">
             <label className="space-y-2">
               <span className="text-sm font-bold text-slate-700">
@@ -175,8 +175,8 @@ export default function IncomeDocumentPage() {
           </div>
         </form>
 
-        <aside className="space-y-6">
-          <div className="app-panel p-6">
+        <aside className="space-y-4 sm:space-y-6">
+          <div className="app-panel p-4 sm:p-6">
             <p className="text-sm font-bold uppercase tracking-[0.18em] text-slate-400">
               {t("incomePage.dbRecords")}
             </p>
@@ -185,7 +185,7 @@ export default function IncomeDocumentPage() {
             </pre>
           </div>
 
-          <div className="app-panel p-6">
+          <div className="app-panel p-4 sm:p-6">
             <p className="text-sm font-bold uppercase tracking-[0.18em] text-slate-400">
               {t("incomePage.existingExample")}
             </p>

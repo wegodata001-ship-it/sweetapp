@@ -456,7 +456,103 @@ export default function FinanceArchivePage() {
             </div>
           </div>
 
-          <div className="mt-5 overflow-x-auto rounded-xl border border-slate-200">
+          <div className="mt-5 space-y-3 md:hidden">
+            {reportsLoading ? (
+              <div className="rounded-xl border border-slate-200 bg-white px-4 py-12 text-center">
+                <Loader2 className="mx-auto h-6 w-6 animate-spin text-slate-400" aria-hidden />
+              </div>
+            ) : filteredReports.length === 0 ? (
+              <div className="rounded-xl border border-slate-200 bg-white px-4 py-12 text-center">
+                <Archive className="mx-auto h-12 w-12 text-slate-300" aria-hidden />
+                <p className="mt-3 text-sm font-bold text-slate-500">{t("archive.noHistorical")}</p>
+              </div>
+            ) : (
+              filteredReports.map((r) => {
+                const labelKey = typeLabelKey(r.type);
+                const createdAt = new Date(r.createdAt).toLocaleString(bcp47, {
+                  day: "2-digit",
+                  month: "2-digit",
+                  year: "numeric",
+                  hour: "2-digit",
+                  minute: "2-digit",
+                });
+                return (
+                  <article key={r.id} className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <span
+                          className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-black ring-1 ${typeBadgeClass(r.type)}`}
+                        >
+                          {labelKey ? t(labelKey) : r.type}
+                        </span>
+                        <h3 className="mt-2 line-clamp-2 text-sm font-black text-slate-950">{r.title}</h3>
+                        <p className="mt-1 truncate text-[11px] font-semibold text-slate-500">{r.fileName}</p>
+                      </div>
+                      <button
+                        type="button"
+                        disabled={!r.publicUrl}
+                        onClick={() => setPreview({ url: r.publicUrl, title: r.fileName })}
+                        className="inline-flex h-10 shrink-0 items-center justify-center rounded-xl border border-cyan-200 bg-cyan-50 px-3 text-xs font-black text-cyan-900 disabled:opacity-40"
+                      >
+                        {t("archive.thPdf")}
+                      </button>
+                    </div>
+                    <dl className="mt-3 grid grid-cols-2 gap-2 rounded-xl bg-slate-50 p-2 text-xs">
+                      <div>
+                        <dt className="font-bold text-slate-500">{t("archive.thDate")}</dt>
+                        <dd className="mt-0.5 font-semibold text-slate-800">{createdAt}</dd>
+                      </div>
+                      <div>
+                        <dt className="font-bold text-slate-500">{t("archive.thCreatedBy")}</dt>
+                        <dd className="mt-0.5 truncate font-semibold text-slate-800">{r.createdBy?.fullName ?? "—"}</dd>
+                      </div>
+                    </dl>
+                    <div className="mt-3 grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        disabled={!r.publicUrl}
+                        onClick={() => setPreview({ url: r.publicUrl, title: r.fileName })}
+                        className={`${btnSm} justify-center border-slate-200 bg-white text-slate-800 hover:bg-slate-50 disabled:opacity-40`}
+                      >
+                        <Eye className="h-3.5 w-3.5" aria-hidden />
+                        {t("archive.view")}
+                      </button>
+                      <a
+                        href={r.publicUrl || "#"}
+                        download={r.fileName}
+                        aria-disabled={!r.publicUrl}
+                        className={`${btnSm} justify-center border-slate-200 bg-white text-slate-800 hover:bg-slate-50 ${
+                          r.publicUrl ? "" : "pointer-events-none opacity-40"
+                        }`}
+                      >
+                        <Download className="h-3.5 w-3.5" aria-hidden />
+                        {t("archive.download")}
+                      </a>
+                      <button
+                        type="button"
+                        disabled={!r.publicUrl}
+                        onClick={() => setPreview({ url: r.publicUrl, title: r.fileName })}
+                        className={`${btnSm} justify-center border-slate-200 bg-white text-slate-800 hover:bg-slate-50 disabled:opacity-40`}
+                      >
+                        <Printer className="h-3.5 w-3.5" aria-hidden />
+                        {t("archive.print")}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setDeleteTarget(r)}
+                        className={`${btnSm} justify-center border-rose-200 bg-rose-50 text-rose-800 hover:bg-rose-100`}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" aria-hidden />
+                        {t("archive.delete")}
+                      </button>
+                    </div>
+                  </article>
+                );
+              })
+            )}
+          </div>
+
+          <div className="mt-5 hidden overflow-x-auto rounded-xl border border-slate-200 md:block">
             <table className="min-w-[960px] w-full divide-y divide-slate-100 text-right text-sm">
               <thead className="bg-slate-50 text-[11px] font-black uppercase tracking-wide text-slate-600">
                 <tr>

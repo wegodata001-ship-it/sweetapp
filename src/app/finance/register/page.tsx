@@ -1049,7 +1049,7 @@ function FinanceRegisterPageInner() {
   const labelClass = "block text-[13px] font-bold text-slate-700";
 
   const btnPrimary =
-    "inline-flex h-[42px] items-center justify-center rounded-[16px] px-[18px] text-sm font-bold transition disabled:opacity-50";
+    "inline-flex h-[44px] w-full items-center justify-center rounded-[16px] px-[18px] text-sm font-bold transition disabled:opacity-50 sm:h-[42px] sm:w-auto";
 
   const paymentFieldClass =
     "mt-1 block h-11 min-h-[44px] w-full rounded-[16px] border bg-white px-3 text-right text-sm font-semibold text-slate-900 outline-none focus:border-luxury-gold focus:ring-1 focus:ring-luxury-gold/25";
@@ -1083,14 +1083,14 @@ function FinanceRegisterPageInner() {
 
   return (
     <div className="mx-auto max-w-7xl space-y-[14px]">
-      <section className="app-panel mb-[14px] min-h-0 p-6">
+      <section className="app-panel mb-[14px] min-h-0 p-4 sm:p-6">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div className="min-w-0">
             <p className="flex items-center gap-2 text-[13px] font-bold tracking-[0.1em] text-cyan-700 opacity-90">
               <FileSpreadsheet className="h-3.5 w-3.5 shrink-0" aria-hidden />
               {t(LK.title)}
             </p>
-            <h1 className="mt-2 text-[38px] font-black leading-tight tracking-tight text-slate-950">
+            <h1 className="mt-2 text-[28px] font-black leading-tight tracking-tight text-slate-950 sm:text-[38px]">
               {t(LK.heading)}
             </h1>
             <p className="mt-1.5 max-w-2xl text-[15px] leading-snug text-slate-600 opacity-75">
@@ -1128,7 +1128,7 @@ function FinanceRegisterPageInner() {
                 <p className="text-[13px] font-black text-cyan-800">{t("register.payment.customerPaymentTitle")}</p>
                 <p className="mt-0.5 text-[15px] text-slate-900">{paymentCustomer.name}</p>
               </div>
-              <div className="grid gap-2 sm:grid-cols-3 lg:min-w-[520px]">
+              <div className="grid w-full gap-2 sm:grid-cols-3 lg:min-w-[520px]">
                 <label className={labelClass}>
                   {t("register.fields.paymentMethod")}
                   <select
@@ -1243,7 +1243,7 @@ function FinanceRegisterPageInner() {
                   <span className="font-black">{formatShekel(paymentDoc.remaining_amount)}</span>
                 </p>
               </div>
-              <div className="grid gap-2 sm:grid-cols-3 lg:min-w-[520px]">
+              <div className="grid w-full gap-2 sm:grid-cols-3 lg:min-w-[520px]">
                 <label className={labelClass}>
                   {t("register.fields.paymentMethod")}
                   <select
@@ -1350,7 +1350,7 @@ function FinanceRegisterPageInner() {
           </div>
         )}
 
-        <div className="mt-3 grid gap-3 sm:grid-cols-3">
+        <div className="mt-3 grid gap-2 sm:grid-cols-3 sm:gap-3">
           {tabs.map((tab) => {
             const isActive = activeTab === tab.id;
             return (
@@ -1358,7 +1358,7 @@ function FinanceRegisterPageInner() {
                 key={tab.id}
                 type="button"
                 onClick={() => setActiveTab(tab.id)}
-                className={`finance-register-tab h-[52px] rounded-2xl border px-[22px] text-[15px] font-bold transition ${
+                className={`finance-register-tab h-[48px] rounded-2xl border px-4 text-[14px] font-bold transition sm:h-[52px] sm:px-[22px] sm:text-[15px] ${
                   locale === "ar" ? "text-[13px] leading-snug px-3 sm:px-4" : ""
                 } ${
                   isActive
@@ -1404,7 +1404,7 @@ function FinanceRegisterPageInner() {
             counterpartyInputId="income-counterparty-name"
           />
 
-          <div className="flex flex-wrap gap-3 px-0">
+          <div className="grid gap-2 px-0 sm:flex sm:flex-wrap sm:gap-3">
             {editingDocId && editingKind === "income" ? (
               <button
                 type="button"
@@ -1448,7 +1448,7 @@ function FinanceRegisterPageInner() {
       )}
 
       {activeTab === "zreport" && (
-        <section className="app-panel mb-[14px] p-[18px]">
+        <section className="app-panel mb-[14px] p-4 sm:p-[18px]">
           <div className="flex flex-wrap items-center gap-2">
             <FileText className="h-4 w-4 text-cyan-600" aria-hidden />
             <h2 className="text-[22px] font-extrabold text-slate-950">{t("register.zreport.title")}</h2>
@@ -1546,7 +1546,7 @@ function FinanceRegisterPageInner() {
             </div>
           </div>
 
-          <div className="mt-3 flex flex-wrap gap-3">
+          <div className="mt-3 grid gap-2 sm:flex sm:flex-wrap sm:gap-3">
             {editingDocId && editingKind === "zreport" ? (
               <button
                 type="button"
@@ -1632,7 +1632,7 @@ function FinanceRegisterPageInner() {
             onWorkerPaySubmit={() => void publishExpenseDoc()}
           />
 
-          <div className="flex flex-wrap gap-3 px-0">
+          <div className="grid gap-2 px-0 sm:flex sm:flex-wrap sm:gap-3">
             {editingDocId && editingKind === "expense" ? (
               <button
                 type="button"

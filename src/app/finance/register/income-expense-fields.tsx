@@ -606,8 +606,126 @@ export function IncomeExpenseFields({
           </button>
         </div>
 
+        <div className="mt-3 space-y-3 sm:hidden">
+          {value.lines.map((row, index) => (
+            <div key={row.id} className="rounded-[18px] border border-slate-200 bg-white p-3 shadow-sm">
+              <div className="mb-3 flex items-center justify-between gap-2">
+                <p className="text-[13px] font-black text-slate-800">
+                  {t("register.lines.itemPlaceholder", { n: index + 1 })}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => removeLine(row.id)}
+                  className="rounded-lg p-2 text-rose-600 hover:bg-rose-50"
+                  aria-label={t("register.lines.deleteLine")}
+                >
+                  <Trash2 className="h-4 w-4" />
+                </button>
+              </div>
+              <ProductLinePicker
+                value={row.itemName}
+                supplierId={isExpense ? value.supplierId : null}
+                disabled={disabled}
+                autoOpen={focusLineId === row.id}
+                onAutoOpenDone={() => setFocusLineId(null)}
+                placeholder={t("register.lines.itemPlaceholder", { n: index + 1 })}
+                onFocusLine={() => setFocusLineId(row.id)}
+                onChange={(name) => {
+                  setFocusLineId(row.id);
+                  updateLine(row.id, { itemName: name });
+                  if (!name.trim() && row.supplierProductId) {
+                    updateLine(row.id, { supplierProductId: null, priceFlag: null });
+                  }
+                }}
+                onSelect={(picked) => applyProductPick(row.id, picked)}
+              />
+              <div className="mt-3 grid grid-cols-2 gap-2">
+                <label className={labelClass}>
+                  {t("register.fields.quantity")}
+                  <input
+                    type="number"
+                    min={0}
+                    step="0.001"
+                    value={row.quantity}
+                    onChange={(e) => updateLine(row.id, { quantity: e.target.value })}
+                    className="mt-1 h-11 min-h-[44px] w-full rounded-[16px] border border-slate-200 px-3 text-right text-sm outline-none focus:border-luxury-gold focus:ring-1 focus:ring-luxury-gold/25"
+                  />
+                </label>
+                <label className={labelClass}>
+                  {t("register.fields.unitPrice")}
+                  <input
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    value={row.price}
+                    onChange={(e) => updateLine(row.id, { price: e.target.value })}
+                    className={`mt-1 h-11 min-h-[44px] w-full rounded-[16px] border border-slate-200 px-3 text-right text-sm outline-none focus:border-luxury-gold focus:ring-1 focus:ring-luxury-gold/25 ${
+                      row.priceFlag?.flag === "higher"
+                        ? "border-rose-400 bg-rose-50"
+                        : row.priceFlag?.flag === "lower"
+                          ? "border-emerald-400 bg-emerald-50"
+                          : ""
+                    }`}
+                  />
+                </label>
+                <label className={`col-span-2 ${labelClass}`}>
+                  {t("register.lines.vat")}
+                  <select
+                    value={row.vatMode}
+                    onChange={(e) => updateLine(row.id, { vatMode: e.target.value as VatMode })}
+                    className="mt-1 h-11 min-h-[44px] w-full rounded-[16px] border border-slate-200 px-3 text-right text-[13px] font-semibold outline-none focus:border-luxury-gold"
+                  >
+                    {(Object.keys(VAT_MODE_LABELS) as VatMode[]).map((k) => (
+                      <option key={k} value={k}>
+                        {VAT_MODE_LABELS[k]}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+              {row.priceFlag ? (
+                <p
+                  className={`mt-2 inline-flex items-center gap-1 text-[11px] font-bold ${
+                    row.priceFlag.flag === "higher"
+                      ? "text-rose-700"
+                      : row.priceFlag.flag === "lower"
+                        ? "text-emerald-700"
+                        : "text-slate-500"
+                  }`}
+                >
+                  {row.priceFlag.flag === "higher" ? <TrendingUp className="h-3 w-3" aria-hidden /> : null}
+                  {row.priceFlag.flag === "lower" ? <TrendingDown className="h-3 w-3" aria-hidden /> : null}
+                  {row.priceFlag.flag === "match" ? <CheckCircle2 className="h-3 w-3" aria-hidden /> : null}
+                  {row.priceFlag.flag === "higher"
+                    ? t("register.priceFlag.higher")
+                    : row.priceFlag.flag === "lower"
+                      ? t("register.priceFlag.lower")
+                      : t("register.priceFlag.match")}
+                  {row.priceFlag.regularPrice ? (
+                    <span className="opacity-75">({formatShekel(row.priceFlag.regularPrice)})</span>
+                  ) : null}
+                </p>
+              ) : null}
+              <div className="mt-3 grid grid-cols-3 gap-2 rounded-[14px] bg-slate-50 p-2 text-center">
+                <div>
+                  <p className="text-[10px] font-bold text-slate-500">{t("register.lines.beforeVat")}</p>
+                  <p className="mt-0.5 text-[13px] font-black tabular-nums text-slate-800">{formatShekel(netLineTotals[index] ?? 0)}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] font-bold text-slate-500">{t("register.lines.vat")}</p>
+                  <p className="mt-0.5 text-[13px] font-black tabular-nums text-slate-800">{formatShekel(vatLineTotals[index] ?? 0)}</p>
+                </div>
+                <div>
+                  <p className="text-[10px] font-bold text-slate-500">{t("register.fields.lineTotal")}</p>
+                  <p className="mt-0.5 text-[13px] font-black tabular-nums text-slate-950">{formatShekel(lineTotals[index] ?? 0)}</p>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+
         <div
-          className="mt-3 overflow-x-auto rounded-[18px] border border-slate-200"
+          className="mt-3 hidden overflow-x-auto rounded-[18px] border border-slate-200 sm:block"
           onKeyDown={(e) => {
             if (e.key !== "Enter" || e.shiftKey) return;
             const tag = (e.target as HTMLElement).tagName;
@@ -762,23 +880,23 @@ export function IncomeExpenseFields({
       ) : null}
 
       {!isWorkerExpense ? (
-      <div className="mt-3 flex min-h-[70px] flex-wrap items-center justify-between gap-4 rounded-[18px] border border-cyan-200 bg-cyan-50/70 px-[18px] py-3">
+      <div className="mt-3 flex min-h-[70px] flex-col items-stretch justify-between gap-4 rounded-[18px] border border-cyan-200 bg-cyan-50/70 px-3 py-3 sm:flex-row sm:flex-wrap sm:items-center sm:px-[18px]">
         <span className="flex items-center gap-2 text-[13px] font-bold text-cyan-900">
           <Calculator className="h-4 w-4 shrink-0" aria-hidden />
           {t("register.summary.title")}
         </span>
-        <div className="flex flex-1 flex-wrap items-end justify-end gap-6 sm:gap-10">
+        <div className="grid flex-1 grid-cols-3 gap-2 sm:flex sm:flex-wrap sm:items-end sm:justify-end sm:gap-10">
           <div className="text-center sm:text-right">
             <p className="text-[13px] font-bold text-slate-600 opacity-70">{t("common.total")}</p>
-            <p className="text-[28px] font-black tabular-nums leading-none text-slate-950">{formatShekel(grandTotal)}</p>
+            <p className="text-[20px] font-black tabular-nums leading-none text-slate-950 sm:text-[28px]">{formatShekel(grandTotal)}</p>
           </div>
           <div className="text-center sm:text-right">
             <p className="text-[13px] font-bold text-slate-600 opacity-70">{t("register.lines.vat")}</p>
-            <p className="text-[28px] font-black tabular-nums leading-none text-slate-950">{formatShekel(vatTotal)}</p>
+            <p className="text-[20px] font-black tabular-nums leading-none text-slate-950 sm:text-[28px]">{formatShekel(vatTotal)}</p>
           </div>
           <div className="text-center sm:text-right">
             <p className="text-[13px] font-bold text-slate-600 opacity-70">{t("register.summary.toPay")}</p>
-            <p className="text-[28px] font-black tabular-nums leading-none text-cyan-900">{formatShekel(totalToPay)}</p>
+            <p className="text-[20px] font-black tabular-nums leading-none text-cyan-900 sm:text-[28px]">{formatShekel(totalToPay)}</p>
           </div>
         </div>
       </div>
