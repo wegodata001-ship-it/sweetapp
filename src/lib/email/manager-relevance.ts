@@ -35,6 +35,10 @@ export async function isManagerNotificationRelevant(
       "SYSTEM_ALERT",
       "NEW_UPDATE",
       "MISSED_CLOCK_IN",
+      "MISSED_CLOCK_OUT",
+      "CLOCK_OUT",
+      "OVERTIME",
+      "INVENTORY_LOW",
     ].includes(type);
   }
 
@@ -55,6 +59,12 @@ export async function isManagerNotificationRelevant(
     case "CHECK_BOUNCED":
     case "FUTURE_ORDER":
     case "CASHFLOW_SHORTAGE":
+      return true;
+    case "MISSED_CLOCK_IN":
+    case "MISSED_CLOCK_OUT":
+    case "CLOCK_OUT":
+    case "OVERTIME":
+    case "INVENTORY_LOW":
       return true;
     case "SYSTEM_ALERT":
       return true;
@@ -81,6 +91,9 @@ export function isEmployeeNotificationOwned(
     case "TASK_ASSIGNED":
     case "SHIFT_LATE":
     case "CLOCK_IN_LATE":
+    case "MISSED_CLOCK_IN":
+    case "MISSED_CLOCK_OUT":
+    case "CLOCK_OUT":
     case "TASK_OVERDUE":
     case "TASK_LATE":
     case "TASK_STARTED":

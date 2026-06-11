@@ -58,6 +58,16 @@ export function resolveEmailImportance(params: {
     case "CLOCK_IN_LATE":
       if (p === "CRITICAL" || p === "HIGH") return "HIGH";
       return "NORMAL";
+    case "CLOCK_OUT":
+    case "MISSED_CLOCK_OUT":
+      return p === "CRITICAL" ? "HIGH" : "NORMAL";
+    case "MISSED_CLOCK_IN":
+      return "NORMAL";
+    case "OVERTIME":
+      return p === "CRITICAL" ? "HIGH" : "NORMAL";
+    case "INVENTORY_LOW":
+      if (m.outOfStock === true || p === "CRITICAL") return "CRITICAL";
+      return "HIGH";
     case "TASK_OVERDUE":
     case "TASK_LATE":
     case "TASK_STARTED":
@@ -69,9 +79,14 @@ export function resolveEmailImportance(params: {
       return "NORMAL";
     case "NEW_UPDATE":
       return m.importantUpdate === true ? "HIGH" : "LOW";
-    case "MISSED_CLOCK_IN":
-      return params.roleTarget === "ADMIN" ? "NORMAL" : "NONE";
+    case "PERSONAL_NOTE":
+      return "NONE";
     default:
+      if (m.emailImportance === "NONE") return "NONE";
+      if (m.scanAlert === true || m.systemAlert === true) {
+        if (p === "CRITICAL") return "CRITICAL";
+        return "NORMAL";
+      }
       return "NONE";
   }
 }

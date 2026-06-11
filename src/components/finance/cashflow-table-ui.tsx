@@ -101,7 +101,8 @@ export function CashflowDescriptionCell({ description }: { description: string |
 }
 
 export function CashflowMethodCustomerCell({ row }: { row: CashFlowRow }) {
-  const method = paymentMethodLabel(row.payment_method);
+  const { t } = useI18n();
+  const method = paymentMethodLabel(row.payment_method, t);
   const cust = row.customer_name?.trim();
   if (!method && !cust) {
     return <span className="text-[12px] text-slate-400">—</span>;

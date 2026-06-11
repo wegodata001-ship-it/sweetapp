@@ -1,22 +1,34 @@
 "use client";
 
-import { Loader2, Mail, Star, X } from "lucide-react";
+import { Check, Loader2, Mail, Star, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useI18n } from "@/components/i18n-provider";
-import type { DocumentEmailContactRow } from "@/lib/finance/db";
+import type { DocumentEmailAttachmentPreview } from "@/lib/finance/db";
 import {
   fetchDocumentEmailContacts,
+  previewAccountantEmailAttachments,
   toggleDocumentEmailContactFavorite,
+  type DocumentEmailContactRow,
 } from "@/lib/finance/db";
+
+export type AccountantEmailSendMode = "pdf_only" | "source_only" | "pdf_and_source";
 
 type Props = {
   open: boolean;
   selectedCount: number;
+  selectedDocumentIds: string[];
   defaultEmail: string;
   defaultSubject: string;
   sending: boolean;
   onClose: () => void;
-  onSend: (params: { recipients: string[]; subject: string; message: string }) => void;
+  onSend: (params: {
+    recipients: string[];
+    subject: string;
+    message: string;
+    sendMode: AccountantEmailSendMode;
+    includePdf: boolean;
+    includeSource: boolean;
+  }) => void;
 };
 
 function normalizeEmail(value: string): string {
@@ -27,9 +39,27 @@ function isValidEmail(value: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizeEmail(value));
 }
 
+function modeFromFlags(includePdf: boolean, includeSource: boolean): AccountantEmailSendMode {
+  if (includePdf && includeSource) return "pdf_and_source";
+  if (includeSource) return "source_only";
+  return "pdf_only";
+}
+
+function flagsFromMode(mode: AccountantEmailSendMode): { includePdf: boolean; includeSource: boolean } {
+  switch (mode) {
+    case "pdf_only":
+      return { includePdf: true, includeSource: false };
+    case "source_only":
+      return { includePdf: false, includeSource: true };
+    default:
+      return { includePdf: true, includeSource: true };
+  }
+}
+
 export function AccountantEmailModal({
   open,
   selectedCount,
+  selectedDocumentIds,
   defaultEmail,
   defaultSubject,
   sending,
@@ -43,12 +73,20 @@ export function AccountantEmailModal({
   const [manualEmail, setManualEmail] = useState("");
   const [subject, setSubject] = useState(defaultSubject);
   const [message, setMessage] = useState("");
+  const [sendMode, setSendMode] = useState<AccountantEmailSendMode>("pdf_and_source");
+  const [includePdf, setIncludePdf] = useState(true);
+  const [includeSource, setIncludeSource] = useState(true);
+  const [preview, setPreview] = useState<DocumentEmailAttachmentPreview | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
 
   useEffect(() => {
     if (!open) return;
     setSubject(defaultSubject);
     setMessage("");
     setManualEmail("");
+    setSendMode("pdf_and_source");
+    setIncludePdf(true);
+    setIncludeSource(true);
     const initial = defaultEmail.trim();
     setSelectedEmails(initial && isValidEmail(initial) ? new Set([normalizeEmail(initial)]) : new Set());
 
@@ -66,6 +104,37 @@ export function AccountantEmailModal({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [open, sending, onClose]);
+
+  useEffect(() => {
+    if (!open || selectedDocumentIds.length === 0) {
+      setPreview(null);
+      return;
+    }
+    if (!includePdf && !includeSource) {
+      setPreview(null);
+      return;
+    }
+
+    let cancelled = false;
+    setPreviewLoading(true);
+    void previewAccountantEmailAttachments({
+      documentIds: selectedDocumentIds,
+      includePdf,
+      includeSource,
+      sendMode,
+    })
+      .then((res) => {
+        if (cancelled) return;
+        setPreview(res.ok ? (res.data ?? null) : null);
+      })
+      .finally(() => {
+        if (!cancelled) setPreviewLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [open, selectedDocumentIds, includePdf, includeSource, sendMode]);
 
   const sortedContacts = useMemo(() => {
     return [...contacts].sort((a, b) => {
@@ -111,7 +180,37 @@ export function AccountantEmailModal({
     );
   };
 
+  const applyMode = (mode: AccountantEmailSendMode) => {
+    const flags = flagsFromMode(mode);
+    setSendMode(mode);
+    setIncludePdf(flags.includePdf);
+    setIncludeSource(flags.includeSource);
+  };
+
+  const setPdfChecked = (checked: boolean) => {
+    const nextPdf = checked;
+    const nextSource = checked ? includeSource : includeSource || !nextPdf;
+    if (!nextPdf && !nextSource) return;
+    setIncludePdf(nextPdf);
+    setIncludeSource(nextSource);
+    setSendMode(modeFromFlags(nextPdf, nextSource));
+  };
+
+  const setSourceChecked = (checked: boolean) => {
+    const nextSource = checked;
+    const nextPdf = checked ? includePdf : includePdf || !nextSource;
+    if (!nextPdf && !nextSource) return;
+    setIncludePdf(nextPdf);
+    setIncludeSource(nextSource);
+    setSendMode(modeFromFlags(nextPdf, nextSource));
+  };
+
   const recipients = [...selectedEmails];
+  const canSend =
+    recipients.length > 0 &&
+    (includePdf || includeSource) &&
+    (preview?.totalFiles ?? 0) > 0 &&
+    !previewLoading;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4" dir={dir}>
@@ -251,6 +350,110 @@ export function AccountantEmailModal({
             </div>
           ) : null}
 
+          <fieldset className="rounded-xl border border-slate-200 p-3">
+            <legend className="px-1 text-xs font-bold text-slate-600">
+              {t("archive.emailModal.fileTypeLegend")}
+            </legend>
+            <ul className="mt-1 space-y-2">
+              {(
+                [
+                  ["pdf_only", t("archive.emailModal.modePdfOnly")],
+                  ["source_only", t("archive.emailModal.modeSourceOnly")],
+                  ["pdf_and_source", t("archive.emailModal.modePdfAndSource")],
+                ] as const
+              ).map(([mode, label]) => (
+                <li key={mode}>
+                  <label className="flex cursor-pointer items-center gap-3 rounded-lg px-2 py-1.5 hover:bg-slate-50">
+                    <input
+                      type="radio"
+                      name="accountantEmailSendMode"
+                      checked={sendMode === mode}
+                      onChange={() => applyMode(mode)}
+                      disabled={sending}
+                      className="h-4 w-4 border-slate-300"
+                    />
+                    <span className="text-sm font-semibold text-slate-800">{label}</span>
+                  </label>
+                </li>
+              ))}
+            </ul>
+          </fieldset>
+
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+            <p className="text-xs font-bold text-slate-600">{t("archive.emailModal.filesCardTitle")}</p>
+            <ul className="mt-2 space-y-2">
+              <li>
+                <label className="flex cursor-pointer items-center gap-3">
+                  <input
+                    type="checkbox"
+                    checked={includePdf}
+                    onChange={(e) => setPdfChecked(e.target.checked)}
+                    disabled={sending}
+                    className="h-4 w-4 rounded border-slate-300 accent-luxury-navy-rich"
+                  />
+                  <span className="text-sm font-semibold text-slate-800">
+                    {t("archive.emailModal.includePdf")}
+                  </span>
+                </label>
+              </li>
+              <li>
+                <label className="flex cursor-pointer items-center gap-3">
+                  <input
+                    type="checkbox"
+                    checked={includeSource}
+                    onChange={(e) => setSourceChecked(e.target.checked)}
+                    disabled={sending}
+                    className="h-4 w-4 rounded border-slate-300 accent-luxury-navy-rich"
+                  />
+                  <span className="text-sm font-semibold text-slate-800">
+                    {t("archive.emailModal.includeSource")}
+                  </span>
+                </label>
+              </li>
+            </ul>
+          </div>
+
+          <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2.5 text-sm text-emerald-950">
+            <p className="font-bold">{t("archive.emailModal.willSendTitle")}</p>
+            {previewLoading ? (
+              <p className="mt-1 flex items-center gap-2 text-emerald-800">
+                <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                {t("archive.emailModal.previewLoading")}
+              </p>
+            ) : preview ? (
+              <ul className="mt-1 space-y-0.5 text-emerald-900">
+                {preview.selectedPdfCount > 0 ? (
+                  <li className="flex items-center gap-1.5">
+                    <Check className="h-4 w-4 shrink-0" aria-hidden />
+                    {t("archive.emailModal.previewPdfCount", {
+                      count: String(preview.selectedPdfCount),
+                    })}
+                  </li>
+                ) : null}
+                {preview.selectedSourceCount > 0 ? (
+                  <li className="flex items-center gap-1.5">
+                    <Check className="h-4 w-4 shrink-0" aria-hidden />
+                    {t("archive.emailModal.previewSourceCount", {
+                      count: String(preview.selectedSourceCount),
+                    })}
+                  </li>
+                ) : null}
+                <li className="pt-1 font-bold">
+                  {t("archive.emailModal.previewTotal", { count: String(preview.totalFiles) })}
+                </li>
+                {preview.documentsWithNoFiles.length > 0 ? (
+                  <li className="text-amber-800">
+                    {t("archive.emailModal.previewMissing", {
+                      count: String(preview.documentsWithNoFiles.length),
+                    })}
+                  </li>
+                ) : null}
+              </ul>
+            ) : (
+              <p className="mt-1 text-emerald-800">{t("archive.emailModal.previewEmpty")}</p>
+            )}
+          </div>
+
           <label className="block">
             <span className="text-xs font-bold text-slate-600">{t("archive.emailModal.subjectLabel")}</span>
             <input
@@ -291,12 +494,15 @@ export function AccountantEmailModal({
           </button>
           <button
             type="button"
-            disabled={sending || recipients.length === 0}
+            disabled={sending || !canSend}
             onClick={() =>
               onSend({
                 recipients,
                 subject: subject.trim(),
                 message: message.trim(),
+                sendMode,
+                includePdf,
+                includeSource,
               })
             }
             className="inline-flex flex-1 items-center justify-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-sm font-bold text-white hover:bg-slate-800 disabled:opacity-50"

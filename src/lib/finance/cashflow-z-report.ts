@@ -1,4 +1,3 @@
-import { paymentMethodLabel } from "@/lib/finance/cashflow-display";
 import type { ZReportPayload } from "@/lib/finance/document-payload";
 import type { CashFlowRow } from "@/lib/finance/types";
 
@@ -11,6 +10,8 @@ export type ZReportCashflowSummary = {
   totalInflow: number;
   totalOutflow: number;
   paymentMethodLabels: string[];
+  /** ערכי DB גולמיים — לתרגום בתצוגה */
+  paymentMethods: string[];
   lineCount: number;
   representativeRowId: string;
 };
@@ -60,9 +61,10 @@ export function buildZReportSummary(zReportId: string, lines: CashFlowRow[]): ZR
   for (const row of sorted) {
     totalInflow += row.inflow;
     totalOutflow += row.outflow;
-    const label = paymentMethodLabel(row.payment_method);
-    if (label) methods.add(label);
+    const raw = (row.payment_method ?? "").trim();
+    if (raw) methods.add(raw);
   }
+  const paymentMethods = Array.from(methods);
   return {
     zReportId,
     documentId: zReportId,
@@ -71,7 +73,8 @@ export function buildZReportSummary(zReportId: string, lines: CashFlowRow[]): ZR
     zNumber,
     totalInflow,
     totalOutflow,
-    paymentMethodLabels: Array.from(methods),
+    paymentMethodLabels: paymentMethods,
+    paymentMethods,
     lineCount: sorted.length,
     representativeRowId: sorted[0]?.id ?? zReportId,
   };

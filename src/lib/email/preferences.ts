@@ -9,6 +9,8 @@ export type EmailPreferenceSnapshot = {
   emailNotifyTasks: boolean;
   emailNotifyLate: boolean;
   emailNotifyUpdates: boolean;
+  inAppNotificationsEnabled: boolean;
+  emailNotificationsEnabled: boolean;
 };
 
 const DEFAULTS: EmailPreferenceSnapshot = {
@@ -18,6 +20,8 @@ const DEFAULTS: EmailPreferenceSnapshot = {
   emailNotifyTasks: true,
   emailNotifyLate: true,
   emailNotifyUpdates: true,
+  inAppNotificationsEnabled: true,
+  emailNotificationsEnabled: true,
 };
 
 export async function getUserEmailPreferences(userId: string): Promise<EmailPreferenceSnapshot> {
@@ -31,6 +35,8 @@ export async function getUserEmailPreferences(userId: string): Promise<EmailPref
         emailNotifyTasks: true,
         emailNotifyLate: true,
         emailNotifyUpdates: true,
+        inAppNotificationsEnabled: true,
+        emailNotificationsEnabled: true,
       },
     });
     if (!u) return DEFAULTS;
@@ -44,6 +50,8 @@ export async function getUserEmailPreferences(userId: string): Promise<EmailPref
       emailNotifyTasks: u.emailNotifyTasks ?? true,
       emailNotifyLate: u.emailNotifyLate ?? true,
       emailNotifyUpdates: u.emailNotifyUpdates ?? true,
+      inAppNotificationsEnabled: u.inAppNotificationsEnabled ?? true,
+      emailNotificationsEnabled: u.emailNotificationsEnabled ?? true,
     };
   } catch {
     return DEFAULTS;

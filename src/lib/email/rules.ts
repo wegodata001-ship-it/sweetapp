@@ -41,6 +41,7 @@ function prefsAllowImportance(
   notificationType: string,
 ): boolean {
   if (prefs.emailMode === "muted") return false;
+  if (!prefs.emailNotificationsEnabled) return false;
   if (prefs.emailMode === "critical_only") {
     return importance === "CRITICAL" || importance === "HIGH";
   }

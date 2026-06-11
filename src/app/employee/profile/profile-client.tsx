@@ -28,6 +28,8 @@ export function EmployeeProfileClient() {
     emailNotifyTasks: true,
     emailNotifyLate: true,
     emailNotifyUpdates: true,
+    inAppNotificationsEnabled: true,
+    emailNotificationsEnabled: true,
   });
   const [prefsLoading, setPrefsLoading] = useState(true);
 
@@ -120,8 +122,52 @@ export function EmployeeProfileClient() {
       </section>
 
       <section className="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-200 md:p-5">
-        <h2 className="text-sm font-black text-slate-900">התראות במייל</h2>
-        <p className="mt-1 text-xs text-slate-500">רק התראות חשובות — לא כל מה שמופיע בפעמון</p>
+        <h2 className="text-sm font-black text-slate-900">העדפות התראות</h2>
+        <p className="mt-1 text-xs text-slate-500">בחר איך לקבל התראות מהמערכת</p>
+        {prefsLoading ? (
+          <p className="mt-3 text-sm text-slate-400">טוען…</p>
+        ) : (
+          <ul className="mt-3 space-y-2">
+            <li>
+              <label className="flex cursor-pointer items-center gap-3 rounded-xl border border-slate-100 px-3 py-2.5 hover:bg-slate-50">
+                <input
+                  type="checkbox"
+                  checked={emailPrefs.inAppNotificationsEnabled}
+                  onChange={(e) =>
+                    void saveEmailPrefs({
+                      ...emailPrefs,
+                      inAppNotificationsEnabled: e.target.checked,
+                    })
+                  }
+                  className="h-4 w-4 rounded border-slate-300"
+                />
+                <span className="text-sm font-semibold text-slate-800">🔔 קבלת התראות במערכת</span>
+              </label>
+            </li>
+            <li>
+              <label className="flex cursor-pointer items-center gap-3 rounded-xl border border-slate-100 px-3 py-2.5 hover:bg-slate-50">
+                <input
+                  type="checkbox"
+                  checked={emailPrefs.emailNotificationsEnabled}
+                  onChange={(e) =>
+                    void saveEmailPrefs({
+                      ...emailPrefs,
+                      emailNotificationsEnabled: e.target.checked,
+                      emailMode: e.target.checked ? emailPrefs.emailMode : "muted",
+                    })
+                  }
+                  className="h-4 w-4 rounded border-slate-300"
+                />
+                <span className="text-sm font-semibold text-slate-800">📧 קבלת התראות באימייל</span>
+              </label>
+            </li>
+          </ul>
+        )}
+      </section>
+
+      <section className="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-200 md:p-5">
+        <h2 className="text-sm font-black text-slate-900">התראות במייל — רמת פירוט</h2>
+        <p className="mt-1 text-xs text-slate-500">רק כשקבלת מיילים מופעלת</p>
         {prefsLoading ? (
           <p className="mt-3 text-sm text-slate-400">טוען…</p>
         ) : (
@@ -140,6 +186,7 @@ export function EmployeeProfileClient() {
                     type="radio"
                     name="emailMode"
                     checked={emailPrefs.emailMode === mode}
+                    disabled={!emailPrefs.emailNotificationsEnabled}
                     onChange={() => setEmailMode(mode)}
                     className="h-4 w-4 border-slate-300"
                   />
@@ -152,7 +199,7 @@ export function EmployeeProfileClient() {
                 <input
                   type="checkbox"
                   checked={emailPrefs.emailQuietHours}
-                  disabled={emailPrefs.emailMode === "muted"}
+                  disabled={emailPrefs.emailMode === "muted" || !emailPrefs.emailNotificationsEnabled}
                   onChange={(e) =>
                     void saveEmailPrefs({ ...emailPrefs, emailQuietHours: e.target.checked })
                   }

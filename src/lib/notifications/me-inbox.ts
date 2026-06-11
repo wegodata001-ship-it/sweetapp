@@ -5,15 +5,18 @@ import {
   priorityFromMetadata,
 } from "@/lib/notifications/db-compat";
 import { logNotificationFetch, logNotificationRead } from "@/lib/notifications/audit";
+import { getUserEmailPreferences } from "@/lib/email/preferences";
 
 /** סוגים שמותר לעובד לראות בתיבה שלו בלבד */
 export const EMPLOYEE_INBOX_TYPES = new Set<string>([
   "TASK_ASSIGNED",
   "TASK_STARTED",
   "TASK_LATE",
+  "TASK_OVERDUE",
   "TASK_GROUP_COMPLETED",
   "CLOCK_IN_LATE",
   "SHIFT_LATE",
+  "MISSED_CLOCK_IN",
   "MISSED_CLOCK_OUT",
   "CLOCK_OUT",
   "CHECK_DEPOSITED",
@@ -90,6 +93,11 @@ export async function listMeNotifications(params: {
 }): Promise<{ rows: MeRow[]; unreadCount: number; inbox: "employee" | "admin" }> {
   const { userId, role, onlyUnread, take } = params;
   const manager = isManagerRole(role);
+  const prefs = await getUserEmailPreferences(userId);
+
+  if (!prefs.inAppNotificationsEnabled) {
+    return { rows: [], unreadCount: 0, inbox: manager ? "admin" : "employee" };
+  }
 
   const baseWhere = manager
     ? { recipientUserId: userId, roleTarget: "ADMIN" as const }

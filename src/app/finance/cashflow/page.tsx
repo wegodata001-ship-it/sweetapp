@@ -25,7 +25,6 @@ import {
   zReportMatchesPaymentFilter,
 } from "@/lib/finance/cashflow-z-report";
 import { PdfPreviewModal } from "@/components/pdf-preview-modal";
-import { ExpenseCounterpartyFilter } from "@/components/finance/expense-counterparty-filter";
 import { useI18n } from "@/components/i18n-provider";
 import {
   deleteCashFlowEntry,
@@ -36,9 +35,11 @@ import {
 import { EXPENSE_TYPE_I18N, EXPENSE_TYPE_VALUES } from "@/lib/finance/expense-types";
 import type { CashFlowRow } from "@/lib/finance/types";
 import {
-  cashflowRowMatchesExpenseCounterparty,
-  type ExpenseCounterpartyKind,
+  cashflowRowMatchesEntityFilter,
+  cashflowRowSearchText,
+  type CashflowEntityFilterKind,
 } from "@/lib/finance/counterparty-filter";
+import { translatePaymentMethod } from "@/lib/finance/payment-methods-i18n";
 import { formatShekel, parseNum } from "@/lib/format-shekel";
 
 const thClass = "text-xs font-semibold text-slate-500";
@@ -57,8 +58,7 @@ export default function CashflowPage() {
   const [filterDateFrom, setFilterDateFrom] = useState("");
   const [filterDateTo, setFilterDateTo] = useState("");
   const [filterPaymentMethod, setFilterPaymentMethod] = useState("");
-  const [filterCounterpartyKind, setFilterCounterpartyKind] = useState<ExpenseCounterpartyKind>("");
-  const [filterCounterpartyId, setFilterCounterpartyId] = useState("");
+  const [filterEntityType, setFilterEntityType] = useState<CashflowEntityFilterKind>("");
   const [suppliers, setSuppliers] = useState<{ id: string; name: string }[]>([]);
   const [employees, setEmployees] = useState<{ id: string; name: string }[]>([]);
 
@@ -150,28 +150,36 @@ export default function CashflowPage() {
     return () => document.removeEventListener("mousedown", close);
   }, [openTypeMenuId]);
 
+  const supplierNameById = useMemo(
+    () => new Map(suppliers.map((s) => [s.id, s.name] as const)),
+    [suppliers],
+  );
+  const employeeNameById = useMemo(
+    () => new Map(employees.map((e) => [e.id, e.name] as const)),
+    [employees],
+  );
+
   const paymentMethodOptions = useMemo(() => {
     const set = new Set<string>();
     for (const r of rows) {
       const p = r.payment_method?.trim();
       if (p) set.add(p);
     }
-    return Array.from(set).sort((a, b) => a.localeCompare(b, bcp47));
-  }, [rows, bcp47]);
+    return Array.from(set).sort((a, b) =>
+      (translatePaymentMethod(a, t) ?? a).localeCompare(translatePaymentMethod(b, t) ?? b, bcp47),
+    );
+  }, [rows, bcp47, t]);
 
   const filteredRows = useMemo(() => {
     const q = filterCustomer.trim().toLowerCase();
     return rows.filter((row) => {
-      if (q && !(row.customer_name ?? "").toLowerCase().includes(q)) return false;
       if (filterDateFrom.trim() && row.entry_date < filterDateFrom.trim()) return false;
       if (filterDateTo.trim() && row.entry_date > filterDateTo.trim()) return false;
       if (filterPaymentMethod && (row.payment_method ?? "").trim() !== filterPaymentMethod) return false;
-      if (
-        filterCounterpartyKind &&
-        filterCounterpartyId &&
-        !cashflowRowMatchesExpenseCounterparty(row, filterCounterpartyKind, filterCounterpartyId)
-      ) {
-        return false;
+      if (!cashflowRowMatchesEntityFilter(row, filterEntityType)) return false;
+      if (q) {
+        const haystack = cashflowRowSearchText(row, supplierNameById, employeeNameById);
+        if (!haystack.includes(q)) return false;
       }
       return true;
     });
@@ -181,8 +189,9 @@ export default function CashflowPage() {
     filterDateFrom,
     filterDateTo,
     filterPaymentMethod,
-    filterCounterpartyKind,
-    filterCounterpartyId,
+    filterEntityType,
+    supplierNameById,
+    employeeNameById,
   ]);
 
   const zGroups = useMemo(() => groupCashflowByZReport(filteredRows), [filteredRows]);
@@ -864,17 +873,49 @@ export default function CashflowPage() {
       </div>
 
       <div className="mt-[14px] flex min-h-[56px] flex-wrap items-center gap-2.5 rounded-[18px] border border-slate-100 bg-slate-50/80 p-3 shadow-sm">
-        <input
-          type="text"
-          value={filterCustomer}
-          onChange={(e) => setFilterCustomer(e.target.value)}
+        <select
+          value={filterPaymentMethod}
+          onChange={(e) => setFilterPaymentMethod(e.target.value)}
           className={`${filterInputClass} min-w-[10rem] flex-1`}
-          placeholder={t("cashflow.searchCustomer")}
+          aria-label={t("cashflow.thMethod")}
+        >
+          <option value="">{t("cashflow.allPaymentMethods")}</option>
+          {paymentMethodOptions.map((p) => (
+            <option key={p} value={p}>
+              {translatePaymentMethod(p, t) ?? p}
+            </option>
+          ))}
+        </select>
+        <input
+          type="date"
+          value={filterDateFrom}
+          onChange={(e) => setFilterDateFrom(e.target.value)}
+          className={`${filterInputClass} min-w-[9rem] flex-1`}
+          aria-label={t("archive.filterFromDate")}
         />
+        <input
+          type="date"
+          value={filterDateTo}
+          onChange={(e) => setFilterDateTo(e.target.value)}
+          className={`${filterInputClass} min-w-[9rem] flex-1`}
+          aria-label={t("archive.filterToDate")}
+        />
+        <select
+          value={filterEntityType}
+          onChange={(e) => setFilterEntityType(e.target.value as CashflowEntityFilterKind)}
+          className={`${filterInputClass} min-w-[10rem] flex-1`}
+          aria-label={t("cashflow.entityTypeFilter")}
+        >
+          <option value="">{t("cashflow.entityTypeAll")}</option>
+          <option value="customer">{t("cashflow.entityTypeCustomers")}</option>
+          <option value="supplier">{t("cashflow.entityTypeSuppliers")}</option>
+          <option value="employee">{t("cashflow.entityTypeEmployees")}</option>
+        </select>
         <select
           value={filterType}
           onChange={(e) => setFilterType(e.target.value as "all" | "income" | "expense")}
           className={`${filterInputClass} min-w-[10rem] flex-1`}
+          aria-label={t("cashflow.thType")}
         >
           <option value="all">{t("cashflow.allTypes")}</option>
           <option value="income">{t("cashflow.incomeOnly")}</option>
@@ -896,46 +937,12 @@ export default function CashflowPage() {
           </select>
         ) : null}
         <input
-          type="date"
-          value={filterDateFrom}
-          onChange={(e) => setFilterDateFrom(e.target.value)}
-          className={`${filterInputClass} min-w-[9rem] flex-1`}
+          type="text"
+          value={filterCustomer}
+          onChange={(e) => setFilterCustomer(e.target.value)}
+          className={`${filterInputClass} min-w-[10rem] flex-[1.2]`}
+          placeholder={t("cashflow.searchParty")}
         />
-        <input
-          type="date"
-          value={filterDateTo}
-          onChange={(e) => setFilterDateTo(e.target.value)}
-          className={`${filterInputClass} min-w-[9rem] flex-1`}
-        />
-        <select
-          value={filterPaymentMethod}
-          onChange={(e) => setFilterPaymentMethod(e.target.value)}
-          className={`${filterInputClass} min-w-[10rem] flex-1`}
-        >
-          <option value="">{t("cashflow.allPaymentMethods")}</option>
-          {paymentMethodOptions.map((p) => (
-            <option key={p} value={p}>
-              {p}
-            </option>
-          ))}
-        </select>
-      </div>
-
-      <div className="mt-2 rounded-[18px] border border-slate-100 bg-white p-3 shadow-sm">
-        <ExpenseCounterpartyFilter
-          kind={filterCounterpartyKind}
-          onKindChange={setFilterCounterpartyKind}
-          partyId={filterCounterpartyId}
-          onPartyIdChange={setFilterCounterpartyId}
-          suppliers={suppliers}
-          employees={employees}
-          selectClassName={`${filterInputClass} mt-1 h-[42px]`}
-        />
-        {filterCounterpartyKind && filterCounterpartyId ? (
-          <p className="mt-2 text-[11px] font-semibold text-slate-500">
-            {t("financeCounterparty.expenseFilterHint")}
-          </p>
-        ) : null}
       </div>
 
       {/* Desktop table — שורות רגילות + דוחות Z מקובצים */}

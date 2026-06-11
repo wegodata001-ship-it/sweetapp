@@ -28,7 +28,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { PdfPreviewModal } from "@/components/pdf-preview-modal";
 import { AccountantEmailModal } from "@/components/finance/accountant-email-modal";
-import { ExpenseCounterpartyFilter } from "@/components/finance/expense-counterparty-filter";
+import { ArchiveCounterpartyFilter } from "@/components/finance/archive-counterparty-filter";
 import { useI18n } from "@/components/i18n-provider";
 import {
   bulkSetDocumentsAccountantSent,
@@ -42,8 +42,9 @@ import { REPORT_TYPES } from "@/lib/pdf/constants";
 import { DEPOSIT_STATUS_LABELS, DEPOSIT_TYPE_LABELS } from "@/lib/finance/document-payload";
 import type { AccountantTransferLogRow, FinanceDocumentRow } from "@/lib/finance/types";
 import {
-  documentMatchesExpenseCounterparty,
-  type ExpenseCounterpartyKind,
+  documentMatchesArchiveCounterparty,
+  parseArchiveCounterpartyKey,
+  type ArchiveCounterpartyKindFilter,
 } from "@/lib/finance/counterparty-filter";
 
 type GeneratedReportRow = {
@@ -168,19 +169,6 @@ function sortReportsNewestFirst(rows: GeneratedReportRow[]): GeneratedReportRow[
   );
 }
 
-function documentPartySearchText(row: FinanceDocumentRow): string {
-  const payload = row.payload;
-  const parts = [
-    row.title,
-    row.customer_name,
-    row.category,
-    row.document_type,
-    payload?.kind !== "zreport" ? payload?.counterpartyName : null,
-    payload?.kind !== "zreport" ? payload?.employeePayNotes : null,
-  ];
-  return parts.filter(Boolean).join(" ").toLowerCase();
-}
-
 export default function FinanceArchivePage() {
   const { t, bcp47 } = useI18n();
   const [tab, setTab] = useState<(typeof TAB_OPTIONS)[number]["id"]>("pdf");
@@ -192,11 +180,9 @@ export default function FinanceArchivePage() {
   const [accountantFilter, setAccountantFilter] = useState<AccountantFilter>("all");
   const [accountantBusyIds, setAccountantBusyIds] = useState<Set<string>>(new Set());
   const [accountantNotice, setAccountantNotice] = useState<string | null>(null);
-  const [partyFilter, setPartyFilter] = useState("");
-  const [counterpartyKind, setCounterpartyKind] = useState<ExpenseCounterpartyKind>("");
-  const [counterpartyId, setCounterpartyId] = useState("");
-  const [suppliers, setSuppliers] = useState<{ id: string; name: string }[]>([]);
-  const [employees, setEmployees] = useState<{ id: string; name: string }[]>([]);
+  const [archiveCounterpartyKey, setArchiveCounterpartyKey] = useState("");
+  const [archiveCounterpartyKindFilter, setArchiveCounterpartyKindFilter] =
+    useState<ArchiveCounterpartyKindFilter>("");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkBusy, setBulkBusy] = useState(false);
   const [emailModalOpen, setEmailModalOpen] = useState(false);
@@ -248,33 +234,29 @@ export default function FinanceArchivePage() {
   }, [refresh]);
 
   useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      try {
-        const [supRes, empRes] = await Promise.all([
-          fetch("/api/procurement/suppliers", { credentials: "same-origin" }),
-          fetch("/api/employees", { credentials: "same-origin" }),
-        ]);
-        const supJson = (await supRes.json()) as { data?: { id: string; name: string }[] };
-        const empJson = (await empRes.json()) as { data?: { id: string; name: string }[] };
-        if (!cancelled) {
-          setSuppliers(supJson.data ?? []);
-          setEmployees(empJson.data ?? []);
-        }
-      } catch {
-        /* ignore */
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  useEffect(() => {
     queueMicrotask(() => void loadReports());
-    // טעינה ראשונית; סינון נוסף בלחיצה על «סינון»
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const archiveCounterpartyRef = useMemo(
+    () => (archiveCounterpartyKey ? parseArchiveCounterpartyKey(archiveCounterpartyKey) : null),
+    [archiveCounterpartyKey],
+  );
+
+  const matchingDocumentIds = useMemo(() => {
+    if (!archiveCounterpartyRef) return null;
+    return new Set(
+      rows
+        .filter((row) =>
+          documentMatchesArchiveCounterparty(
+            row,
+            archiveCounterpartyRef.kind,
+            archiveCounterpartyRef.id,
+          ),
+        )
+        .map((row) => row.id),
+    );
+  }, [rows, archiveCounterpartyRef]);
 
   const markAccountantBusy = (id: string, busy: boolean) => {
     setAccountantBusyIds((prev) => {
@@ -372,6 +354,9 @@ export default function FinanceArchivePage() {
     recipients: string[];
     subject: string;
     message: string;
+    sendMode: "pdf_only" | "source_only" | "pdf_and_source";
+    includePdf: boolean;
+    includeSource: boolean;
   }) => {
     if (selectedIds.size === 0) return;
     setEmailSending(true);
@@ -382,6 +367,9 @@ export default function FinanceArchivePage() {
         recipients: params.recipients,
         subject: params.subject || undefined,
         message: params.message || undefined,
+        sendMode: params.sendMode,
+        includePdf: params.includePdf,
+        includeSource: params.includeSource,
       });
       if (!res.ok) {
         setAccountantNotice(res.error ?? t("archive.emailModal.sendFailed"));
@@ -454,18 +442,26 @@ export default function FinanceArchivePage() {
   const btnSm =
     "inline-flex h-9 items-center justify-center gap-1 rounded-lg border px-2.5 text-xs font-black transition";
 
-  const filteredReports = useMemo(() => sortReportsNewestFirst(reports), [reports]);
+  const filteredReports = useMemo(() => {
+    let base = sortReportsNewestFirst(reports);
+    if (matchingDocumentIds) {
+      base = base.filter((r) => r.relatedId && matchingDocumentIds.has(r.relatedId));
+    }
+    return base;
+  }, [reports, matchingDocumentIds]);
   const filteredRows = useMemo(() => {
-    const q = partyFilter.trim().toLowerCase();
     let base = sortFinanceDocumentsNewestFirst(rows);
-    if (counterpartyKind && counterpartyId) {
+    if (archiveCounterpartyRef) {
       base = base.filter((row) =>
-        documentMatchesExpenseCounterparty(row, counterpartyKind, counterpartyId),
+        documentMatchesArchiveCounterparty(
+          row,
+          archiveCounterpartyRef.kind,
+          archiveCounterpartyRef.id,
+        ),
       );
     }
-    if (!q) return base;
-    return base.filter((row) => documentPartySearchText(row).includes(q));
-  }, [rows, partyFilter, counterpartyKind, counterpartyId]);
+    return base;
+  }, [rows, archiveCounterpartyRef]);
 
   return (
     <div className="mx-auto max-w-7xl space-y-4">
@@ -501,7 +497,7 @@ export default function FinanceArchivePage() {
       {tab === "pdf" ? (
         <section className="app-panel p-4 md:p-6">
           <div className="grid gap-3 md:grid-cols-12 md:gap-2">
-            <label className="md:col-span-4">
+            <label className="md:col-span-3">
               <span className="block text-[11px] font-bold text-slate-500">{t("archive.filterSearch")}</span>
               <input
                 value={reportQ}
@@ -510,7 +506,18 @@ export default function FinanceArchivePage() {
                 className="mt-1 h-[42px] w-full rounded-lg border border-slate-300 px-3 text-right text-sm font-semibold outline-none focus:border-cyan-600 focus:ring-1 focus:ring-cyan-600/25"
               />
             </label>
-            <label className="md:col-span-3">
+            <div className="md:col-span-3">
+              <ArchiveCounterpartyFilter
+                className="mt-1"
+                kindFilter={archiveCounterpartyKindFilter}
+                onKindFilterChange={setArchiveCounterpartyKindFilter}
+                valueKey={archiveCounterpartyKey}
+                onChange={(key) => {
+                  setArchiveCounterpartyKey(key);
+                }}
+              />
+            </div>
+            <label className="md:col-span-2">
               <span className="block text-[11px] font-bold text-slate-500">{t("archive.filterDocType")}</span>
               <select
                 value={reportType}
@@ -861,38 +868,17 @@ export default function FinanceArchivePage() {
               </p>
             ) : null}
 
-            <label className="block max-w-md">
-              <span className="block text-[11px] font-bold text-slate-500">{t("archive.filterPartyName")}</span>
-              <input
-                value={partyFilter}
-                onChange={(e) => {
-                  setPartyFilter(e.target.value);
+            <div className="max-w-2xl">
+              <ArchiveCounterpartyFilter
+                kindFilter={archiveCounterpartyKindFilter}
+                onKindFilterChange={setArchiveCounterpartyKindFilter}
+                valueKey={archiveCounterpartyKey}
+                onChange={(key) => {
+                  setArchiveCounterpartyKey(key);
                   clearSelection();
                 }}
-                placeholder={t("archive.filterPartyNamePlaceholder")}
-                className="mt-1 h-[42px] w-full rounded-xl border border-slate-300 bg-white px-3 text-right text-sm font-semibold outline-none focus:border-cyan-600 focus:ring-1 focus:ring-cyan-600/25"
               />
-            </label>
-
-            <ExpenseCounterpartyFilter
-              kind={counterpartyKind}
-              onKindChange={(kind) => {
-                setCounterpartyKind(kind);
-                clearSelection();
-              }}
-              partyId={counterpartyId}
-              onPartyIdChange={(id) => {
-                setCounterpartyId(id);
-                clearSelection();
-              }}
-              suppliers={suppliers}
-              employees={employees}
-            />
-            {counterpartyKind && counterpartyId ? (
-              <p className="text-[11px] font-semibold text-slate-500">
-                {t("financeCounterparty.archiveExpenseFilterHint")}
-              </p>
-            ) : null}
+            </div>
 
             {selectedIds.size > 0 ? (
               <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-luxury-navy-rich/15 bg-luxury-navy-rich/5 px-4 py-3">
@@ -943,7 +929,7 @@ export default function FinanceArchivePage() {
               <p className="text-sm font-semibold text-slate-500">{t("common.loading")}</p>
             ) : filteredRows.length === 0 ? (
               <p className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-6 py-12 text-center text-sm font-semibold text-slate-500">
-                {partyFilter.trim()
+                {archiveCounterpartyKey
                   ? t("archive.emptyPartyFilter")
                   : accountantFilter === "not_sent"
                   ? t("archive.emptyNotSent")
@@ -1500,6 +1486,7 @@ export default function FinanceArchivePage() {
       <AccountantEmailModal
         open={emailModalOpen}
         selectedCount={selectedIds.size}
+        selectedDocumentIds={[...selectedIds]}
         defaultEmail={accountantRecipientEmail ?? ""}
         defaultSubject={t("archive.emailModal.defaultSubject")}
         sending={emailSending}

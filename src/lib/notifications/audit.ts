@@ -1,6 +1,18 @@
+import { persistNotificationAudit } from "@/lib/notifications/system-audit-log";
+
 /** לוגים אחידים לשרשרת ההתראות — QA ודיבוג */
 export function logNotificationCreated(payload: Record<string, unknown>): void {
   console.log("[NOTIFICATION CREATED]", payload);
+  const recipientUserId =
+    typeof payload.recipientUserId === "string" ? payload.recipientUserId : null;
+  if (recipientUserId) {
+    void persistNotificationAudit(recipientUserId, "NOTIFICATION_CREATED", {
+      notificationId: payload.id,
+      type: payload.type,
+      roleTarget: payload.roleTarget,
+      emailImportance: payload.emailImportance,
+    });
+  }
 }
 
 export function logNotificationRead(payload: Record<string, unknown>): void {

@@ -1,3 +1,5 @@
+import { persistNotificationAudit } from "@/lib/notifications/system-audit-log";
+
 type EmailLogPayload = {
   notificationId?: string | null;
   userId?: string | null;
@@ -57,6 +59,16 @@ export function logEmailSending(payload: EmailLogPayload): void {
 
 export function logEmailSent(payload: EmailLogPayload): void {
   console.log(formatEmailLog({ ...payload, status: "SUCCESS" }));
+  const userId = payload.userId ?? payload.recipientUserId;
+  if (userId) {
+    void persistNotificationAudit(userId, "EMAIL_NOTIFICATION_SENT", {
+      notificationId: payload.notificationId,
+      type: payload.type,
+      to: payload.to ?? payload.email,
+      logId: payload.logId,
+      resendId: payload.resendId,
+    });
+  }
 }
 
 function reasonText(payload: EmailLogPayload): string | undefined {
@@ -67,6 +79,16 @@ function reasonText(payload: EmailLogPayload): string | undefined {
 
 export function logEmailFailed(payload: EmailLogPayload): void {
   console.log(formatEmailLog({ ...payload, status: "FAILED", reason: reasonText(payload) }));
+  const userId = payload.userId ?? payload.recipientUserId;
+  if (userId) {
+    void persistNotificationAudit(userId, "EMAIL_NOTIFICATION_FAILED", {
+      notificationId: payload.notificationId,
+      type: payload.type,
+      to: payload.to ?? payload.email,
+      reason: reasonText(payload),
+      logId: payload.logId,
+    });
+  }
 }
 
 export function logEmailSkipped(payload: EmailLogPayload): void {

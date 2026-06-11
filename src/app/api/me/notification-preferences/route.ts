@@ -37,6 +37,8 @@ export async function PATCH(req: NextRequest) {
     emailNotifyTasks: boolean;
     emailNotifyLate: boolean;
     emailNotifyUpdates: boolean;
+    inAppNotificationsEnabled: boolean;
+    emailNotificationsEnabled: boolean;
   }>;
 
   const data: Record<string, boolean | string> = {};
@@ -50,6 +52,12 @@ export async function PATCH(req: NextRequest) {
   if (typeof body.emailNotifyTasks === "boolean") data.emailNotifyTasks = body.emailNotifyTasks;
   if (typeof body.emailNotifyLate === "boolean") data.emailNotifyLate = body.emailNotifyLate;
   if (typeof body.emailNotifyUpdates === "boolean") data.emailNotifyUpdates = body.emailNotifyUpdates;
+  if (typeof body.inAppNotificationsEnabled === "boolean") {
+    data.inAppNotificationsEnabled = body.inAppNotificationsEnabled;
+  }
+  if (typeof body.emailNotificationsEnabled === "boolean") {
+    data.emailNotificationsEnabled = body.emailNotificationsEnabled;
+  }
 
   try {
     const updated = await prisma.user.update({
@@ -62,6 +70,8 @@ export async function PATCH(req: NextRequest) {
         emailNotifyTasks: true,
         emailNotifyLate: true,
         emailNotifyUpdates: true,
+        inAppNotificationsEnabled: true,
+        emailNotificationsEnabled: true,
       },
     });
     return NextResponse.json({ ok: true, data: updated });

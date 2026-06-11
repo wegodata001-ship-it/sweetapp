@@ -1,8 +1,10 @@
-/** תצוגת יומן תזרים בלבד — ללא יתרות לקוח */
-
-import type { CashFlowRow } from "@/lib/finance/types";
-import { EXPENSE_TYPE_I18N, isExpenseType } from "@/lib/finance/expense-types";
 import type { TranslateFn } from "@/lib/i18n/translator";
+import {
+  normalizePaymentMethodKey,
+  translatePaymentMethod,
+} from "@/lib/finance/payment-methods-i18n";
+import { EXPENSE_TYPE_I18N, isExpenseType } from "@/lib/finance/expense-types";
+import type { CashFlowRow } from "@/lib/finance/types";
 
 const CUID_LIKE = /\b[c][abcdefghijklmnopqrstuvwxyz0123456789]{15,}\b/gi;
 
@@ -100,31 +102,28 @@ export function sanitizeCashFlowDescription(raw: string | null | undefined): str
   return t;
 }
 
-const METHOD_PRESETS: Record<string, { emoji: string; label: string }> = {
-  CASH: { emoji: "💵", label: "מזומן" },
-  CREDIT: { emoji: "💳", label: "אשראי" },
-  BIT: { emoji: "📱", label: "ביט" },
-  BANK: { emoji: "🏦", label: "העברה בנקאית" },
-  CHECK: { emoji: "📝", label: "צ׳ק" },
-  /** סיכום דוח Z כשורה אחת */
-  CASH_REGISTER: { emoji: "🧾", label: "קופה" },
+const METHOD_EMOJI: Record<string, string> = {
+  CASH: "💵",
+  CREDIT: "💳",
+  BIT: "📱",
+  TRANSFER: "🏦",
+  BANK: "🏦",
+  CHECK: "📝",
+  OTHER: "💰",
+  CASH_REGISTER: "🧾",
 };
 
-export function paymentMethodPill(raw: string | null | undefined): { emoji: string; label: string } | null {
-  const k = (raw ?? "").trim();
-  if (!k) return null;
-  const upper = k.toUpperCase();
-  if (METHOD_PRESETS[upper]) return METHOD_PRESETS[upper];
-  if (upper === "CASH_REGISTER" || /cash_register/i.test(k)) return METHOD_PRESETS.CASH_REGISTER;
-  if (/מזומן|cash/i.test(k)) return METHOD_PRESETS.CASH;
-  if (/אשראי|credit/i.test(k)) return METHOD_PRESETS.CREDIT;
-  if (/ביט|bit/i.test(k)) return METHOD_PRESETS.BIT;
-  if (/העבר|בנק|bank|transfer/i.test(k)) return METHOD_PRESETS.BANK;
-  if (/צ.?ק|check/i.test(k)) return METHOD_PRESETS.CHECK;
-  return { emoji: "💰", label: k };
+export function paymentMethodPill(
+  raw: string | null | undefined,
+  t: TranslateFn,
+): { emoji: string; label: string } | null {
+  const label = translatePaymentMethod(raw, t);
+  if (!label) return null;
+  const key = normalizePaymentMethodKey(raw) ?? "OTHER";
+  return { emoji: METHOD_EMOJI[key] ?? "💰", label };
 }
 
 /** תווית אמצעי תשלום לטבלה — בלי אימוג'י */
-export function paymentMethodLabel(raw: string | null | undefined): string | null {
-  return paymentMethodPill(raw)?.label ?? null;
+export function paymentMethodLabel(raw: string | null | undefined, t: TranslateFn): string | null {
+  return translatePaymentMethod(raw, t);
 }

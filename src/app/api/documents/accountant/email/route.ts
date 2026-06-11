@@ -24,6 +24,9 @@ export async function POST(req: NextRequest) {
     recipients?: unknown;
     subject?: unknown;
     message?: unknown;
+    includePdf?: unknown;
+    includeSource?: unknown;
+    sendMode?: unknown;
   };
   try {
     body = (await req.json()) as typeof body;
@@ -46,6 +49,17 @@ export async function POST(req: NextRequest) {
 
   const subject = typeof body.subject === "string" ? body.subject : undefined;
   const message = typeof body.message === "string" ? body.message : undefined;
+  const attachmentSelection =
+    body.sendMode === "pdf_only"
+      ? { includePdf: true, includeSource: false }
+      : body.sendMode === "source_only"
+        ? { includePdf: false, includeSource: true }
+        : body.sendMode === "pdf_and_source"
+          ? { includePdf: true, includeSource: true }
+          : {
+              includePdf: body.includePdf !== false,
+              includeSource: body.includeSource !== false,
+            };
 
   if (documentIds.length === 0) {
     return NextResponse.json({ ok: false, error: "לא נבחרו מסמכים" }, { status: 400 });
@@ -64,6 +78,7 @@ export async function POST(req: NextRequest) {
       subject,
       message,
       sentById: session.sub,
+      attachmentSelection,
     });
 
     if (!result.ok) {
@@ -71,9 +86,9 @@ export async function POST(req: NextRequest) {
         {
           ok: false,
           error: result.error,
-          missingPdfDocumentIds: result.missingPdfDocumentIds,
+          missingDocumentIds: result.missingDocumentIds,
         },
-        { status: result.missingPdfDocumentIds?.length ? 422 : 502 },
+        { status: result.missingDocumentIds?.length ? 422 : 502 },
       );
     }
 
@@ -84,6 +99,9 @@ export async function POST(req: NextRequest) {
       zipped: result.zipped,
       resendId: result.resendId,
       message: result.message,
+      attachmentCount: result.attachmentCount,
+      pdfCount: result.pdfCount,
+      sourceCount: result.sourceCount,
     });
   } catch (e) {
     return NextResponse.json(

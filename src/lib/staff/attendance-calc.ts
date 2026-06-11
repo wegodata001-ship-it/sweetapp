@@ -27,3 +27,17 @@ export function computeOvertimeOnClockOut(
   const ot = Math.max(0, actual - end);
   return { hasOvertime: ot > 0, overtimeMinutes: ot };
 }
+
+const EARLY_LEAVE_GRACE_MINUTES = 5;
+
+export function computeEarlyLeaveOnClockOut(
+  shift: ShiftLike | null,
+  clockOut: Date,
+): { isEarlyLeave: boolean; earlyMinutes: number } {
+  if (!shift) return { isEarlyLeave: false, earlyMinutes: 0 };
+  const end = hmToMinutes(shift.endTime);
+  if (end === null) return { isEarlyLeave: false, earlyMinutes: 0 };
+  const actual = minutesSinceMidnightIsrael(clockOut);
+  const early = Math.max(0, end - actual - EARLY_LEAVE_GRACE_MINUTES);
+  return { isEarlyLeave: early > 0, earlyMinutes: early };
+}

@@ -14,6 +14,12 @@ import {
 import { logScanEnv } from "@/lib/document-scan/scan-env";
 import { scanStreamResponse } from "@/lib/document-scan/scan-stream";
 import type { ScanProgressPhase } from "@/lib/document-scan/scan-progress";
+import type { ScannedDocument } from "@/lib/document-scan/api-response";
+import {
+  notifyDocumentScanFailed,
+  notifyDocumentScanSuccess,
+  notifyDocumentScanUnlinked,
+} from "@/lib/notifications/document-scan-notifications";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -94,6 +100,33 @@ async function runExpenseScan(params: {
   return { data: { ...data, partial }, debug };
 }
 
+async function emitScanNotifications(
+  data: ScannedDocument & { error?: string },
+  fileName: string,
+  hash: string,
+): Promise<void> {
+  if (data.error === "SCAN_READ_FAILED") {
+    await notifyDocumentScanFailed({
+      fileName,
+      fileHash: hash,
+      reason: "פענוח המסמך נכשל",
+    });
+    return;
+  }
+
+  await notifyDocumentScanSuccess({ fileName, fileHash: hash });
+
+  const hasSupplier = Boolean(data.supplierId?.trim());
+  const supplierDetected = Boolean(data.supplierName?.trim() || data.supplierRawName?.trim());
+  if (!hasSupplier && supplierDetected) {
+    await notifyDocumentScanUnlinked({
+      fileName,
+      fileHash: hash,
+      supplierName: data.supplierName || data.supplierRawName,
+    });
+  }
+}
+
 /** POST /api/expenses/scan — ניתוח מסמכים באמצעות Gemini AI בלבד */
 export async function POST(req: NextRequest) {
   console.log("SCAN_START");
@@ -150,6 +183,7 @@ export async function POST(req: NextRequest) {
             compareSupplierPrices,
             onProgress,
           });
+          void emitScanNotifications(data, fileName, hash);
           return {
             type: "result",
             success: true,
@@ -182,11 +216,23 @@ export async function POST(req: NextRequest) {
       intakeMode,
       compareSupplierPrices,
     });
+    void emitScanNotifications(data, fileName, hash);
     return scanJsonSuccess(data, debug);
   } catch (scanError) {
     if (scanError instanceof ScanServiceError && scanError.code === "SCAN_READ_FAILED") {
+      void notifyDocumentScanFailed({
+        fileName: "scan-upload",
+        fileHash: "failed-read",
+        reason: scanError.message,
+      });
       return scanJsonError(scanError.message, 422, "SCAN_READ_FAILED");
     }
+    const fileName = "scan-upload";
+    void notifyDocumentScanFailed({
+      fileName,
+      fileHash: `err-${Date.now()}`,
+      reason: scanError instanceof Error ? scanError.message : "שגיאה בסריקה",
+    });
     return scanErrorResponse(scanError);
   }
 }

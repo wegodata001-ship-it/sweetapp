@@ -362,6 +362,9 @@ export async function sendAccountantDocumentsByEmail(params: {
   recipients: string[];
   subject?: string;
   message?: string;
+  includePdf?: boolean;
+  includeSource?: boolean;
+  sendMode?: "pdf_only" | "source_only" | "pdf_and_source";
 }): Promise<{
   ok: boolean;
   sentCount?: number;
@@ -369,7 +372,10 @@ export async function sendAccountantDocumentsByEmail(params: {
   zipped?: boolean;
   message?: string;
   error?: string;
-  missingPdfDocumentIds?: string[];
+  missingDocumentIds?: string[];
+  attachmentCount?: number;
+  pdfCount?: number;
+  sourceCount?: number;
 }> {
   const res = await fetch("/api/documents/accountant/email", {
     method: "POST",
@@ -385,7 +391,10 @@ export async function sendAccountantDocumentsByEmail(params: {
       zipped?: boolean;
       message?: string;
       error?: string;
-      missingPdfDocumentIds?: string[];
+      missingDocumentIds?: string[];
+      attachmentCount?: number;
+      pdfCount?: number;
+      sourceCount?: number;
     };
     return {
       ok: Boolean(j.ok),
@@ -394,8 +403,39 @@ export async function sendAccountantDocumentsByEmail(params: {
       zipped: j.zipped,
       message: j.message,
       error: j.error,
-      missingPdfDocumentIds: j.missingPdfDocumentIds,
+      missingDocumentIds: j.missingDocumentIds,
+      attachmentCount: j.attachmentCount,
+      pdfCount: j.pdfCount,
+      sourceCount: j.sourceCount,
     };
+  } catch {
+    return { ok: false, error: "תגובת שרת לא תקינה" };
+  }
+}
+
+export type DocumentEmailAttachmentPreview = {
+  documents: Array<{ documentId: string; hasPdf: boolean; hasSource: boolean }>;
+  selectedPdfCount: number;
+  selectedSourceCount: number;
+  totalFiles: number;
+  documentsWithNoFiles: string[];
+};
+
+export async function previewAccountantEmailAttachments(params: {
+  documentIds: string[];
+  includePdf?: boolean;
+  includeSource?: boolean;
+  sendMode?: "pdf_only" | "source_only" | "pdf_and_source";
+}): Promise<{ ok: boolean; data?: DocumentEmailAttachmentPreview; error?: string }> {
+  const res = await fetch("/api/documents/accountant/email/preview", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(params),
+    credentials: "same-origin",
+  });
+  try {
+    const j = (await res.json()) as { ok?: boolean; data?: DocumentEmailAttachmentPreview; error?: string };
+    return { ok: Boolean(j.ok), data: j.data, error: j.error };
   } catch {
     return { ok: false, error: "תגובת שרת לא תקינה" };
   }

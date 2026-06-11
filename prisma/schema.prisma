@@ -944,6 +944,10 @@ model User {
   /// העדפות מייל — important | critical_only | daily_digest | muted
   emailMode                    String                  @default("important")
   emailQuietHours              Boolean                 @default(true)
+  /// 🔔 קבלת התראות במערכת (פעמון)
+  inAppNotificationsEnabled    Boolean                 @default(true)
+  /// 📧 קבלת התראות באימייל (Resend)
+  emailNotificationsEnabled    Boolean                 @default(true)
   activeTaskId                 String?                 @unique
   activeTaskStartedAt          DateTime?
   /// נוכחות LIVE — מצב עבודה

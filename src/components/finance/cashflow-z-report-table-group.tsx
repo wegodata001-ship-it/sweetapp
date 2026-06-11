@@ -5,6 +5,7 @@ import { Fragment, type ReactNode } from "react";
 import type { CashflowMenuAction } from "@/components/finance/cashflow-row-actions-menu";
 import { CashflowRowActionsMenu } from "@/components/finance/cashflow-row-actions-menu";
 import { useI18n } from "@/components/i18n-provider";
+import { translatePaymentMethod } from "@/lib/finance/payment-methods-i18n";
 import type { ZReportCashflowSummary } from "@/lib/finance/cashflow-z-report";
 import type { CashFlowRow } from "@/lib/finance/types";
 import { formatShekel } from "@/lib/format-shekel";
@@ -64,7 +65,9 @@ export function CashflowZReportTableGroupDesktop({
   const statusText = detailStatus ? paymentStatusLabel(detailStatus, t) : "—";
   const timeText = detailTime ?? "—";
   const methodsText =
-    summary.paymentMethodLabels.length > 0 ? summary.paymentMethodLabels.join(" · ") : "—";
+    summary.paymentMethods.length > 0
+      ? summary.paymentMethods.map((m) => translatePaymentMethod(m, t) ?? m).join(" · ")
+      : "—";
 
   return (
     <Fragment key={`z-desktop-${summary.zReportId}`}>

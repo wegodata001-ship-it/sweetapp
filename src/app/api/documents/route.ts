@@ -31,6 +31,7 @@ import { prisma, prismaAny } from "@/lib/prisma";
 import { requireDb } from "@/lib/api-route";
 import { getSessionFromCookie } from "@/lib/auth/get-session";
 import { logActivity } from "@/lib/activity-log";
+import { notifyAbnormalExpenseIfNeeded } from "@/lib/notifications/notifyAbnormalExpense";
 import { archiveSourceDocumentForFinancialDoc } from "@/lib/finance/source-documents";
 import { getAccountantRecipientEmail } from "@/lib/finance/accountant-config";
 import { parseNum } from "@/lib/format-shekel";
@@ -264,6 +265,14 @@ export async function POST(req: NextRequest) {
         : Promise.resolve(),
     ]);
     if (session) void logActivity(session.sub, "document_create");
+    if (body.category === "הוצאה" && ie.kind === "expense") {
+      void notifyAbnormalExpenseIfNeeded({
+        documentId: doc.id,
+        totalAmount: calculatedTotal,
+        supplierId: expenseLinks.supplierId,
+        title: body.title.trim(),
+      });
+    }
     if (ie.kind === "income" || ie.kind === "expense") {
       await archiveSourceDocumentForFinancialDoc({
         financialDocumentId: doc.id,

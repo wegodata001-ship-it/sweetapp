@@ -4,10 +4,12 @@ import { getSessionFromCookie } from "@/lib/auth/get-session";
 import { listStaffAlertRecipientIds } from "@/lib/staff/notify-managers";
 import { notifyAdminRecipients, toneToColor } from "@/lib/notifications/dispatch";
 import {
+  computeEarlyLeaveOnClockOut,
   computeOvertimeOnClockOut,
   diffMinutesClocked,
 } from "@/lib/staff/attendance-calc";
 import { israelCalendarDateString, parseCalendarDateToDbDate } from "@/lib/staff/work-date";
+import { notifyEarlyClockOut } from "@/lib/notifications/checkMissedAttendance";
 
 export async function POST(req: NextRequest) {
   const session = await getSessionFromCookie();
@@ -66,8 +68,21 @@ export async function POST(req: NextRequest) {
         title: `חריגת שעות — ${name}`,
         message: `${name} — חריגה של ${ot.overtimeMinutes} דקות`,
         color: toneToColor("WARNING"),
+        priority: "MEDIUM",
         subjectUserId: session.sub,
         metadata: { attendanceId: updated.id, source: "attendance" },
+      });
+    }
+  } else if (shiftLike) {
+    const early = computeEarlyLeaveOnClockOut(shiftLike, clockOut);
+    if (early.isEarlyLeave) {
+      await notifyEarlyClockOut({
+        userId: session.sub,
+        userName: user?.fullName ?? "עובד",
+        earlyMinutes: early.earlyMinutes,
+        shiftEndTime: shiftLike.endTime,
+        workDate: workDateStr,
+        attendanceId: updated.id,
       });
     }
   }
