@@ -79,7 +79,7 @@ export function parseCashflowQueryFilters(searchParams: URLSearchParams): Cashfl
 
 export async function listCashFlowRows(filters: CashflowListFilters): Promise<CashFlowRow[]> {
   const rows = await prisma.cashFlowEntry.findMany({
-    orderBy: [{ entryDate: "asc" }, { createdAt: "asc" }],
+    orderBy: [{ entryDate: "desc" }, { createdAt: "desc" }],
   });
   let mapped = rows.map((row) => prismaCashFlowToRow(row));
   mapped = await enrichCashFlowRowsWithExpenseType(rows, mapped);

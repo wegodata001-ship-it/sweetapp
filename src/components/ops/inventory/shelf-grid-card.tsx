@@ -101,7 +101,7 @@ function ShelfGridCardInner({
 
   return (
     <article
-      className={`group relative overflow-hidden rounded-[24px] border p-5 shadow-[0_4px_20px_rgba(15,23,42,0.12)] transition-all duration-200 hover:-translate-y-0.5 ${
+      className={`group relative overflow-visible rounded-[24px] border p-5 shadow-[0_4px_20px_rgba(15,23,42,0.12)] transition-all duration-200 hover:-translate-y-0.5 ${
         isCounting
           ? "border-[#bfdbfe] shadow-[0_8px_28px_rgba(37,99,235,0.12)]"
           : "border-white/[0.08] shadow-[0_4px_20px_rgba(15,23,42,0.25)] hover:shadow-[0_8px_28px_rgba(15,23,42,0.35)]"

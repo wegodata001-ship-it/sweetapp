@@ -1,12 +1,11 @@
 "use client";
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Loader2, ScanLine, X } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Loader2, Save, ScanLine, X } from "lucide-react";
 import type { InventoryCountProductRow } from "@/components/ops/inventory-count/types";
 import { ShelfCountLineRow } from "./shelf-count-line-row";
 
-const ROW_HEIGHT = 76;
-const SAVE_DEBOUNCE_MS = 400;
+const ROW_HEIGHT = 96;
 const REFRESH_SHELVES_MS = 1200;
 
 type Props = {
@@ -35,12 +34,15 @@ function ShelfCountModalInner({
   const [loading, setLoading] = useState(false);
   const [actualById, setActualById] = useState<Record<string, string>>({});
   const [savingIds, setSavingIds] = useState<Set<string>>(new Set());
+  const [savingAll, setSavingAll] = useState(false);
+  const [confirmCloseOpen, setConfirmCloseOpen] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [scanQ, setScanQ] = useState("");
   const [scrollTop, setScrollTop] = useState(0);
   const [viewportH, setViewportH] = useState(480);
 
   const listRef = useRef<HTMLDivElement>(null);
-  const saveTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const rowRefs = useRef<Map<string, HTMLDivElement>>(new Map());
 
@@ -68,16 +70,13 @@ function ShelfCountModalInner({
   useEffect(() => {
     if (!open) return;
     setActualById({});
+    setSavingIds(new Set());
+    setConfirmCloseOpen(false);
+    setNotice(null);
+    setError(null);
     setScanQ("");
     setScrollTop(0);
     void loadProducts();
-    return () => {
-      for (const id of saveTimers.current.keys()) {
-        const tm = saveTimers.current.get(id);
-        if (tm) clearTimeout(tm);
-      }
-      saveTimers.current.clear();
-    };
   }, [open, shelfName, loadProducts]);
 
   useEffect(() => {
@@ -98,72 +97,25 @@ function ShelfCountModalInner({
     }, REFRESH_SHELVES_MS);
   }, [onShelfStatsChange]);
 
-  const persistLine = useCallback(
-    async (productId: string, qty: number) => {
-      setSavingIds((prev) => new Set(prev).add(productId));
-      try {
-        const res = await fetch("/api/inventory/count-line", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          credentials: "same-origin",
-          body: JSON.stringify({
-            inventoryProductId: productId,
-            currentQuantity: qty,
-            countDate,
-          }),
-        });
-        const j = (await res.json()) as { ok?: boolean };
-        if (j.ok) scheduleShelfRefresh();
-      } catch {
-        /* silent — user can retry by editing */
-      } finally {
-        setSavingIds((prev) => {
-          const next = new Set(prev);
-          next.delete(productId);
-          return next;
-        });
-      }
-    },
-    [countDate, scheduleShelfRefresh],
-  );
-
-  const queueSave = useCallback(
-    (productId: string, raw: string) => {
-      const prev = saveTimers.current.get(productId);
-      if (prev) clearTimeout(prev);
-      const n = raw === "" ? null : Number(raw);
-      if (n === null || Number.isNaN(n) || n < 0) return;
-      saveTimers.current.set(
-        productId,
-        setTimeout(() => {
-          saveTimers.current.delete(productId);
-          void persistLine(productId, n);
-        }, SAVE_DEBOUNCE_MS),
-      );
-    },
-    [persistLine],
-  );
-
-  const setActual = useCallback(
-    (productId: string, value: string) => {
-      setActualById((prev) => ({ ...prev, [productId]: value }));
-      queueSave(productId, value);
-    },
-    [queueSave],
-  );
+  const setActual = useCallback((productId: string, value: string) => {
+    setNotice(null);
+    setError(null);
+    setActualById((prev) => ({ ...prev, [productId]: value }));
+  }, []);
 
   const bump = useCallback(
     (productId: string, systemQty: number, delta: number) => {
+      setNotice(null);
+      setError(null);
       setActualById((prev) => {
         const raw = prev[productId] ?? "";
         const base = raw === "" ? systemQty : Number(raw);
         const next = Math.max(0, (Number.isNaN(base) ? systemQty : base) + delta);
         const str = String(next);
-        queueSave(productId, str);
         return { ...prev, [productId]: str };
       });
     },
-    [queueSave],
+    [],
   );
 
   const sortedProducts = useMemo(() => {
@@ -202,6 +154,104 @@ function ShelfCountModalInner({
   const visible = sortedProducts.slice(startIdx, endIdx);
   const padTop = startIdx * ROW_HEIGHT;
   const padBottom = Math.max(0, (sortedProducts.length - endIdx) * ROW_HEIGHT);
+  const dirtyEntries = Object.entries(actualById).filter(([, raw]) => raw !== "");
+  const hasDirtyChanges = dirtyEntries.length > 0;
+  const hasInvalidChanges = dirtyEntries.some(([, raw]) => {
+    const n = Number(raw);
+    return !Number.isFinite(n) || n < 0;
+  });
+  const minimumSummary = useMemo(() => {
+    let below = 0;
+    let near = 0;
+    for (const product of products) {
+      if (product.minimumQuantity <= 0) continue;
+      if (product.previousQuantity < product.minimumQuantity) below += 1;
+      else if (product.previousQuantity <= product.minimumQuantity * 1.2) near += 1;
+    }
+    return {
+      total: products.length,
+      below,
+      near,
+      ok: Math.max(0, products.length - below),
+    };
+  }, [products]);
+
+  const saveCount = useCallback(
+    async (opts?: { closeAfterSave?: boolean }) => {
+      const lines = Object.entries(actualById)
+        .map(([id, raw]) => ({ id, qty: raw === "" ? null : Number(raw) }))
+        .filter((line): line is { id: string; qty: number } => {
+          return line.qty !== null && Number.isFinite(line.qty) && line.qty >= 0;
+        });
+
+      if (lines.length === 0) {
+        setError(t("nothingToSave"));
+        return false;
+      }
+
+      setSavingAll(true);
+      setError(null);
+      setNotice(null);
+      setSavingIds(new Set(lines.map((line) => line.id)));
+      try {
+        const res = await fetch("/api/inventory/monthly-count", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "same-origin",
+          body: JSON.stringify({
+            countDate,
+            lines: lines.map((line) => ({
+              inventoryProductId: line.id,
+              currentQuantity: line.qty,
+            })),
+          }),
+        });
+        const j = (await res.json()) as {
+          ok?: boolean;
+          error?: string;
+          data?: {
+            saved?: number;
+            rows?: { inventoryProductId: string; currentQuantity: number }[];
+          };
+        };
+
+        if (!res.ok || !j.ok) {
+          setError(j.error ?? t("saveFailed"));
+          return false;
+        }
+
+        const savedRows = j.data?.rows ?? [];
+        setProducts((prev) =>
+          prev.map((product) => {
+            const saved = savedRows.find((row) => row.inventoryProductId === product.id);
+            return saved ? { ...product, previousQuantity: saved.currentQuantity } : product;
+          }),
+        );
+        setActualById({});
+        setConfirmCloseOpen(false);
+        setNotice(t("savedSuccess"));
+        scheduleShelfRefresh();
+        if (opts?.closeAfterSave) onClose();
+        return true;
+      } catch {
+        setError(t("saveFailed"));
+        return false;
+      } finally {
+        setSavingAll(false);
+        setSavingIds(new Set());
+      }
+    },
+    [actualById, countDate, onClose, scheduleShelfRefresh, t],
+  );
+
+  const requestClose = useCallback(() => {
+    if (savingAll) return;
+    if (hasDirtyChanges) {
+      setConfirmCloseOpen(true);
+      return;
+    }
+    onClose();
+  }, [hasDirtyChanges, onClose, savingAll]);
 
   if (!open) return null;
 
@@ -217,7 +267,7 @@ function ShelfCountModalInner({
           <div className="flex items-center justify-between gap-3">
             <button
               type="button"
-              onClick={onClose}
+              onClick={requestClose}
               className="grid h-10 w-10 place-items-center rounded-xl text-slate-500 transition hover:bg-slate-100"
             >
               <X className="h-5 w-5" />
@@ -232,6 +282,32 @@ function ShelfCountModalInner({
               </p>
             </div>
           </div>
+          <div className="mt-3 grid grid-cols-3 gap-2 text-center text-[11px] font-black">
+            <div className="rounded-2xl bg-slate-50 px-2 py-2 text-slate-700 ring-1 ring-slate-200">
+              <p className="text-[10px] text-slate-500">{t("summaryTotal")}</p>
+              <p className="text-base tabular-nums">{minimumSummary.total}</p>
+            </div>
+            <div className="rounded-2xl bg-emerald-50 px-2 py-2 text-emerald-700 ring-1 ring-emerald-200">
+              <p className="text-[10px]">{t("summaryOk")}</p>
+              <p className="text-base tabular-nums">{minimumSummary.ok}</p>
+            </div>
+            <div className="rounded-2xl bg-rose-50 px-2 py-2 text-rose-700 ring-1 ring-rose-200">
+              <p className="text-[10px]">{t("summaryBelowMinimum")}</p>
+              <p className="text-base tabular-nums">{minimumSummary.below}</p>
+            </div>
+          </div>
+          {notice ? (
+            <p className="mt-2 inline-flex items-center gap-1 rounded-full bg-emerald-50 px-3 py-1 text-xs font-black text-emerald-700 ring-1 ring-emerald-200">
+              <CheckCircle2 className="h-4 w-4" aria-hidden />
+              {notice}
+            </p>
+          ) : null}
+          {error ? (
+            <p className="mt-2 inline-flex items-center gap-1 rounded-full bg-rose-50 px-3 py-1 text-xs font-black text-rose-700 ring-1 ring-rose-200">
+              <AlertTriangle className="h-4 w-4" aria-hidden />
+              {error}
+            </p>
+          ) : null}
           <div className="relative mt-3">
             <ScanLine className="pointer-events-none absolute top-1/2 h-4 w-4 -translate-y-1/2 text-[#6c4cff] ltr:left-3 rtl:right-3" />
             <input
@@ -277,6 +353,7 @@ function ShelfCountModalInner({
                       barcode={shortBarcode(row.id)}
                       unit={row.unit}
                       systemQty={row.previousQuantity}
+                      minimumQuantity={row.minimumQuantity}
                       actualRaw={actualById[row.id] ?? ""}
                       saving={savingIds.has(row.id)}
                       onActualChange={(v) => setActual(row.id, v)}
@@ -290,7 +367,71 @@ function ShelfCountModalInner({
             </div>
           )}
         </div>
+        <footer className="sticky bottom-0 z-10 flex shrink-0 items-center justify-between gap-2 border-t border-[#e7ecf5]/80 bg-white/95 px-4 py-3 backdrop-blur-md sm:px-5">
+          <button
+            type="button"
+            onClick={requestClose}
+            disabled={savingAll}
+            className="rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-black text-slate-600 transition hover:bg-slate-50 disabled:opacity-50"
+          >
+            {t("cancel")}
+          </button>
+          <button
+            type="button"
+            onClick={() => void saveCount()}
+            disabled={savingAll || !hasDirtyChanges || hasInvalidChanges}
+            className="inline-flex items-center gap-2 rounded-2xl bg-emerald-600 px-5 py-2.5 text-sm font-black text-white shadow-md shadow-emerald-600/20 transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {savingAll ? (
+              <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+            ) : (
+              <Save className="h-4 w-4" aria-hidden />
+            )}
+            {t("saveCount")}
+          </button>
+        </footer>
       </div>
+      {confirmCloseOpen ? (
+        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/50 p-4">
+          <div className="w-full max-w-md rounded-[24px] bg-white p-5 text-end shadow-2xl" dir="rtl">
+            <div className="flex items-start gap-3">
+              <div className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-amber-50 text-amber-600">
+                <AlertTriangle className="h-5 w-5" aria-hidden />
+              </div>
+              <div className="min-w-0 flex-1">
+                <h3 className="text-lg font-black text-slate-900">{t("unsavedTitle")}</h3>
+                <p className="mt-1 text-sm font-semibold text-slate-600">{t("unsavedBody")}</p>
+              </div>
+            </div>
+            <div className="mt-5 grid gap-2 sm:grid-cols-3">
+              <button
+                type="button"
+                onClick={() => void saveCount({ closeAfterSave: true })}
+                disabled={savingAll || hasInvalidChanges}
+                className="rounded-2xl bg-emerald-600 px-4 py-2.5 text-sm font-black text-white transition hover:bg-emerald-700 disabled:opacity-50"
+              >
+                {t("saveAndExit")}
+              </button>
+              <button
+                type="button"
+                onClick={onClose}
+                disabled={savingAll}
+                className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-sm font-black text-rose-700 transition hover:bg-rose-100 disabled:opacity-50"
+              >
+                {t("exitWithoutSaving")}
+              </button>
+              <button
+                type="button"
+                onClick={() => setConfirmCloseOpen(false)}
+                disabled={savingAll}
+                className="rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-black text-slate-700 transition hover:bg-slate-50 disabled:opacity-50"
+              >
+                {t("backToEdit")}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

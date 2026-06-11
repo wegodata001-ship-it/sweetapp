@@ -32,7 +32,7 @@ function MiniSpark({ value }: { value: number }) {
 
 export function WeddingOverviewCards({ dataByRange }: { dataByRange: RangeKeyed<WeddingSectionStats> }) {
   const { t } = useI18n();
-  const [range, setRange] = useState<DashboardTimeRange>("today");
+  const [range, setRange] = useState<DashboardTimeRange>("month");
 
   const data = useMemo(() => dataByRange[range], [dataByRange, range]);
 

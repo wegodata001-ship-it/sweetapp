@@ -36,7 +36,7 @@ const TONE_CLASS: Record<(typeof ITEMS)[number]["tone"], string> = {
 
 export function ZReportCards({ dataByRange }: { dataByRange: RangeKeyed<ZPosMetrics> }) {
   const { t } = useI18n();
-  const [range, setRange] = useState<DashboardTimeRange>("today");
+  const [range, setRange] = useState<DashboardTimeRange>("month");
   const data = useMemo(() => dataByRange[range], [dataByRange, range]);
 
   return (

@@ -13,6 +13,7 @@ export type InventoryCountProductRow = {
   location: string;
   unit: string | null;
   previousQuantity: number;
+  minimumQuantity: number;
   lastCountedAt: string | null;
 };
 

@@ -59,7 +59,10 @@ export async function GET(req: NextRequest) {
     }
   }
   try {
-    const rows = await prisma.employee.findMany({ orderBy: { name: "asc" } });
+    const rows = await prisma.employee.findMany({
+      where: { isActive: true },
+      orderBy: { name: "asc" },
+    });
     return NextResponse.json({ ok: true, data: rows });
   } catch (e) {
     return NextResponse.json(

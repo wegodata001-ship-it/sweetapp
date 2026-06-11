@@ -1,8 +1,14 @@
 "use client";
 
 import { Copy, MoreVertical, Plus, Trash2 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useI18n } from "@/components/i18n-provider";
+import {
+  computeDropdownMenuPosition,
+  FLOATING_MENU_Z,
+  type DropdownMenuPosition,
+} from "@/lib/ui/floating-menu-position";
 
 export type ShelfCardMenuAction = "addProducts" | "duplicate" | "delete";
 
@@ -14,6 +20,10 @@ type Props = {
   variant?: "dark" | "light";
 };
 
+const MENU_WIDTH = 192;
+const MENU_ITEM_HEIGHT = 40;
+const MENU_PADDING = 8;
+
 export function ShelfCardActionsMenu({
   onAction,
   busy,
@@ -24,12 +34,18 @@ export function ShelfCardActionsMenu({
   const { t, dir } = useI18n();
   const tMenu = (key: string) => t(`ops.inventory.warehouse.card.menu.${key}`);
   const [open, setOpen] = useState(false);
+  const [entered, setEntered] = useState(false);
+  const [position, setPosition] = useState<DropdownMenuPosition | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLUListElement>(null);
 
   useEffect(() => {
     if (!open) return;
     const onDoc = (e: MouseEvent) => {
-      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
+      const target = e.target as Node;
+      if (rootRef.current?.contains(target) || menuRef.current?.contains(target)) return;
+      setOpen(false);
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") setOpen(false);
@@ -40,6 +56,48 @@ export function ShelfCardActionsMenu({
       document.removeEventListener("mousedown", onDoc);
       document.removeEventListener("keydown", onKey);
     };
+  }, [open]);
+
+  const estimatedMenuHeight = MENU_ITEM_HEIGHT * 3 + MENU_PADDING;
+
+  const updatePosition = useCallback(() => {
+    const el = btnRef.current;
+    if (!el) return;
+    setPosition(
+      computeDropdownMenuPosition(el, dir, {
+        width: MENU_WIDTH,
+        estimatedHeight: estimatedMenuHeight,
+        gap: 6,
+      }),
+    );
+  }, [dir, estimatedMenuHeight]);
+
+  useLayoutEffect(() => {
+    if (!open) {
+      setPosition(null);
+      return;
+    }
+    updatePosition();
+  }, [open, updatePosition]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onReposition = () => updatePosition();
+    window.addEventListener("resize", onReposition);
+    window.addEventListener("scroll", onReposition, true);
+    return () => {
+      window.removeEventListener("resize", onReposition);
+      window.removeEventListener("scroll", onReposition, true);
+    };
+  }, [open, updatePosition]);
+
+  useEffect(() => {
+    if (!open) {
+      setEntered(false);
+      return;
+    }
+    const id = requestAnimationFrame(() => setEntered(true));
+    return () => cancelAnimationFrame(id);
   }, [open]);
 
   const pick = (action: ShelfCardMenuAction) => {
@@ -74,9 +132,56 @@ export function ShelfCardActionsMenu({
     },
   ];
 
+  const transformOrigin =
+    dir === "rtl"
+      ? position?.openAbove
+        ? "bottom right"
+        : "top right"
+      : position?.openAbove
+        ? "bottom left"
+        : "top left";
+
+  const menuList =
+    open && !disabled && position ? (
+      <ul
+        ref={menuRef}
+        role="menu"
+        dir={dir}
+        className={`fixed rounded-2xl border border-[#e7ecf5] bg-white py-1 shadow-[0_18px_54px_rgba(15,23,42,0.22)] ring-1 ring-white/70 transition-all duration-150 ease-out sm:rounded-xl ${
+          entered ? "scale-100 opacity-100" : "scale-95 opacity-0"
+        }`}
+        style={{
+          zIndex: FLOATING_MENU_Z,
+          top: position.top,
+          left: position.left,
+          width: position.width,
+          overflow: "visible",
+          transformOrigin,
+        }}
+      >
+        {items.map(({ id, icon: Icon, label, className }) => (
+          <li key={id} role="none">
+            <button
+              type="button"
+              role="menuitem"
+              onClick={(e) => {
+                e.stopPropagation();
+                pick(id);
+              }}
+              className={`flex w-full items-center gap-2.5 px-3.5 py-2.5 text-start text-sm font-bold transition sm:py-2 sm:text-xs ${className}`}
+            >
+              <Icon className="h-4 w-4 shrink-0" aria-hidden />
+              {label}
+            </button>
+          </li>
+        ))}
+      </ul>
+    ) : null;
+
   return (
-    <div ref={rootRef} className="relative shrink-0" dir={dir}>
+    <div ref={rootRef} className="relative shrink-0 overflow-visible" dir={dir}>
       <button
+        ref={btnRef}
         type="button"
         disabled={busy || disabled}
         title={disabled ? disabledTitle : tMenu("label")}
@@ -97,36 +202,19 @@ export function ShelfCardActionsMenu({
         <MoreVertical className="h-4 w-4" aria-hidden />
       </button>
 
-      {open && !disabled ? (
-        <>
-          <div
-            className="fixed inset-0 z-[60] bg-black/30 sm:hidden"
-            aria-hidden
-            onClick={() => setOpen(false)}
-          />
-          <ul
-            role="menu"
-            className="fixed inset-x-3 bottom-3 z-[61] overflow-hidden rounded-2xl bg-white py-1 shadow-[0_12px_40px_rgba(15,23,42,0.12)] ring-1 ring-[#e7ecf5] sm:absolute sm:inset-auto sm:bottom-auto sm:start-0 sm:top-full sm:mt-1.5 sm:w-48 sm:rounded-xl"
-          >
-            {items.map(({ id, icon: Icon, label, className }) => (
-              <li key={id} role="none">
-                <button
-                  type="button"
-                  role="menuitem"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    pick(id);
-                  }}
-                  className={`flex w-full items-center gap-2.5 px-3.5 py-2.5 text-start text-sm font-bold transition sm:py-2 sm:text-xs ${className}`}
-                >
-                  <Icon className="h-4 w-4 shrink-0" aria-hidden />
-                  {label}
-                </button>
-              </li>
-            ))}
-          </ul>
-        </>
-      ) : null}
+      {open && typeof document !== "undefined"
+        ? createPortal(
+            <>
+              <div
+                className="fixed inset-0 z-[9998] bg-transparent"
+                aria-hidden
+                onClick={() => setOpen(false)}
+              />
+              {menuList}
+            </>,
+            document.body,
+          )
+        : null}
     </div>
   );
 }

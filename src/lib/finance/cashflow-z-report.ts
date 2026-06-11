@@ -51,7 +51,7 @@ export function groupCashflowByZReport(rows: CashFlowRow[]): Map<string, CashFlo
 }
 
 export function buildZReportSummary(zReportId: string, lines: CashFlowRow[]): ZReportCashflowSummary {
-  const sorted = [...lines].sort((a, b) => a.entry_date.localeCompare(b.entry_date));
+  const sorted = [...lines].sort((a, b) => b.entry_date.localeCompare(a.entry_date));
   const title = extractZReportTitle(sorted);
   const zNumber = parseZNumberFromText(title) || parseZNumberFromText(sorted[0]?.description ?? "");
   const methods = new Set<string>();
@@ -101,7 +101,7 @@ export function buildJournalDisplayItems(rows: CashFlowRow[]): JournalDisplayIte
     });
   }
 
-  items.sort((a, b) => a.sortKey.localeCompare(b.sortKey));
+  items.sort((a, b) => b.sortKey.localeCompare(a.sortKey));
   return items;
 }
 

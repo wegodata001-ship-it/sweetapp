@@ -11,6 +11,7 @@ import {
   Eye,
   FileStack,
   History,
+  ImageIcon,
   Loader2,
   Mail,
   MoreVertical,
@@ -128,6 +129,53 @@ function buildSentStatusTooltip(
   return lines.join("\n");
 }
 
+function sourceDocumentAccessUrl(row: FinanceDocumentRow): string | null {
+  const sourcePath = row.payload?.receiptStoragePath?.trim();
+  if (!sourcePath) return null;
+
+  const q = new URLSearchParams({
+    storagePath: sourcePath,
+    redirect: "1",
+  });
+  if (row.payload?.receiptStorageBucket?.trim()) {
+    q.set("storageBucket", row.payload.receiptStorageBucket.trim());
+  }
+  if (row.payload?.receiptFileName?.trim()) {
+    q.set("fileName", row.payload.receiptFileName.trim());
+  }
+  if (row.payload?.receiptMimeType?.trim()) {
+    q.set("fileType", row.payload.receiptMimeType.trim());
+  }
+  return `/api/source-documents/access?${q.toString()}`;
+}
+
+function sortFinanceDocumentsNewestFirst(rows: FinanceDocumentRow[]): FinanceDocumentRow[] {
+  return [...rows].sort(
+    (a, b) =>
+      new Date(b.created_at || b.doc_date || 0).getTime() -
+      new Date(a.created_at || a.doc_date || 0).getTime(),
+  );
+}
+
+function sortReportsNewestFirst(rows: GeneratedReportRow[]): GeneratedReportRow[] {
+  return [...rows].sort(
+    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+  );
+}
+
+function documentPartySearchText(row: FinanceDocumentRow): string {
+  const payload = row.payload;
+  const parts = [
+    row.title,
+    row.customer_name,
+    row.category,
+    row.document_type,
+    payload?.kind !== "zreport" ? payload?.counterpartyName : null,
+    payload?.kind !== "zreport" ? payload?.employeePayNotes : null,
+  ];
+  return parts.filter(Boolean).join(" ").toLowerCase();
+}
+
 export default function FinanceArchivePage() {
   const { t, bcp47 } = useI18n();
   const [tab, setTab] = useState<(typeof TAB_OPTIONS)[number]["id"]>("pdf");
@@ -139,6 +187,7 @@ export default function FinanceArchivePage() {
   const [accountantFilter, setAccountantFilter] = useState<AccountantFilter>("all");
   const [accountantBusyIds, setAccountantBusyIds] = useState<Set<string>>(new Set());
   const [accountantNotice, setAccountantNotice] = useState<string | null>(null);
+  const [partyFilter, setPartyFilter] = useState("");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkBusy, setBulkBusy] = useState(false);
   const [emailModalOpen, setEmailModalOpen] = useState(false);
@@ -163,7 +212,7 @@ export default function FinanceArchivePage() {
     setLoading(true);
     const { rows: list, counts: c, accountantRecipientEmail: recipientEmail } =
       await fetchFinanceDocumentsWithCounts({ accountant: accountantFilter });
-    setRows(list);
+    setRows(sortFinanceDocumentsNewestFirst(list));
     setCounts(c);
     setAccountantRecipientEmail(recipientEmail);
     setLoading(false);
@@ -179,7 +228,7 @@ export default function FinanceArchivePage() {
       if (dateTo) params.set("dateTo", dateTo);
       const res = await fetch(`/api/reports?${params}`, { credentials: "same-origin" });
       const j = (await res.json()) as { data?: GeneratedReportRow[] };
-      setReports(j.data ?? []);
+      setReports(sortReportsNewestFirst(j.data ?? []));
     } finally {
       setReportsLoading(false);
     }
@@ -216,8 +265,8 @@ export default function FinanceArchivePage() {
       if (!inFilter) {
         return prev.filter((r) => r.id !== updated.id);
       }
-      if (!exists) return [updated, ...prev];
-      return prev.map((r) => (r.id === updated.id ? updated : r));
+      if (!exists) return sortFinanceDocumentsNewestFirst([updated, ...prev]);
+      return sortFinanceDocumentsNewestFirst(prev.map((r) => (r.id === updated.id ? updated : r)));
     });
   }, [accountantFilter]);
 
@@ -259,7 +308,7 @@ export default function FinanceArchivePage() {
   };
 
   const selectAllVisible = () => {
-    setSelectedIds(new Set(rows.map((r) => r.id)));
+    setSelectedIds(new Set(filteredRows.map((r) => r.id)));
   };
 
   const clearSelection = () => setSelectedIds(new Set());
@@ -339,6 +388,12 @@ export default function FinanceArchivePage() {
     if (res.ok) await refresh();
   };
 
+  const openSourceDocument = (row: FinanceDocumentRow) => {
+    const url = sourceDocumentAccessUrl(row);
+    if (!url) return;
+    window.open(url, "_blank", "noopener,noreferrer");
+  };
+
   const updateDeposit = async (id: string, action: "returned" | "refunded") => {
     const res = await fetch(`/api/documents/${encodeURIComponent(id)}/deposit`, {
       method: "PATCH",
@@ -367,7 +422,13 @@ export default function FinanceArchivePage() {
   const btnSm =
     "inline-flex h-9 items-center justify-center gap-1 rounded-lg border px-2.5 text-xs font-black transition";
 
-  const filteredReports = useMemo(() => reports, [reports]);
+  const filteredReports = useMemo(() => sortReportsNewestFirst(reports), [reports]);
+  const filteredRows = useMemo(() => {
+    const q = partyFilter.trim().toLowerCase();
+    const base = sortFinanceDocumentsNewestFirst(rows);
+    if (!q) return base;
+    return base.filter((row) => documentPartySearchText(row).includes(q));
+  }, [rows, partyFilter]);
 
   return (
     <div className="mx-auto max-w-7xl space-y-4">
@@ -763,6 +824,19 @@ export default function FinanceArchivePage() {
               </p>
             ) : null}
 
+            <label className="block max-w-md">
+              <span className="block text-[11px] font-bold text-slate-500">{t("archive.filterPartyName")}</span>
+              <input
+                value={partyFilter}
+                onChange={(e) => {
+                  setPartyFilter(e.target.value);
+                  clearSelection();
+                }}
+                placeholder={t("archive.filterPartyNamePlaceholder")}
+                className="mt-1 h-[42px] w-full rounded-xl border border-slate-300 bg-white px-3 text-right text-sm font-semibold outline-none focus:border-cyan-600 focus:ring-1 focus:ring-cyan-600/25"
+              />
+            </label>
+
             {selectedIds.size > 0 ? (
               <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-luxury-navy-rich/15 bg-luxury-navy-rich/5 px-4 py-3">
                 <p className="text-sm font-black text-luxury-navy-rich">
@@ -810,9 +884,11 @@ export default function FinanceArchivePage() {
 
             {loading ? (
               <p className="text-sm font-semibold text-slate-500">{t("common.loading")}</p>
-            ) : rows.length === 0 ? (
+            ) : filteredRows.length === 0 ? (
               <p className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-6 py-12 text-center text-sm font-semibold text-slate-500">
-                {accountantFilter === "not_sent"
+                {partyFilter.trim()
+                  ? t("archive.emptyPartyFilter")
+                  : accountantFilter === "not_sent"
                   ? t("archive.emptyNotSent")
                   : accountantFilter === "sent"
                     ? t("archive.emptySent")
@@ -827,11 +903,11 @@ export default function FinanceArchivePage() {
                         <th className="w-[44px] px-3 py-3">
                           <input
                             type="checkbox"
-                            checked={selectedIds.size === rows.length && rows.length > 0}
+                            checked={selectedIds.size === filteredRows.length && filteredRows.length > 0}
                             ref={(el) => {
                               if (el) {
                                 el.indeterminate =
-                                  selectedIds.size > 0 && selectedIds.size < rows.length;
+                                  selectedIds.size > 0 && selectedIds.size < filteredRows.length;
                               }
                             }}
                             onChange={(e) => {
@@ -853,9 +929,10 @@ export default function FinanceArchivePage() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 bg-white">
-                      {rows.map((row) => {
+                      {filteredRows.map((row) => {
                         const busy = accountantBusyIds.has(row.id);
                         const selected = selectedIds.has(row.id);
+                        const sourceUrl = sourceDocumentAccessUrl(row);
                         return (
                           <tr key={row.id} className={selected ? "bg-luxury-navy-rich/5" : ""}>
                             <td className="px-3 py-3 align-top">
@@ -989,6 +1066,16 @@ export default function FinanceArchivePage() {
                                   {t("archive.actionEditDoc")}
                                   <ExternalLink className="h-3 w-3 opacity-60" aria-hidden />
                                 </Link>
+                                {sourceUrl ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => openSourceDocument(row)}
+                                    className="inline-flex items-center gap-1 rounded-lg border border-cyan-300 bg-cyan-50 px-3 py-2 text-xs font-black text-cyan-900 hover:bg-cyan-100"
+                                  >
+                                    <ImageIcon className="h-3.5 w-3.5" aria-hidden />
+                                    {t("archive.actionSourceInvoice")}
+                                  </button>
+                                ) : null}
                                 <DocumentPdfQuick docId={row.id} onAfter={() => void loadReports()} />
                                 <button
                                   type="button"
@@ -1028,10 +1115,11 @@ export default function FinanceArchivePage() {
                 </div>
 
                 <div className="space-y-3 md:hidden">
-                  {rows.map((row) => {
+                  {filteredRows.map((row) => {
                     const busy = accountantBusyIds.has(row.id);
                     const selected = selectedIds.has(row.id);
                     const menuOpen = mobileMenuId === row.id;
+                    const sourceUrl = sourceDocumentAccessUrl(row);
                     return (
                       <div
                         key={row.id}
@@ -1144,6 +1232,19 @@ export default function FinanceArchivePage() {
                               <PencilLine className="h-3.5 w-3.5" aria-hidden />
                               {t("archive.actionEditDoc")}
                             </Link>
+                            {sourceUrl ? (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setMobileMenuId(null);
+                                  openSourceDocument(row);
+                                }}
+                                className="flex items-center gap-2 rounded-lg bg-white px-3 py-2 text-xs font-black text-cyan-900"
+                              >
+                                <ImageIcon className="h-3.5 w-3.5" aria-hidden />
+                                {t("archive.actionSourceInvoice")}
+                              </button>
+                            ) : null}
                             <button
                               type="button"
                               onClick={() => {

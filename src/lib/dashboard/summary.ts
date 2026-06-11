@@ -140,6 +140,12 @@ function emptySummary(): DashboardSummary {
       yesterdayExpenses: 0,
       expenseChangeVsYesterdayPct: null,
       monthIncome: 0,
+      monthIncomeByMethod: { cash: 0, card: 0, check: 0, other: 0 },
+      monthCashIncome: 0,
+      monthCashExpenses: 0,
+      monthCashBalance: 0,
+      monthExpenses: 0,
+      monthProfit: 0,
     },
     tasksChart: { onTime: 0, late: 0, early: 0 },
     supplierPayments: {

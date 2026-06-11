@@ -32,7 +32,7 @@ function filterByRange(data: DailyPnlPoint[], range: ChartRange): DailyPnlPoint[
 
 export function FinancialAnalyticsChart({ data }: { data: DailyPnlPoint[] }) {
   const { t } = useI18n();
-  const [range, setRange] = useState<ChartRange>("7d");
+  const [range, setRange] = useState<ChartRange>("month");
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
 
   const series = useMemo(() => filterByRange(data, range), [data, range]);

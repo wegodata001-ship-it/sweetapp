@@ -77,6 +77,12 @@ export type DashboardHeroMetrics = {
   yesterdayExpenses: number;
   expenseChangeVsYesterdayPct: number | null;
   monthIncome: number;
+  monthIncomeByMethod: TodayIncomeByMethod;
+  monthCashIncome: number;
+  monthCashExpenses: number;
+  monthCashBalance: number;
+  monthExpenses: number;
+  monthProfit: number;
 };
 
 export type FinancialEngineResult = {
@@ -212,7 +218,7 @@ export function runFinancialEngine(
   prevWeekStart.setHours(0, 0, 0, 0);
 
   const nowStart = monthStart(0);
-  const nowEnd = monthEnd(0);
+  const nowEnd = todayEnd;
   const prevStart = monthStart(-1);
   const prevEnd = monthEnd(-1);
 
@@ -248,6 +254,8 @@ export function runFinancialEngine(
   let yesterdayExpenses = 0;
   let monthIncome = 0;
   const todayIncomeByMethod: TodayIncomeByMethod = { cash: 0, card: 0, check: 0, other: 0 };
+  const monthIncomeByMethod: TodayIncomeByMethod = { cash: 0, card: 0, check: 0, other: 0 };
+  let monthCashExpenses = 0;
   let monthExpenses = 0;
   let prevMonthIncome = 0;
   let prevMonthExpenses = 0;
@@ -263,6 +271,9 @@ export function runFinancialEngine(
     if (inMonth) {
       monthIncome += row.inflow;
       monthExpenses += row.outflow;
+      const bucket = zPaymentBucket(raw.paymentMethod);
+      if (row.inflow > 0) monthIncomeByMethod[bucket] += row.inflow;
+      if (row.outflow > 0 && bucket === "cash") monthCashExpenses += row.outflow;
     } else if (inPrevMonth) {
       prevMonthIncome += row.inflow;
       prevMonthExpenses += row.outflow;
@@ -357,6 +368,8 @@ export function runFinancialEngine(
       profit: v.income - v.expenses,
     };
   });
+  const monthCashIncome = monthIncomeByMethod.cash;
+  const monthProfit = monthIncome - monthExpenses;
 
   return {
     monthIncome,
@@ -381,6 +394,12 @@ export function runFinancialEngine(
       yesterdayExpenses,
       expenseChangeVsYesterdayPct: pctChange(todayExpenses, yesterdayExpenses),
       monthIncome,
+      monthIncomeByMethod,
+      monthCashIncome,
+      monthCashExpenses,
+      monthCashBalance: monthCashIncome - monthCashExpenses,
+      monthExpenses,
+      monthProfit,
     },
     newCustomers: 0,
   };

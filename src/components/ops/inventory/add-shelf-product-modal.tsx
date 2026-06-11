@@ -14,6 +14,7 @@ type Props = {
     location: string;
     unit: string | null;
     previousQuantity: number;
+    minimumQuantity: number;
     lastCountedAt: string | null;
   }) => void;
   t: (key: string) => string;
@@ -71,6 +72,7 @@ export function AddShelfProductModal({
         location: shelfName,
         unit: j.data.unit,
         previousQuantity: 0,
+        minimumQuantity: Number(minimumQuantity) || 0,
         lastCountedAt: null,
       });
       setName("");

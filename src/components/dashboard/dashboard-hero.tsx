@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { Banknote, CalendarRange, RefreshCw, TrendingDown, TrendingUp, Wallet } from "lucide-react";
+import { Banknote, RefreshCw, TrendingDown, TrendingUp, Wallet } from "lucide-react";
 import { CountUp } from "@/components/count-up";
 import { useI18n } from "@/components/i18n-provider";
 import { StaffAlertsBell } from "@/components/staff-alerts-bell";
@@ -53,30 +53,11 @@ function MiniKpi({
   );
 }
 
-function ExpenseDelta({ pct }: { pct: number | null }) {
-  const { t } = useI18n();
-  if (pct === null) {
-    return <span className={styles.deltaMuted}>{t("dashboard.trendNoChange")}</span>;
-  }
-  const up = pct > 0;
-  const Icon = up ? TrendingUp : TrendingDown;
-  return (
-    <span className={up ? styles.deltaUp : styles.deltaDown}>
-      <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden />
-      {t(up ? "dashboard.redesign.heroVsYesterdayUp" : "dashboard.redesign.heroVsYesterdayDown", {
-        pct: Math.abs(pct),
-      })}
-    </span>
-  );
-}
-
 export function DashboardHero({ hero, updatedAt, loading, onRefresh }: Props) {
   const { t } = useI18n();
   const timeLabel = updatedAt
     ? new Date(updatedAt).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })
     : "—";
-
-  const { todayIncomeByMethod: br } = hero;
 
   return (
     <section className={styles.hero}>
@@ -108,66 +89,40 @@ export function DashboardHero({ hero, updatedAt, loading, onRefresh }: Props) {
               <div className={styles.mainCardInner}>
                 <div className={styles.mainCardTop}>
                   <span className={styles.mainIconWrap}>
-                    <Banknote className="h-7 w-7" aria-hidden />
+                    <Wallet className="h-7 w-7" aria-hidden />
                   </span>
-                  <p className={styles.mainLabel}>{t("dashboard.redesign.heroTotalIncomeToday")}</p>
+                  <p className={styles.mainLabel}>{t("dashboard.redesign.heroCashBalanceSystem")}</p>
                 </div>
                 <p className={styles.mainAmount}>
-                  <CountUp value={hero.todayIncomeTotal} currency duration={1200} />
+                  <CountUp value={hero.monthCashBalance} currency duration={1200} />
                 </p>
-                <div className={styles.breakdown}>
-                  <span>
-                    {t("dashboard.redesign.heroBreakdownCash")}:{" "}
-                    <CountUp value={br.cash} currency duration={900} className={styles.brCash} />
-                  </span>
-                  <span className={styles.breakdownSep}>·</span>
-                  <span>
-                    {t("dashboard.redesign.heroBreakdownCard")}:{" "}
-                    <CountUp value={br.card} currency duration={900} className={styles.brCard} />
-                  </span>
-                  <span className={styles.breakdownSep}>·</span>
-                  <span>
-                    {t("dashboard.redesign.heroBreakdownChecks")}:{" "}
-                    <CountUp value={br.check} currency duration={900} className={styles.brCheck} />
-                  </span>
-                  {br.other > 0 ? (
-                    <>
-                      <span className={styles.breakdownSep}>·</span>
-                      <span>
-                        {t("dashboard.redesign.zOther")}:{" "}
-                        <CountUp value={br.other} currency duration={900} />
-                      </span>
-                    </>
-                  ) : null}
-                </div>
               </div>
             </div>
 
             <div className={styles.miniGrid}>
               <MiniKpi
-                variant="expense"
-                label={t("dashboard.redesign.heroExpensesToday")}
-                value={hero.todayExpenses}
-                icon={TrendingDown}
-                sub={<ExpenseDelta pct={hero.expenseChangeVsYesterdayPct} />}
-              />
-              <MiniKpi
-                variant="income"
-                label={t("dashboard.redesign.heroTodayIncome")}
-                value={hero.todayIncomeTotal}
+                variant="month"
+                label={t("dashboard.redesign.heroIncomeMonth")}
+                value={hero.monthIncome}
                 icon={TrendingUp}
               />
               <MiniKpi
                 variant="cash"
-                label={t("dashboard.redesign.heroCashIncomeToday")}
-                value={hero.todayCashIncome}
-                icon={Wallet}
+                label={t("dashboard.redesign.heroCashIncomeMonth")}
+                value={hero.monthCashIncome}
+                icon={Banknote}
               />
               <MiniKpi
-                variant="month"
-                label={t("dashboard.redesign.heroMonthIncomeOnly")}
-                value={hero.monthIncome}
-                icon={CalendarRange}
+                variant="income"
+                label={t("dashboard.redesign.heroExpensesMonth")}
+                value={hero.monthExpenses}
+                icon={TrendingDown}
+              />
+              <MiniKpi
+                variant="expense"
+                label={t("dashboard.redesign.heroProfitLossMonth")}
+                value={hero.monthProfit}
+                icon={hero.monthProfit >= 0 ? TrendingUp : TrendingDown}
               />
             </div>
           </div>

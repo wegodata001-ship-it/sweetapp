@@ -73,6 +73,7 @@ export async function GET(req: NextRequest) {
       locationId: string | null;
       unit: string | null;
       previousQuantity: number;
+      minimumQuantity: number;
       lastCountedAt: string | null;
       stockTier: ReturnType<typeof classifyStockTier>;
     };
@@ -98,6 +99,7 @@ export async function GET(req: NextRequest) {
           locationId: p.locationId,
           unit: p.unit,
           previousQuantity: latestQty ?? 0,
+          minimumQuantity: p.minimumQuantity,
           lastCountedAt: p.counts[0]?.countDate ? new Date(p.counts[0].countDate).toISOString() : null,
           stockTier: tier,
         };

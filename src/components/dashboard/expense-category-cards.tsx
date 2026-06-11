@@ -51,7 +51,7 @@ function amountForRange(card: ExpenseCategoryMetrics, range: DashboardTimeRange)
 
 export function ExpenseCategoryCards({ cards }: { cards: ExpenseCategoryMetrics[] }) {
   const { t } = useI18n();
-  const [range, setRange] = useState<DashboardTimeRange>("today");
+  const [range, setRange] = useState<DashboardTimeRange>("month");
 
   const displayCards = useMemo(
     () =>
