@@ -200,6 +200,7 @@
     "errorNetwork": "שגיאת רשת",
     "errorInvalidCredentials": "שם משתמש או סיסמה שגויים",
     "errorSessionExpired": "פג תוקף החיבור — היכנסו מחדש",
+    "errorSessionSuperseded": "החשבון התחבר ממכשיר אחר. לצורכי אבטחה נותקת מהמערכת.",
     "errorChangePasswordFailed": "שינוי סיסמה נכשל",
     "passwordTooShort": "סיסמה חדשה חייבת לכלול לפחות 8 תווים",
     "passwordMismatch": "הסיסמאות אינן תואמות",
@@ -1280,6 +1281,15 @@
     "filterPartyName": "שם גורם",
     "filterPartyNamePlaceholder": "חיפוש לפי ספק, עובד או לקוח…",
     "selectedCount": "{{count}} מסמכים נבחרו",
+    "selectedOne": "נבחר מסמך אחד",
+    "selectedMany": "נבחרו {{count}} מסמכים",
+    "selectionTotal": "סה\"כ",
+    "selectionDocumentsTotal": "סה\"כ מסמכים",
+    "selectionIncomeTotal": "סה\"כ הכנסות",
+    "selectionExpenseTotal": "סה\"כ הוצאות",
+    "selectionNet": "נטו",
+    "exportExcel": "ייצוא Excel",
+    "exportSummaryAmount": "סה\"כ סכום",
     "bulkMarkSent": "סמן כנשלח לרואה חשבון",
     "bulkCancelSent": "בטל העברה",
     "clearSelection": "ניקוי בחירה",
@@ -2472,7 +2482,12 @@
       "role_EMPLOYEE": "עובד",
       "changePassword": "שינוי סיסמה",
       "changePasswordSoon": "שינוי סיסמה זמין בכפתור 'שינוי סיסמה' שבסרגל העליון.",
-      "signOut": "יציאה מהחשבון"
+      "signOut": "יציאה מהחשבון",
+      "lastLoginTitle": "התחברות אחרונה",
+      "lastLoginAt": "תאריך ושעה",
+      "lastLoginIp": "IP",
+      "lastLoginDevice": "מכשיר",
+      "lastLoginUnknown": "—"
     }
   },
   "ops": {

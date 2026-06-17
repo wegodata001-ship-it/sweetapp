@@ -200,6 +200,7 @@
     "errorNetwork": "Network error",
     "errorInvalidCredentials": "Invalid username or password",
     "errorSessionExpired": "Session expired — please sign in again",
+    "errorSessionSuperseded": "This account signed in from another device. For security, you have been signed out.",
     "errorChangePasswordFailed": "Password change failed",
     "passwordTooShort": "New password must be at least 8 characters",
     "passwordMismatch": "Passwords do not match",
@@ -1280,6 +1281,15 @@
     "filterPartyName": "Party name",
     "filterPartyNamePlaceholder": "Search by supplier, employee, or customer…",
     "selectedCount": "{{count}} documents selected",
+    "selectedOne": "1 document selected",
+    "selectedMany": "{{count}} documents selected",
+    "selectionTotal": "Total",
+    "selectionDocumentsTotal": "Documents total",
+    "selectionIncomeTotal": "Total income",
+    "selectionExpenseTotal": "Total expenses",
+    "selectionNet": "Net",
+    "exportExcel": "Export Excel",
+    "exportSummaryAmount": "Total amount",
     "bulkMarkSent": "Mark as sent to accountant",
     "bulkCancelSent": "Cancel transfer",
     "clearSelection": "Clear selection",
@@ -2476,7 +2486,12 @@
       "role_EMPLOYEE": "Employee",
       "changePassword": "Change password",
       "changePasswordSoon": "Use the 'Change password' button in the top bar.",
-      "signOut": "Sign out"
+      "signOut": "Sign out",
+      "lastLoginTitle": "Last sign-in",
+      "lastLoginAt": "Date & time",
+      "lastLoginIp": "IP",
+      "lastLoginDevice": "Device",
+      "lastLoginUnknown": "—"
     }
   },
   "ops": {

@@ -4,6 +4,8 @@ import { Check, Loader2, Mail, Star, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useI18n } from "@/components/i18n-provider";
 import type { DocumentEmailAttachmentPreview } from "@/lib/finance/db";
+import type { ArchiveSelectionTotals } from "@/lib/finance/archive-selection-totals";
+import { ArchiveSelectionSummary } from "@/components/finance/archive-selection-summary";
 import {
   fetchDocumentEmailContacts,
   previewAccountantEmailAttachments,
@@ -15,7 +17,7 @@ export type AccountantEmailSendMode = "pdf_only" | "source_only" | "pdf_and_sour
 
 type Props = {
   open: boolean;
-  selectedCount: number;
+  selectionTotals: ArchiveSelectionTotals;
   selectedDocumentIds: string[];
   defaultEmail: string;
   defaultSubject: string;
@@ -58,7 +60,7 @@ function flagsFromMode(mode: AccountantEmailSendMode): { includePdf: boolean; in
 
 export function AccountantEmailModal({
   open,
-  selectedCount,
+  selectionTotals,
   selectedDocumentIds,
   defaultEmail,
   defaultSubject,
@@ -150,10 +152,7 @@ export function AccountantEmailModal({
 
   if (!open) return null;
 
-  const selectedLabel =
-    selectedCount === 1
-      ? t("archive.emailModal.selectedOne")
-      : t("archive.emailModal.selectedMany", { count: String(selectedCount) });
+  const selectedCount = selectionTotals.count;
 
   const toggleRecipient = (email: string) => {
     const key = normalizeEmail(email);
@@ -478,7 +477,7 @@ export function AccountantEmailModal({
             />
           </label>
 
-          <p className="rounded-xl bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-700">{selectedLabel}</p>
+          <ArchiveSelectionSummary totals={selectionTotals} variant="modal" />
           <p className="text-xs leading-5 text-slate-500">{t("archive.emailModal.attachmentsHint")}</p>
           <p className="text-xs leading-5 text-slate-500">{t("archive.emailModal.zipHint")}</p>
         </div>

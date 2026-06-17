@@ -7,6 +7,7 @@ import { signSessionToken, COOKIE_NAME } from "@/lib/auth/jwt";
 import { getPermissionStringsForUser } from "@/lib/auth/user-permissions";
 import { logActivity } from "@/lib/activity-log";
 import { looksLikeEmail } from "@/lib/employees/national-id";
+import { createUserSession, requestClientMeta } from "@/lib/auth/session-binding";
 
 async function writeAudit(params: {
   userId: string | null;
@@ -117,12 +118,15 @@ export async function POST(req: NextRequest) {
     }
 
     const permissions = await getPermissionStringsForUser(user.id, user.role as "EMPLOYEE" | "ADMIN" | "SUPER_ADMIN");
+    const clientMeta = requestClientMeta(req.headers);
+    const sessionId = await createUserSession(user.id, clientMeta);
 
     const token = await signSessionToken({
       sub: user.id,
       email: user.email,
       role: user.role as "EMPLOYEE" | "ADMIN" | "SUPER_ADMIN",
       permissions,
+      sid: sessionId,
       mustChangePassword: Boolean(user.mustChangePassword),
     });
 

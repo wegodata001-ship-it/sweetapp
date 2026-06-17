@@ -200,6 +200,7 @@
     "errorNetwork": "خطأ في الشبكة",
     "errorInvalidCredentials": "اسم المستخدم أو كلمة المرور غير صحيحة",
     "errorSessionExpired": "انتهت الجلسة — يرجى تسجيل الدخول مجدداً",
+    "errorSessionSuperseded": "تم تسجيل الدخول إلى الحساب من جهاز آخر. لأسباب أمنية تم تسجيل خروجك.",
     "errorChangePasswordFailed": "فشل تغيير كلمة المرور",
     "passwordTooShort": "كلمة المرور الجديدة يجب أن تحتوي على 8 أحرف على الأقل",
     "passwordMismatch": "كلمتا المرور غير متطابقتين",
@@ -1280,6 +1281,15 @@
     "filterPartyName": "اسم الجهة",
     "filterPartyNamePlaceholder": "بحث حسب المورد أو الموظف أو العميل…",
     "selectedCount": "تم تحديد {{count}} مستندات",
+    "selectedOne": "تم تحديد مستند واحد",
+    "selectedMany": "تم تحديد {{count}} مستندات",
+    "selectionTotal": "الإجمالي",
+    "selectionDocumentsTotal": "إجمالي المستندات",
+    "selectionIncomeTotal": "إجمالي الإيرادات",
+    "selectionExpenseTotal": "إجمالي المصروفات",
+    "selectionNet": "صافي",
+    "exportExcel": "تصدير Excel",
+    "exportSummaryAmount": "إجمالي المبلغ",
     "bulkMarkSent": "علّم كمُرسَل إلى المحاسب",
     "bulkCancelSent": "إلغاء الإرسال",
     "clearSelection": "مسح التحديد",
@@ -2476,7 +2486,12 @@
       "role_EMPLOYEE": "موظف",
       "changePassword": "تغيير كلمة المرور",
       "changePasswordSoon": "يمكنك تغيير كلمة المرور من زر 'تغيير كلمة المرور' في الشريط العلوي.",
-      "signOut": "تسجيل الخروج من الحساب"
+      "signOut": "تسجيل الخروج من الحساب",
+      "lastLoginTitle": "آخر تسجيل دخول",
+      "lastLoginAt": "التاريخ والوقت",
+      "lastLoginIp": "IP",
+      "lastLoginDevice": "الجهاز",
+      "lastLoginUnknown": "—"
     }
   },
   "ops": {

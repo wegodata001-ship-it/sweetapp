@@ -29,6 +29,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { PdfPreviewModal } from "@/components/pdf-preview-modal";
 import { AccountantEmailModal } from "@/components/finance/accountant-email-modal";
 import { ArchiveCounterpartyFilter } from "@/components/finance/archive-counterparty-filter";
+import { ArchiveSelectionSummary } from "@/components/finance/archive-selection-summary";
 import { useI18n } from "@/components/i18n-provider";
 import {
   bulkSetDocumentsAccountantSent,
@@ -46,6 +47,11 @@ import {
   parseArchiveCounterpartyKey,
   type ArchiveCounterpartyKindFilter,
 } from "@/lib/finance/counterparty-filter";
+import {
+  buildArchiveSelectionCsv,
+  computeArchiveSelectionTotals,
+  formatArchiveSelectionAmount,
+} from "@/lib/finance/archive-selection-totals";
 
 type GeneratedReportRow = {
   id: string;
@@ -462,6 +468,34 @@ export default function FinanceArchivePage() {
     }
     return base;
   }, [rows, archiveCounterpartyRef]);
+
+  const selectionTotals = useMemo(
+    () => computeArchiveSelectionTotals(filteredRows, selectedIds),
+    [filteredRows, selectedIds],
+  );
+
+  const exportSelectionCsv = () => {
+    if (selectionTotals.count === 0) return;
+    const countLabel =
+      selectionTotals.count === 1
+        ? t("archive.selectedOne")
+        : t("archive.selectedMany", { count: selectionTotals.count });
+    const csv = buildArchiveSelectionCsv(filteredRows, selectedIds, selectionTotals, {
+      summaryCount: countLabel,
+      summaryAmount: `${t("archive.exportSummaryAmount")}: ${formatArchiveSelectionAmount(selectionTotals.total)}`,
+      colTitle: t("archive.thDocument"),
+      colCategory: t("archive.thType"),
+      colDate: t("archive.thDate"),
+      colAmount: t("archive.selectionTotal"),
+    });
+    const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `archive-selection-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
 
   return (
     <div className="mx-auto max-w-7xl space-y-4">
@@ -882,10 +916,16 @@ export default function FinanceArchivePage() {
 
             {selectedIds.size > 0 ? (
               <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-luxury-navy-rich/15 bg-luxury-navy-rich/5 px-4 py-3">
-                <p className="text-sm font-black text-luxury-navy-rich">
-                  {t("archive.selectedCount", { count: selectedIds.size })}
-                </p>
+                <ArchiveSelectionSummary totals={selectionTotals} variant="bar" />
                 <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={exportSelectionCsv}
+                    className="inline-flex items-center gap-1 rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-black text-slate-900 hover:bg-slate-50"
+                  >
+                    <Download className="h-3.5 w-3.5" aria-hidden />
+                    {t("archive.exportExcel")}
+                  </button>
                   <button
                     type="button"
                     disabled={emailSending}
@@ -1485,7 +1525,7 @@ export default function FinanceArchivePage() {
 
       <AccountantEmailModal
         open={emailModalOpen}
-        selectedCount={selectedIds.size}
+        selectionTotals={selectionTotals}
         selectedDocumentIds={[...selectedIds]}
         defaultEmail={accountantRecipientEmail ?? ""}
         defaultSubject={t("archive.emailModal.defaultSubject")}

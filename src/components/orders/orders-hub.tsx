@@ -10,7 +10,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type Dispatch, type SetStateAction } from "react";
 import { useI18n } from "@/components/i18n-provider";
 import { formatShekel } from "@/lib/format-shekel";
 import {
@@ -103,6 +103,225 @@ function rowToForm(row: FutureOrderRow): FormState {
     depositPaid: row.depositPaid,
     status: (row.status as FutureOrderStatus) || "PENDING",
   };
+}
+
+type TranslateFn = (key: string, vars?: Record<string, string | number>) => string;
+
+function OrderPaymentBadge({
+  remaining,
+  tL,
+}: {
+  remaining: number;
+  tL: (key: string) => string;
+}) {
+  return remaining > 0.01 ? (
+    <span className="rounded-full border border-rose-300/80 bg-rose-50 px-2 py-0.5 text-[10px] font-black text-rose-800">
+      {tL("badgeRemaining")}
+    </span>
+  ) : (
+    <span className="rounded-full border border-emerald-400/80 bg-emerald-50 px-2 py-0.5 text-[10px] font-black text-emerald-900">
+      {tL("badgePaidFull")}
+    </span>
+  );
+}
+
+function OrderStatusBadge({
+  status,
+  module,
+  t,
+}: {
+  status: string;
+  module: OrdersModule;
+  t: TranslateFn;
+}) {
+  const s = (FUTURE_ORDER_STATUSES as readonly string[]).includes(status)
+    ? (status as FutureOrderStatus)
+    : "PENDING";
+  return (
+    <span
+      className={`inline-flex rounded-full border px-2.5 py-0.5 text-[11px] font-bold ${STATUS_BADGE_CLASS[s]}`}
+    >
+      {t(statusI18nKey(s, module))}
+    </span>
+  );
+}
+
+function OrderFormFields({
+  form,
+  setForm,
+  remaining,
+  idPrefix,
+  isWedding,
+  module,
+  tL,
+  t,
+}: {
+  form: FormState;
+  setForm: Dispatch<SetStateAction<FormState>>;
+  remaining: number;
+  idPrefix: string;
+  isWedding: boolean;
+  module: OrdersModule;
+  tL: (key: string) => string;
+  t: TranslateFn;
+}) {
+  return (
+    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      <label className="block sm:col-span-2">
+        <span className="mb-1 block text-xs font-bold text-slate-600">
+          {tL("fieldCustomerName")}
+        </span>
+        <input
+          className={inputClass}
+          value={form.customerName}
+          onChange={(e) => setForm((prev) => ({ ...prev, customerName: e.target.value }))}
+        />
+      </label>
+      <label className="block">
+        <span className="mb-1 block text-xs font-bold text-slate-600">
+          {tL("fieldPhone")}
+        </span>
+        <input
+          className={inputClass}
+          value={form.phone}
+          onChange={(e) => setForm((prev) => ({ ...prev, phone: e.target.value }))}
+        />
+      </label>
+      {!isWedding ? (
+        <label className="block sm:col-span-2">
+          <span className="mb-1 block text-xs font-bold text-slate-600">
+            {tL("fieldItemsDescription")}
+          </span>
+          <input
+            className={inputClass}
+            value={form.itemsDescription}
+            onChange={(e) => setForm((prev) => ({ ...prev, itemsDescription: e.target.value }))}
+          />
+        </label>
+      ) : null}
+      <label className="block">
+        <span className="mb-1 block text-xs font-bold text-slate-600">
+          {tL("fieldEventDate")}
+        </span>
+        <input
+          type="date"
+          className={inputClass}
+          value={form.eventDate}
+          onChange={(e) => setForm((prev) => ({ ...prev, eventDate: e.target.value }))}
+        />
+      </label>
+      <label className="block">
+        <span className="mb-1 block text-xs font-bold text-slate-600">
+          {tL("fieldEventTime")}
+        </span>
+        <input
+          className={inputClass}
+          value={form.eventTime}
+          onChange={(e) => setForm((prev) => ({ ...prev, eventTime: e.target.value }))}
+        />
+      </label>
+      {isWedding ? (
+        <label className="block">
+          <span className="mb-1 block text-xs font-bold text-slate-600">
+            {tL("fieldGuestCount")}
+          </span>
+          <input
+            type="number"
+            min={0}
+            className={inputClass}
+            value={form.guestCount}
+            onChange={(e) => setForm((prev) => ({ ...prev, guestCount: e.target.value }))}
+          />
+        </label>
+      ) : null}
+      <label className="block sm:col-span-2">
+        <span className="mb-1 block text-xs font-bold text-slate-600">
+          {tL("fieldAddress")}
+        </span>
+        <input
+          className={inputClass}
+          value={form.address}
+          onChange={(e) => setForm((prev) => ({ ...prev, address: e.target.value }))}
+        />
+      </label>
+      <label className="block sm:col-span-3">
+        <span className="mb-1 block text-xs font-bold text-slate-600">
+          {tL("fieldNotes")}
+        </span>
+        <textarea
+          className={`${inputClass} min-h-[72px]`}
+          value={form.notes}
+          onChange={(e) => setForm((prev) => ({ ...prev, notes: e.target.value }))}
+        />
+      </label>
+      <label className="block">
+        <span className="mb-1 block text-xs font-bold text-slate-600">
+          {tL("fieldTotalAmount")}
+        </span>
+        <input
+          type="number"
+          min={0}
+          step="0.01"
+          className={inputClass}
+          value={form.totalAmount}
+          onChange={(e) => setForm((prev) => ({ ...prev, totalAmount: e.target.value }))}
+        />
+      </label>
+      <label className="block">
+        <span className="mb-1 block text-xs font-bold text-slate-600">
+          {tL("fieldDeposit")}
+        </span>
+        <input
+          type="number"
+          min={0}
+          step="0.01"
+          className={inputClass}
+          value={form.depositAmount}
+          onChange={(e) => setForm((prev) => ({ ...prev, depositAmount: e.target.value }))}
+        />
+      </label>
+      <div
+        className={`flex flex-col justify-end rounded-xl border border-dashed px-3 py-2 ${
+          isWedding ? "border-rose-200/80 bg-rose-50/40" : "border-sky-200/80 bg-sky-50/40"
+        }`}
+      >
+        <span className={`text-xs font-bold ${isWedding ? "text-rose-800" : "text-sky-800"}`}>
+          {tL("thRemainingPay")}
+        </span>
+        <span className={`text-lg font-black ${isWedding ? "text-rose-950" : "text-sky-950"}`}>
+          {formatShekel(remaining)}
+        </span>
+      </div>
+      {isWedding ? (
+        <label className="flex items-center gap-2 self-end sm:col-span-2">
+          <input
+            type="checkbox"
+            checked={form.depositPaid}
+            onChange={(e) => setForm((prev) => ({ ...prev, depositPaid: e.target.checked }))}
+            className="h-4 w-4 rounded border-slate-300"
+          />
+          <span className="text-sm font-semibold text-slate-700">{tL("fieldDepositPaid")}</span>
+        </label>
+      ) : null}
+      <label className="block">
+        <span className="mb-1 block text-xs font-bold text-slate-600">
+          {tL("fieldStatus")}
+        </span>
+        <select
+          id={`${idPrefix}-status`}
+          className={inputClass}
+          value={form.status}
+          onChange={(e) => setForm((prev) => ({ ...prev, status: e.target.value as FutureOrderStatus }))}
+        >
+          {FUTURE_ORDER_STATUSES.map((s) => (
+            <option key={s} value={s}>
+              {t(statusI18nKey(s, module))}
+            </option>
+          ))}
+        </select>
+      </label>
+    </div>
+  );
 }
 
 export type OrdersHubProps = {
@@ -360,198 +579,6 @@ export function OrdersHub({ module, canManage }: OrdersHubProps) {
     w.print();
   };
 
-  const PaymentBadge = ({ remaining }: { remaining: number }) =>
-    remaining > 0.01 ? (
-      <span className="rounded-full border border-rose-300/80 bg-rose-50 px-2 py-0.5 text-[10px] font-black text-rose-800">
-        {tL("badgeRemaining")}
-      </span>
-    ) : (
-      <span className="rounded-full border border-emerald-400/80 bg-emerald-50 px-2 py-0.5 text-[10px] font-black text-emerald-900">
-        {tL("badgePaidFull")}
-      </span>
-    );
-
-  const StatusBadge = ({ status }: { status: string }) => {
-    const s = (FUTURE_ORDER_STATUSES as readonly string[]).includes(status)
-      ? (status as FutureOrderStatus)
-      : "PENDING";
-    return (
-      <span
-        className={`inline-flex rounded-full border px-2.5 py-0.5 text-[11px] font-bold ${STATUS_BADGE_CLASS[s]}`}
-      >
-        {t(statusI18nKey(s, module))}
-      </span>
-    );
-  };
-
-  const FormFields = ({
-    form,
-    setForm,
-    remaining,
-    idPrefix,
-  }: {
-    form: FormState;
-    setForm: (f: FormState) => void;
-    remaining: number;
-    idPrefix: string;
-  }) => (
-    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-      <label className="block sm:col-span-2">
-        <span className="mb-1 block text-xs font-bold text-slate-600">
-          {tL("fieldCustomerName")}
-        </span>
-        <input
-          className={inputClass}
-          value={form.customerName}
-          onChange={(e) => setForm({ ...form, customerName: e.target.value })}
-        />
-      </label>
-      <label className="block">
-        <span className="mb-1 block text-xs font-bold text-slate-600">
-          {tL("fieldPhone")}
-        </span>
-        <input
-          className={inputClass}
-          value={form.phone}
-          onChange={(e) => setForm({ ...form, phone: e.target.value })}
-        />
-      </label>
-      {!isWedding ? (
-        <label className="block sm:col-span-2">
-          <span className="mb-1 block text-xs font-bold text-slate-600">
-            {tL("fieldItemsDescription")}
-          </span>
-          <input
-            className={inputClass}
-            value={form.itemsDescription}
-            onChange={(e) => setForm({ ...form, itemsDescription: e.target.value })}
-          />
-        </label>
-      ) : null}
-      <label className="block">
-        <span className="mb-1 block text-xs font-bold text-slate-600">
-          {tL("fieldEventDate")}
-        </span>
-        <input
-          type="date"
-          className={inputClass}
-          value={form.eventDate}
-          onChange={(e) => setForm({ ...form, eventDate: e.target.value })}
-        />
-      </label>
-      <label className="block">
-        <span className="mb-1 block text-xs font-bold text-slate-600">
-          {tL("fieldEventTime")}
-        </span>
-        <input
-          className={inputClass}
-          value={form.eventTime}
-          onChange={(e) => setForm({ ...form, eventTime: e.target.value })}
-        />
-      </label>
-      {isWedding ? (
-        <label className="block">
-          <span className="mb-1 block text-xs font-bold text-slate-600">
-            {tL("fieldGuestCount")}
-          </span>
-          <input
-            type="number"
-            min={0}
-            className={inputClass}
-            value={form.guestCount}
-            onChange={(e) => setForm({ ...form, guestCount: e.target.value })}
-          />
-        </label>
-      ) : null}
-      <label className="block sm:col-span-2">
-        <span className="mb-1 block text-xs font-bold text-slate-600">
-          {tL("fieldAddress")}
-        </span>
-        <input
-          className={inputClass}
-          value={form.address}
-          onChange={(e) => setForm({ ...form, address: e.target.value })}
-        />
-      </label>
-      <label className="block sm:col-span-3">
-        <span className="mb-1 block text-xs font-bold text-slate-600">
-          {tL("fieldNotes")}
-        </span>
-        <textarea
-          className={`${inputClass} min-h-[72px]`}
-          value={form.notes}
-          onChange={(e) => setForm({ ...form, notes: e.target.value })}
-        />
-      </label>
-      <label className="block">
-        <span className="mb-1 block text-xs font-bold text-slate-600">
-          {tL("fieldTotalAmount")}
-        </span>
-        <input
-          type="number"
-          min={0}
-          step="0.01"
-          className={inputClass}
-          value={form.totalAmount}
-          onChange={(e) => setForm({ ...form, totalAmount: e.target.value })}
-        />
-      </label>
-      <label className="block">
-        <span className="mb-1 block text-xs font-bold text-slate-600">
-          {tL("fieldDeposit")}
-        </span>
-        <input
-          type="number"
-          min={0}
-          step="0.01"
-          className={inputClass}
-          value={form.depositAmount}
-          onChange={(e) => setForm({ ...form, depositAmount: e.target.value })}
-        />
-      </label>
-      <div
-        className={`flex flex-col justify-end rounded-xl border border-dashed px-3 py-2 ${
-          isWedding ? "border-rose-200/80 bg-rose-50/40" : "border-sky-200/80 bg-sky-50/40"
-        }`}
-      >
-        <span className={`text-xs font-bold ${isWedding ? "text-rose-800" : "text-sky-800"}`}>
-          {tL("thRemainingPay")}
-        </span>
-        <span className={`text-lg font-black ${isWedding ? "text-rose-950" : "text-sky-950"}`}>
-          {formatShekel(remaining)}
-        </span>
-      </div>
-      {isWedding ? (
-        <label className="flex items-center gap-2 self-end sm:col-span-2">
-          <input
-            type="checkbox"
-            checked={form.depositPaid}
-            onChange={(e) => setForm({ ...form, depositPaid: e.target.checked })}
-            className="h-4 w-4 rounded border-slate-300"
-          />
-          <span className="text-sm font-semibold text-slate-700">{tL("fieldDepositPaid")}</span>
-        </label>
-      ) : null}
-      <label className="block">
-        <span className="mb-1 block text-xs font-bold text-slate-600">
-          {tL("fieldStatus")}
-        </span>
-        <select
-          id={`${idPrefix}-status`}
-          className={inputClass}
-          value={form.status}
-          onChange={(e) => setForm({ ...form, status: e.target.value as FutureOrderStatus })}
-        >
-          {FUTURE_ORDER_STATUSES.map((s) => (
-            <option key={s} value={s}>
-              {t(statusI18nKey(s, module))}
-            </option>
-          ))}
-        </select>
-      </label>
-    </div>
-  );
-
   return (
     <div className="tcg-fade-in mx-auto max-w-6xl space-y-6 px-3 pb-16 pt-4 md:px-6 md:pt-6">
       <header
@@ -686,7 +713,16 @@ export function OrdersHub({ module, canManage }: OrdersHubProps) {
             </button>
           </div>
           <div className="p-4">
-            <FormFields form={createForm} setForm={setCreateForm} remaining={createRemaining} idPrefix="create" />
+            <OrderFormFields
+              form={createForm}
+              setForm={setCreateForm}
+              remaining={createRemaining}
+              idPrefix="create"
+              isWedding={isWedding}
+              module={module}
+              tL={tL}
+              t={t}
+            />
             <div className="mt-4 flex flex-wrap gap-2">
               <button
                 type="button"
@@ -736,8 +772,8 @@ export function OrdersHub({ module, canManage }: OrdersHubProps) {
                     <div className="min-w-0 flex-1 space-y-1">
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="text-xs font-bold text-slate-400">#{row.orderNumber}</span>
-                        <StatusBadge status={row.status} />
-                        <PaymentBadge remaining={row.remainingAmount} />
+                        <OrderStatusBadge status={row.status} module={module} t={t} />
+                        <OrderPaymentBadge remaining={row.remainingAmount} tL={tL} />
                       </div>
                       <p className="truncate text-base font-black text-slate-950">{row.customerName}</p>
                       <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs font-semibold text-slate-600">
@@ -825,11 +861,15 @@ export function OrdersHub({ module, canManage }: OrdersHubProps) {
                         </dl>
                       ) : (
                         <>
-                          <FormFields
+                          <OrderFormFields
                             form={editForm}
                             setForm={setEditForm}
                             remaining={editRemaining}
                             idPrefix={`edit-${row.id}`}
+                            isWedding={isWedding}
+                            module={module}
+                            tL={tL}
+                            t={t}
                           />
                           <div className="mt-4 flex gap-2">
                             <button

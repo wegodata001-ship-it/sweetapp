@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import { getSessionFromCookie } from "@/lib/auth/get-session";
 import { appendRefreshedSessionCookie } from "@/lib/auth/reissue-session";
 import { executeSelfServicePasswordChange } from "@/lib/auth/self-service-password-change";
+import { rotateUserSessionId } from "@/lib/auth/session-binding";
 import { createTranslator } from "@/lib/i18n/translator";
 import { normalizeLocale, WEGO_LOCALE_COOKIE } from "@/lib/i18n/constants";
 
@@ -45,7 +46,15 @@ export async function POST(req: NextRequest) {
   }
 
   const res = NextResponse.json({ ok: true });
-  const okCookie = await appendRefreshedSessionCookie(res, session.sub);
+  const newSid = await rotateUserSessionId(session.sub);
+  const okCookie = await appendRefreshedSessionCookie(res, {
+    id: session.sub,
+    email: session.email,
+    role: session.role,
+    mustChangePassword: false,
+    permissions: session.permissions,
+    sid: newSid,
+  });
   if (!okCookie) {
     return NextResponse.json(
       { ok: false, code: "SESSION_REFRESH_FAILED", message: t("auth.errors.sessionRefreshFailed") },

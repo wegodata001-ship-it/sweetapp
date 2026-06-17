@@ -11,6 +11,14 @@ import {
 } from "react";
 import { fetchWithDedupe, invalidateCacheKey, setCached } from "@/lib/client/fetch-cache";
 
+const SESSION_SUPERSEDED_CODE = "SESSION_SUPERSEDED";
+
+export type LastLoginInfo = {
+  at: string | null;
+  ip: string | null;
+  device: string | null;
+};
+
 export type AuthUser = {
   id: string;
   fullName: string;
@@ -23,6 +31,7 @@ export type AuthUser = {
   /** he | ar | en */
   language?: string;
   permissions: string[];
+  lastLogin?: LastLoginInfo;
 };
 
 type AuthContextValue = {
@@ -38,6 +47,19 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 const AUTH_CACHE_MS = 20_000;
 const AUTH_KEY = "auth-me";
 const AUTH_SYNC_KEY = "auth-me-sync";
+const SESSION_POLL_MS = 5_000;
+
+type MeResponse = {
+  ok?: boolean;
+  user?: AuthUser | null;
+  code?: string;
+};
+
+function redirectToLoginSuperseded(): void {
+  invalidateCacheKey(AUTH_KEY);
+  invalidateCacheKey(AUTH_SYNC_KEY);
+  window.location.href = "/login?reason=superseded";
+}
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
@@ -51,16 +73,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     if (sync) invalidateCacheKey(AUTH_KEY);
 
-    const data = await fetchWithDedupe<{ user?: AuthUser | null }>(
+    const data = await fetchWithDedupe<MeResponse>(
       key,
       async () => {
         const res = await fetch(`/api/auth/me${sync ? "?sync=1" : ""}`, {
           credentials: "same-origin",
         });
-        return (await res.json()) as { user?: AuthUser | null };
+        return (await res.json()) as MeResponse;
       },
       ttl,
     );
+
+    if (data.code === SESSION_SUPERSEDED_CODE) {
+      setUser(null);
+      setLoading(false);
+      redirectToLoginSuperseded();
+      return;
+    }
+
     setUser(data.user ?? null);
     setLoading(false);
   }, []);
@@ -79,13 +109,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     void refresh();
   }, [refresh]);
 
-  /** סנכרון הרשאות מה-DB + JWT מעודכן — כל 60 שניות בלבד */
+  /** בדיקת session פעיל — כל 5 שניות + בעת חזרה לטאב */
   useEffect(() => {
     if (!user) return;
-    const interval = window.setInterval(() => {
-      void refresh({ sync: true });
-    }, 60_000);
-    return () => window.clearInterval(interval);
+
+    const poll = () => void refresh({ sync: true });
+
+    const interval = window.setInterval(poll, SESSION_POLL_MS);
+
+    const onVisible = () => {
+      if (document.visibilityState === "visible") poll();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+
+    return () => {
+      window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
   }, [user, refresh]);
 
   const logout = useCallback(async () => {

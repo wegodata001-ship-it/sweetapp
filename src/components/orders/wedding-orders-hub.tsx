@@ -12,7 +12,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState, type Dispatch, type SetStateAction } from "react";
 import { useI18n } from "@/components/i18n-provider";
 import type { FutureOrderRow } from "@/components/orders/orders-hub";
 import { formatShekel } from "@/lib/format-shekel";
@@ -80,6 +80,160 @@ function rowToForm(row: FutureOrderRow): FormState {
     depositPaid: row.depositPaid,
     status: (row.status as FutureOrderStatus) || "IN_PREPARATION",
   };
+}
+
+type TranslateFn = (key: string, vars?: Record<string, string | number>) => string;
+
+function WeddingStatusBadge({
+  row,
+  t,
+}: {
+  row: FutureOrderRow;
+  t: TranslateFn;
+}) {
+  const overdue = isWeddingOrderOverdue(row);
+  const key = overdue ? "OVERDUE" : row.status;
+  const cls = WEDDING_STATUS_BADGE_CLASS[key] ?? WEDDING_STATUS_BADGE_CLASS.IN_PREPARATION;
+  return (
+    <span className={`inline-flex rounded-full border px-2.5 py-0.5 text-[11px] font-bold ${cls}`}>
+      {t(weddingStatusI18nKey(row.status, overdue))}
+    </span>
+  );
+}
+
+function WeddingFormFields({
+  form,
+  setForm,
+  remaining,
+  idPrefix,
+  tL,
+  t,
+}: {
+  form: FormState;
+  setForm: Dispatch<SetStateAction<FormState>>;
+  remaining: number;
+  idPrefix: string;
+  tL: TranslateFn;
+  t: TranslateFn;
+}) {
+  return (
+    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      <label className="block sm:col-span-2">
+        <span className="mb-1 flex items-center gap-1 text-xs font-bold text-[#4c1d95]">
+          <Calendar className="h-3.5 w-3.5 text-[#c9a227]" aria-hidden />
+          {tL("fieldEventDate")}
+        </span>
+        <input
+          type="date"
+          required
+          className={inputClass}
+          value={form.eventDate}
+          onChange={(e) => setForm((prev) => ({ ...prev, eventDate: e.target.value }))}
+        />
+      </label>
+      <label className="block">
+        <span className="mb-1 block text-xs font-bold text-[#4c1d95]">{tL("fieldCustomerName")}</span>
+        <input
+          className={inputClass}
+          value={form.customerName}
+          onChange={(e) => setForm((prev) => ({ ...prev, customerName: e.target.value }))}
+        />
+      </label>
+      <label className="block">
+        <span className="mb-1 block text-xs font-bold text-[#4c1d95]">{tL("fieldPhone")}</span>
+        <input
+          className={inputClass}
+          value={form.phone}
+          onChange={(e) => setForm((prev) => ({ ...prev, phone: e.target.value }))}
+        />
+      </label>
+      <label className="block">
+        <span className="mb-1 block text-xs font-bold text-[#4c1d95]">{tL("fieldEventTime")}</span>
+        <input
+          className={inputClass}
+          placeholder={tL("deliveryTimePlaceholder")}
+          value={form.eventTime}
+          onChange={(e) => setForm((prev) => ({ ...prev, eventTime: e.target.value }))}
+        />
+      </label>
+      <label className="block">
+        <span className="mb-1 block text-xs font-bold text-[#4c1d95]">{tL("fieldGuestCount")}</span>
+        <input
+          type="number"
+          min={0}
+          className={inputClass}
+          value={form.guestCount}
+          onChange={(e) => setForm((prev) => ({ ...prev, guestCount: e.target.value }))}
+        />
+      </label>
+      <label className="block sm:col-span-2">
+        <span className="mb-1 block text-xs font-bold text-[#4c1d95]">{tL("fieldAddress")}</span>
+        <input
+          className={inputClass}
+          value={form.address}
+          onChange={(e) => setForm((prev) => ({ ...prev, address: e.target.value }))}
+        />
+      </label>
+      <label className="block sm:col-span-3">
+        <span className="mb-1 block text-xs font-bold text-[#4c1d95]">{tL("fieldNotes")}</span>
+        <textarea
+          className={`${inputClass} min-h-[72px]`}
+          value={form.notes}
+          onChange={(e) => setForm((prev) => ({ ...prev, notes: e.target.value }))}
+        />
+      </label>
+      <label className="block">
+        <span className="mb-1 block text-xs font-bold text-[#4c1d95]">{tL("fieldTotalAmount")}</span>
+        <input
+          type="number"
+          min={0}
+          step="0.01"
+          className={inputClass}
+          value={form.totalAmount}
+          onChange={(e) => setForm((prev) => ({ ...prev, totalAmount: e.target.value }))}
+        />
+      </label>
+      <label className="block">
+        <span className="mb-1 block text-xs font-bold text-[#4c1d95]">{tL("fieldDeposit")}</span>
+        <input
+          type="number"
+          min={0}
+          step="0.01"
+          className={inputClass}
+          value={form.depositAmount}
+          onChange={(e) => setForm((prev) => ({ ...prev, depositAmount: e.target.value }))}
+        />
+      </label>
+      <div className="flex flex-col justify-end rounded-xl border border-dashed border-[#c9a227]/50 bg-gradient-to-br from-[#fffbeb] to-[#faf5ff] px-3 py-2">
+        <span className="text-xs font-bold text-[#6b21a8]">{tL("thRemaining")}</span>
+        <span className="text-lg font-black text-[#0f172a] tabular-nums">{formatShekel(remaining)}</span>
+      </div>
+      <label className="flex items-center gap-2 self-end">
+        <input
+          type="checkbox"
+          checked={form.depositPaid}
+          onChange={(e) => setForm((prev) => ({ ...prev, depositPaid: e.target.checked }))}
+          className="h-4 w-4 rounded border-violet-300"
+        />
+        <span className="text-sm font-semibold text-[#4c1d95]">{tL("fieldDepositPaid")}</span>
+      </label>
+      <label className="block">
+        <span className="mb-1 block text-xs font-bold text-[#4c1d95]">{tL("fieldStatus")}</span>
+        <select
+          id={`${idPrefix}-status`}
+          className={inputClass}
+          value={form.status}
+          onChange={(e) => setForm((prev) => ({ ...prev, status: e.target.value as FutureOrderStatus }))}
+        >
+          {FUTURE_ORDER_STATUSES.filter((s) => s !== "PENDING").map((s) => (
+            <option key={s} value={s}>
+              {t(weddingStatusI18nKey(s, false))}
+            </option>
+          ))}
+        </select>
+      </label>
+    </div>
+  );
 }
 
 type StatusFilter = "" | FutureOrderStatus | "OVERDUE";
@@ -315,146 +469,6 @@ export function WeddingOrdersHub() {
     w.print();
   };
 
-  const WeddingStatusBadge = ({ row }: { row: FutureOrderRow }) => {
-    const overdue = isWeddingOrderOverdue(row);
-    const key = overdue ? "OVERDUE" : row.status;
-    const cls = WEDDING_STATUS_BADGE_CLASS[key] ?? WEDDING_STATUS_BADGE_CLASS.IN_PREPARATION;
-    return (
-      <span className={`inline-flex rounded-full border px-2.5 py-0.5 text-[11px] font-bold ${cls}`}>
-        {t(weddingStatusI18nKey(row.status, overdue))}
-      </span>
-    );
-  };
-
-  const FormFields = ({
-    form,
-    setForm,
-    remaining,
-    idPrefix,
-  }: {
-    form: FormState;
-    setForm: (f: FormState) => void;
-    remaining: number;
-    idPrefix: string;
-  }) => (
-    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-      <label className="block sm:col-span-2">
-        <span className="mb-1 flex items-center gap-1 text-xs font-bold text-[#4c1d95]">
-          <Calendar className="h-3.5 w-3.5 text-[#c9a227]" aria-hidden />
-          {tL("fieldEventDate")}
-        </span>
-        <input
-          type="date"
-          required
-          className={inputClass}
-          value={form.eventDate}
-          onChange={(e) => setForm({ ...form, eventDate: e.target.value })}
-        />
-      </label>
-      <label className="block">
-        <span className="mb-1 block text-xs font-bold text-[#4c1d95]">{tL("fieldCustomerName")}</span>
-        <input
-          className={inputClass}
-          value={form.customerName}
-          onChange={(e) => setForm({ ...form, customerName: e.target.value })}
-        />
-      </label>
-      <label className="block">
-        <span className="mb-1 block text-xs font-bold text-[#4c1d95]">{tL("fieldPhone")}</span>
-        <input
-          className={inputClass}
-          value={form.phone}
-          onChange={(e) => setForm({ ...form, phone: e.target.value })}
-        />
-      </label>
-      <label className="block">
-        <span className="mb-1 block text-xs font-bold text-[#4c1d95]">{tL("fieldEventTime")}</span>
-        <input
-          className={inputClass}
-          placeholder={tL("deliveryTimePlaceholder")}
-          value={form.eventTime}
-          onChange={(e) => setForm({ ...form, eventTime: e.target.value })}
-        />
-      </label>
-      <label className="block">
-        <span className="mb-1 block text-xs font-bold text-[#4c1d95]">{tL("fieldGuestCount")}</span>
-        <input
-          type="number"
-          min={0}
-          className={inputClass}
-          value={form.guestCount}
-          onChange={(e) => setForm({ ...form, guestCount: e.target.value })}
-        />
-      </label>
-      <label className="block sm:col-span-2">
-        <span className="mb-1 block text-xs font-bold text-[#4c1d95]">{tL("fieldAddress")}</span>
-        <input
-          className={inputClass}
-          value={form.address}
-          onChange={(e) => setForm({ ...form, address: e.target.value })}
-        />
-      </label>
-      <label className="block sm:col-span-3">
-        <span className="mb-1 block text-xs font-bold text-[#4c1d95]">{tL("fieldNotes")}</span>
-        <textarea
-          className={`${inputClass} min-h-[72px]`}
-          value={form.notes}
-          onChange={(e) => setForm({ ...form, notes: e.target.value })}
-        />
-      </label>
-      <label className="block">
-        <span className="mb-1 block text-xs font-bold text-[#4c1d95]">{tL("fieldTotalAmount")}</span>
-        <input
-          type="number"
-          min={0}
-          step="0.01"
-          className={inputClass}
-          value={form.totalAmount}
-          onChange={(e) => setForm({ ...form, totalAmount: e.target.value })}
-        />
-      </label>
-      <label className="block">
-        <span className="mb-1 block text-xs font-bold text-[#4c1d95]">{tL("fieldDeposit")}</span>
-        <input
-          type="number"
-          min={0}
-          step="0.01"
-          className={inputClass}
-          value={form.depositAmount}
-          onChange={(e) => setForm({ ...form, depositAmount: e.target.value })}
-        />
-      </label>
-      <div className="flex flex-col justify-end rounded-xl border border-dashed border-[#c9a227]/50 bg-gradient-to-br from-[#fffbeb] to-[#faf5ff] px-3 py-2">
-        <span className="text-xs font-bold text-[#6b21a8]">{tL("thRemaining")}</span>
-        <span className="text-lg font-black text-[#0f172a] tabular-nums">{formatShekel(remaining)}</span>
-      </div>
-      <label className="flex items-center gap-2 self-end">
-        <input
-          type="checkbox"
-          checked={form.depositPaid}
-          onChange={(e) => setForm({ ...form, depositPaid: e.target.checked })}
-          className="h-4 w-4 rounded border-violet-300"
-        />
-        <span className="text-sm font-semibold text-[#4c1d95]">{tL("fieldDepositPaid")}</span>
-      </label>
-      <label className="block">
-        <span className="mb-1 block text-xs font-bold text-[#4c1d95]">{tL("fieldStatus")}</span>
-        <select
-          id={`${idPrefix}-status`}
-          className={inputClass}
-          value={form.status}
-          onChange={(e) => setForm({ ...form, status: e.target.value as FutureOrderStatus })}
-        >
-          {FUTURE_ORDER_STATUSES.filter((s) => s !== "PENDING").map((s) => (
-            <option key={s} value={s}>
-              {t(weddingStatusI18nKey(s, false))}
-            </option>
-          ))}
-        </select>
-      </label>
-    </div>
-  );
-
   const statCards = [
     { emoji: "💍", label: tL("statCount"), value: String(stats.count) },
     { emoji: "📅", label: tL("statUpcoming"), value: String(stats.upcoming) },
@@ -579,7 +593,14 @@ export function WeddingOrdersHub() {
             </button>
           </div>
           <div className="p-4">
-            <FormFields form={createForm} setForm={setCreateForm} remaining={createRemaining} idPrefix="create" />
+            <WeddingFormFields
+              form={createForm}
+              setForm={setCreateForm}
+              remaining={createRemaining}
+              idPrefix="create"
+              tL={tL}
+              t={t}
+            />
             <div className="mt-4 flex flex-wrap gap-2">
               <button
                 type="button"
@@ -652,7 +673,7 @@ export function WeddingOrdersHub() {
                         {formatShekel(row.remainingAmount)}
                       </td>
                       <td className="px-3 py-3">
-                        <WeddingStatusBadge row={row} />
+                        <WeddingStatusBadge row={row} t={t} />
                       </td>
                       <td className="px-3 py-3 text-slate-700">{row.eventTime ?? "—"}</td>
                       <td className="max-w-[140px] truncate px-3 py-3 text-slate-600" title={row.notes ?? ""}>
@@ -744,11 +765,13 @@ export function WeddingOrdersHub() {
                             </dl>
                           ) : (
                             <>
-                              <FormFields
+                              <WeddingFormFields
                                 form={editForm}
                                 setForm={setEditForm}
                                 remaining={editRemaining}
                                 idPrefix={`edit-${row.id}`}
+                                tL={tL}
+                                t={t}
                               />
                               <div className="mt-4 flex gap-2">
                                 <button

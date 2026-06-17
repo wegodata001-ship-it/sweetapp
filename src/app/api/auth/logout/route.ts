@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { COOKIE_NAME } from "@/lib/auth/jwt";
 import { getSessionFromCookie } from "@/lib/auth/get-session";
+import { clearUserSession } from "@/lib/auth/session-binding";
 import { prismaAny } from "@/lib/prisma";
 import { logActivity } from "@/lib/activity-log";
 
@@ -27,6 +28,7 @@ export async function POST(req: NextRequest) {
       /* לא חוסם זרימה */
     }
     await logActivity(session.sub, "logout");
+    await clearUserSession(session.sub);
   }
 
   const res = NextResponse.json({ ok: true });

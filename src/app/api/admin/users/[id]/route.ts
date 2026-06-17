@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma, prismaAny } from "@/lib/prisma";
+import { invalidateSessionBindingCache } from "@/lib/auth/session-binding";
 import { hashPassword } from "@/lib/auth/password";
 import { PERMISSION_KEYS, type PermissionKey } from "@/lib/auth/permissions";
 import { UserRole } from "@prisma/client";
@@ -99,6 +100,7 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
         passwordHash?: string;
         passwordUpdatedAt?: Date;
         mustChangePassword?: boolean;
+        currentSessionId?: string | null;
         hourlyRate?: number;
         language?: string;
       } = {};
@@ -107,11 +109,19 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
       if (email) userUpdate.email = email;
       if (normalizedNid !== undefined) userUpdate.nationalId = normalizedNid;
       if (phone !== undefined) userUpdate.phone = phone;
-      if (typeof body.isActive === "boolean") userUpdate.isActive = body.isActive;
+      if (typeof body.isActive === "boolean") {
+        userUpdate.isActive = body.isActive;
+        if (!body.isActive) {
+          userUpdate.currentSessionId = null;
+          invalidateSessionBindingCache(id);
+        }
+      }
       if (role) userUpdate.role = role;
       if (passwordPlain) {
         userUpdate.passwordHash = await hashPassword(passwordPlain);
         userUpdate.passwordUpdatedAt = new Date();
+        userUpdate.currentSessionId = null;
+        invalidateSessionBindingCache(id);
         // אם המנהל מאפס סיסמה לעובד — בדרך כלל זה כדי שיחליף בכניסה הבאה
         if (body.mustChangePassword === undefined) {
           userUpdate.mustChangePassword = true;

@@ -22,6 +22,13 @@ function LoginContent() {
   const [submitting, setSubmitting] = useState(false);
 
   const nextUrl = searchParams.get("next") || "/";
+  const reason = searchParams.get("reason");
+
+  useEffect(() => {
+    if (reason === "superseded") {
+      setError(t("auth.errorSessionSuperseded"));
+    }
+  }, [reason, t]);
 
   useEffect(() => {
     if (!loading && user) {

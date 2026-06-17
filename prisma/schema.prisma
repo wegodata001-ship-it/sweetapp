@@ -936,6 +936,11 @@ model User {
   passwordUpdatedAt            DateTime?
   /// טלפון אישי לעובד (לעתיד: שחזור סיסמה דרך OTP)
   phone                        String?
+  /// חיבור יחיד — JWT.sid חייב להתאים; login חדש מחליף
+  currentSessionId             String?
+  lastLoginAt                  DateTime?
+  lastLoginIp                  String?
+  lastLoginDevice              String?
   /// תאימות לאחור — ממופה ל-emailMode ב-rules
   emailNotifyAll               Boolean                 @default(true)
   emailNotifyTasks             Boolean                 @default(true)

@@ -16,8 +16,8 @@ import { useToast } from "@/components/toast-provider";
  * rest of the app uses (no inline form here yet to keep the surface tiny).
  */
 export function EmployeeProfileClient() {
-  const { t, dir } = useI18n();
-  const { user } = useAuth();
+  const { t, dir, bcp47 } = useI18n();
+  const { user, refresh } = useAuth();
   const { showToast } = useToast();
   const router = useRouter();
   const [busy, setBusy] = useState(false);
@@ -49,7 +49,21 @@ export function EmployeeProfileClient() {
 
   useEffect(() => {
     void loadEmailPrefs();
-  }, [loadEmailPrefs]);
+    void refresh({ sync: true });
+  }, [loadEmailPrefs, refresh]);
+
+  const locale = bcp47 === "ar" ? "ar-IL" : bcp47 === "en" ? "en-GB" : "he-IL";
+  const lastLogin = user?.lastLogin;
+  const lastLoginAtLabel =
+    lastLogin?.at
+      ? new Date(lastLogin.at).toLocaleString(locale, {
+          day: "2-digit",
+          month: "short",
+          year: "numeric",
+          hour: "2-digit",
+          minute: "2-digit",
+        })
+      : t("employee.profile.lastLoginUnknown");
 
   async function saveEmailPrefs(next: typeof emailPrefs) {
     setEmailPrefs(next);
@@ -122,7 +136,27 @@ export function EmployeeProfileClient() {
       </section>
 
       <section className="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-200 md:p-5">
-        <h2 className="text-sm font-black text-slate-900">העדפות התראות</h2>
+        <h2 className="text-sm font-black text-slate-900">{t("employee.profile.lastLoginTitle")}</h2>
+        <ul className="mt-3 divide-y divide-slate-100">
+          <Row
+            icon={<ShieldCheck className="h-4 w-4" aria-hidden />}
+            label={t("employee.profile.lastLoginAt")}
+            value={lastLoginAtLabel}
+          />
+          <Row
+            icon={<IdCard className="h-4 w-4" aria-hidden />}
+            label={t("employee.profile.lastLoginIp")}
+            value={lastLogin?.ip ?? t("employee.profile.lastLoginUnknown")}
+          />
+          <Row
+            icon={<Phone className="h-4 w-4" aria-hidden />}
+            label={t("employee.profile.lastLoginDevice")}
+            value={lastLogin?.device ?? t("employee.profile.lastLoginUnknown")}
+          />
+        </ul>
+      </section>
+
+      <section className="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-slate-200 md:p-5">
         <p className="mt-1 text-xs text-slate-500">בחר איך לקבל התראות מהמערכת</p>
         {prefsLoading ? (
           <p className="mt-3 text-sm text-slate-400">טוען…</p>
