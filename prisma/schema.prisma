@@ -940,7 +940,7 @@ model User {
   currentSessionId             String?
   lastLoginAt                  DateTime?
   lastLoginIp                  String?
-  lastLoginDevice              String?
+  lastDevice                   String?
   /// תאימות לאחור — ממופה ל-emailMode ב-rules
   emailNotifyAll               Boolean                 @default(true)
   emailNotifyTasks             Boolean                 @default(true)

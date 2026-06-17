@@ -1,8 +1,11 @@
-import { randomUUID } from "crypto";
 import { prismaAny } from "@/lib/prisma";
 import type { SessionJwtPayload } from "@/lib/auth/jwt";
 
 export const SESSION_SUPERSEDED_CODE = "SESSION_SUPERSEDED";
+
+function newSessionId(): string {
+  return globalThis.crypto.randomUUID();
+}
 
 const CACHE_TTL_MS = 3000;
 
@@ -43,7 +46,7 @@ export async function createUserSession(
   userId: string,
   meta: { ip: string | null; device: string },
 ): Promise<string> {
-  const sessionId = randomUUID();
+  const sessionId = newSessionId();
   invalidateSessionBindingCache(userId);
   await prismaAny.user.update({
     where: { id: userId },
@@ -51,7 +54,7 @@ export async function createUserSession(
       currentSessionId: sessionId,
       lastLoginAt: new Date(),
       lastLoginIp: meta.ip,
-      lastLoginDevice: meta.device,
+      lastDevice: meta.device,
     },
   });
   return sessionId;
@@ -59,7 +62,7 @@ export async function createUserSession(
 
 /** מחליף session ID בלי לעדכן lastLogin — שינוי סיסמה / reissue */
 export async function rotateUserSessionId(userId: string): Promise<string> {
-  const sessionId = randomUUID();
+  const sessionId = newSessionId();
   invalidateSessionBindingCache(userId);
   await prismaAny.user.update({
     where: { id: userId },

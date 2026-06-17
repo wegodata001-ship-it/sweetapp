@@ -12,7 +12,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { Fragment, useCallback, useEffect, useMemo, useState, type Dispatch, type SetStateAction } from "react";
+import { Fragment, memo, useCallback, useEffect, useMemo, useState, type Dispatch, type SetStateAction } from "react";
 import { useI18n } from "@/components/i18n-provider";
 import type { FutureOrderRow } from "@/components/orders/orders-hub";
 import { formatShekel } from "@/lib/format-shekel";
@@ -101,7 +101,7 @@ function WeddingStatusBadge({
   );
 }
 
-function WeddingFormFields({
+const WeddingFormFields = memo(function WeddingFormFields({
   form,
   setForm,
   remaining,
@@ -234,7 +234,7 @@ function WeddingFormFields({
       </label>
     </div>
   );
-}
+});
 
 type StatusFilter = "" | FutureOrderStatus | "OVERDUE";
 
@@ -243,8 +243,11 @@ type StatusFilter = "" | FutureOrderStatus | "OVERDUE";
  */
 export function WeddingOrdersHub() {
   const { t, bcp47, dir } = useI18n();
-  const tL = (key: string, vars?: Record<string, string | number>) =>
-    t(`admin.weddingOrders.${key}`, vars);
+  const tL = useCallback(
+    (key: string, vars?: Record<string, string | number>) =>
+      t(`admin.weddingOrders.${key}`, vars),
+    [t],
+  );
   const orderCategory = ORDER_CATEGORY_WEDDING;
 
   const [rows, setRows] = useState<FutureOrderRow[]>([]);
@@ -362,6 +365,11 @@ export function WeddingOrdersHub() {
     () =>
       computeRemainingAmount(Number(editForm.totalAmount) || 0, Number(editForm.depositAmount) || 0),
     [editForm.totalAmount, editForm.depositAmount],
+  );
+
+  const editingRow = useMemo(
+    () => (expandedId && expandMode === "edit" ? rows.find((r) => r.id === expandedId) ?? null : null),
+    [expandedId, expandMode, rows],
   );
 
   const payloadFromForm = (f: FormState) => ({
@@ -625,6 +633,57 @@ export function WeddingOrdersHub() {
         </div>
       )}
 
+      {editingRow ? (
+        <div className="overflow-hidden rounded-2xl border border-[#c9a227]/40 bg-white shadow-xl">
+          <div className="flex items-center justify-between border-b border-violet-100 bg-gradient-to-r from-[#faf5ff] to-[#fffbeb] px-4 py-3">
+            <h2 className="text-sm font-black text-[#4c1d95]">
+              {tL("actionEdit")} · #{editingRow.orderNumber} · {editingRow.customerName}
+            </h2>
+            <button
+              type="button"
+              className={iconBtn}
+              onClick={() => {
+                setExpandedId(null);
+                setExpandMode(null);
+              }}
+              aria-label={tL("cancel")}
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+          <div className="p-4">
+            <WeddingFormFields
+              form={editForm}
+              setForm={setEditForm}
+              remaining={editRemaining}
+              idPrefix={`edit-${editingRow.id}`}
+              tL={tL}
+              t={t}
+            />
+            <div className="mt-4 flex flex-wrap gap-2">
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => void saveEdit(editingRow.id)}
+                className="rounded-xl bg-gradient-to-r from-[#7c3aed] to-[#4c1d95] px-5 py-2 text-sm font-black text-white disabled:opacity-50"
+              >
+                {busy ? tL("saving") : tL("save")}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setExpandedId(null);
+                  setExpandMode(null);
+                }}
+                className="rounded-xl border border-violet-200 px-4 py-2 text-sm font-bold text-[#4c1d95]"
+              >
+                {tL("cancel")}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       {loading && rows.length === 0 ? (
         <p className="text-center text-sm font-semibold text-violet-700/70">{t("common.loading")}</p>
       ) : displayedRows.length === 0 ? (
@@ -654,7 +713,12 @@ export function WeddingOrdersHub() {
                 return (
                   <Fragment key={row.id}>
                     <tr
-                      className="border-b border-violet-50/80 transition hover:bg-[#faf5ff]/80"
+                      className={[
+                        "border-b border-violet-50/80 transition hover:bg-[#faf5ff]/80",
+                        expandedId === row.id ? "bg-[#faf5ff]/90 ring-1 ring-inset ring-[#c9a227]/30" : "",
+                      ]
+                        .filter(Boolean)
+                        .join(" ")}
                     >
                       <td className="px-3 py-3 font-bold text-[#0f172a]">
                         <span className="text-[10px] font-semibold text-violet-400">#{row.orderNumber}</span>
@@ -724,11 +788,10 @@ export function WeddingOrdersHub() {
                         </div>
                       </td>
                     </tr>
-                    {isOpen ? (
+                    {isOpen && expandMode === "view" ? (
                       <tr key={`${row.id}-detail`} className="bg-[#faf5ff]/60">
                         <td colSpan={10} className="px-4 py-4">
-                          {expandMode === "view" ? (
-                            <dl className="grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-3">
+                          <dl className="grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-3">
                               <div>
                                 <dt className="text-xs font-bold text-[#6b21a8]">{tL("fieldAddress")}</dt>
                                 <dd>{row.address || "—"}</dd>
@@ -763,38 +826,6 @@ export function WeddingOrdersHub() {
                                 </ul>
                               </div>
                             </dl>
-                          ) : (
-                            <>
-                              <WeddingFormFields
-                                form={editForm}
-                                setForm={setEditForm}
-                                remaining={editRemaining}
-                                idPrefix={`edit-${row.id}`}
-                                tL={tL}
-                                t={t}
-                              />
-                              <div className="mt-4 flex gap-2">
-                                <button
-                                  type="button"
-                                  disabled={busy}
-                                  onClick={() => void saveEdit(row.id)}
-                                  className="rounded-xl bg-[#7c3aed] px-5 py-2 text-sm font-black text-white"
-                                >
-                                  {tL("save")}
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setExpandedId(null);
-                                    setExpandMode(null);
-                                  }}
-                                  className="rounded-xl border border-violet-200 px-4 py-2 text-sm font-bold"
-                                >
-                                  {tL("cancel")}
-                                </button>
-                              </div>
-                            </>
-                          )}
                           <button
                             type="button"
                             className="mt-3 text-xs font-bold text-violet-600 hover:text-violet-900"
