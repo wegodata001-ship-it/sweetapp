@@ -10,6 +10,11 @@ import {
   isValidStatus,
   resolveOrderCategory,
 } from "@/lib/future-orders/helpers";
+import { normalizePaymentMethodKey } from "@/lib/finance/payment-methods-i18n";
+import {
+  reverseAllActiveOrderPayments,
+  syncOrderDepositField,
+} from "@/lib/finance/order-cashflow-sync";
 
 export const dynamic = "force-dynamic";
 
@@ -51,6 +56,7 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
       totalAmount?: number;
       depositAmount?: number;
       depositPaid?: boolean;
+      depositMethod?: string | null;
       status?: string;
       isCompleted?: boolean;
       notes?: string | null;
@@ -126,12 +132,23 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
         depositAmount: nextDeposit,
         remainingAmount,
         ...(body.depositPaid !== undefined ? { depositPaid: Boolean(body.depositPaid) } : {}),
+        ...(body.depositMethod !== undefined
+          ? { depositMethod: normalizePaymentMethodKey(body.depositMethod) ?? body.depositMethod?.trim() ?? null }
+          : {}),
         status,
         isCompleted,
         completedAt,
         ...(body.notes !== undefined ? { notes: body.notes?.trim() || null } : {}),
       },
     });
+
+    // סנכרון תזרים — ביטול הזמנה מהפך הכול; אחרת מסנכרן את שדה המקדמה
+    const becameCancelled = existing.status !== "CANCELLED" && row.status === "CANCELLED";
+    if (becameCancelled) {
+      await reverseAllActiveOrderPayments(row, session.sub);
+    } else {
+      await syncOrderDepositField(row, session.sub);
+    }
 
     await logActivity(session.sub, "future_order_edit");
     return NextResponse.json({ ok: true, data: row });

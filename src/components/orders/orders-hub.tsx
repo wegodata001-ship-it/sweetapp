@@ -13,6 +13,7 @@ import {
 import { useCallback, useEffect, useMemo, useState, type Dispatch, type SetStateAction } from "react";
 import { useI18n } from "@/components/i18n-provider";
 import { OrderPaymentsPanel } from "@/components/orders/order-payments-panel";
+import { ORDER_PAYMENT_METHOD_OPTIONS, translatePaymentMethod } from "@/lib/finance/payment-methods-i18n";
 import { formatShekel } from "@/lib/format-shekel";
 import {
   DAILY_GRADIENT,
@@ -42,6 +43,7 @@ export type FutureOrderRow = {
   depositAmount: number;
   remainingAmount: number;
   depositPaid: boolean;
+  depositMethod: string | null;
   status: string;
   notes: string | null;
   isCompleted: boolean;
@@ -59,6 +61,7 @@ type FormState = {
   totalAmount: string;
   depositAmount: string;
   depositPaid: boolean;
+  depositMethod: string;
   status: FutureOrderStatus;
 };
 
@@ -74,6 +77,7 @@ const emptyForm = (): FormState => ({
   totalAmount: "",
   depositAmount: "",
   depositPaid: false,
+  depositMethod: "CASH",
   status: "PENDING",
 });
 
@@ -102,6 +106,7 @@ function rowToForm(row: FutureOrderRow): FormState {
     totalAmount: String(row.totalAmount),
     depositAmount: String(row.depositAmount),
     depositPaid: row.depositPaid,
+    depositMethod: row.depositMethod ?? "CASH",
     status: (row.status as FutureOrderStatus) || "PENDING",
   };
 }
@@ -281,6 +286,22 @@ function OrderFormFields({
           onChange={(e) => setForm((prev) => ({ ...prev, depositAmount: e.target.value }))}
         />
       </label>
+      <label className="block">
+        <span className="mb-1 block text-xs font-bold text-slate-600">
+          {tL("fieldDepositMethod")}
+        </span>
+        <select
+          className={inputClass}
+          value={form.depositMethod}
+          onChange={(e) => setForm((prev) => ({ ...prev, depositMethod: e.target.value }))}
+        >
+          {ORDER_PAYMENT_METHOD_OPTIONS.map((m) => (
+            <option key={m} value={m}>
+              {translatePaymentMethod(m, t) ?? m}
+            </option>
+          ))}
+        </select>
+      </label>
       <div
         className={`flex flex-col justify-end rounded-xl border border-dashed px-3 py-2 ${
           isWedding ? "border-rose-200/80 bg-rose-50/40" : "border-sky-200/80 bg-sky-50/40"
@@ -293,17 +314,15 @@ function OrderFormFields({
           {formatShekel(remaining)}
         </span>
       </div>
-      {isWedding ? (
-        <label className="flex items-center gap-2 self-end sm:col-span-2">
-          <input
-            type="checkbox"
-            checked={form.depositPaid}
-            onChange={(e) => setForm((prev) => ({ ...prev, depositPaid: e.target.checked }))}
-            className="h-4 w-4 rounded border-slate-300"
-          />
-          <span className="text-sm font-semibold text-slate-700">{tL("fieldDepositPaid")}</span>
-        </label>
-      ) : null}
+      <label className="flex items-center gap-2 self-end sm:col-span-2">
+        <input
+          type="checkbox"
+          checked={form.depositPaid}
+          onChange={(e) => setForm((prev) => ({ ...prev, depositPaid: e.target.checked }))}
+          className="h-4 w-4 rounded border-slate-300"
+        />
+        <span className="text-sm font-semibold text-slate-700">{tL("fieldDepositPaid")}</span>
+      </label>
       <label className="block">
         <span className="mb-1 block text-xs font-bold text-slate-600">
           {tL("fieldStatus")}
@@ -469,6 +488,7 @@ export function OrdersHub({ module, canManage }: OrdersHubProps) {
     totalAmount: Number(f.totalAmount) || 0,
     depositAmount: Number(f.depositAmount) || 0,
     depositPaid: f.depositPaid,
+    depositMethod: f.depositMethod,
     status: f.status,
   });
 

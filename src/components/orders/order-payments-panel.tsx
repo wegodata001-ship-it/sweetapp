@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Ban, Loader2, Plus } from "lucide-react";
 import { useI18n } from "@/components/i18n-provider";
 import { formatShekel } from "@/lib/format-shekel";
-import { translatePaymentMethod } from "@/lib/finance/payment-methods-i18n";
+import { ORDER_PAYMENT_METHOD_OPTIONS, translatePaymentMethod } from "@/lib/finance/payment-methods-i18n";
 
 export type OrderPaymentKind = "DEPOSIT" | "PAYMENT" | "REFUND";
 
@@ -17,9 +17,10 @@ type OrderPayment = {
   notes: string | null;
   status: string;
   cancelledAt: string | null;
+  autoSource: string | null;
 };
 
-const METHOD_OPTIONS = ["CASH", "TRANSFER", "CREDIT", "CHECK", "BIT", "PAYBOX", "OTHER"] as const;
+const METHOD_OPTIONS = ORDER_PAYMENT_METHOD_OPTIONS;
 const KIND_OPTIONS: readonly OrderPaymentKind[] = ["DEPOSIT", "PAYMENT", "REFUND"];
 
 const inputClass =
@@ -169,6 +170,7 @@ export function OrderPaymentsPanel({
             {payments.map((p) => {
               const cancelled = p.status !== "ACTIVE";
               const isRefund = p.kind === "REFUND";
+              const managed = Boolean(p.autoSource);
               return (
                 <li
                   key={p.id}
@@ -191,6 +193,11 @@ export function OrderPaymentsPanel({
                         {tP("statusCancelled")}
                       </span>
                     )}
+                    {managed && !cancelled && (
+                      <span className="rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] font-black text-amber-800">
+                        {tP("managed")}
+                      </span>
+                    )}
                   </div>
                   <div className="flex items-center gap-3">
                     <span
@@ -201,7 +208,7 @@ export function OrderPaymentsPanel({
                       {isRefund ? "−" : "+"}
                       {formatShekel(Number(p.amount) || 0)}
                     </span>
-                    {canManage && !cancelled && (
+                    {canManage && !cancelled && !managed && (
                       <button
                         type="button"
                         onClick={() => void cancelPayment(p.id)}

@@ -18,6 +18,8 @@ import {
   prismaCategoryFilter,
   type OrderCategory,
 } from "@/lib/future-orders/helpers";
+import { normalizePaymentMethodKey } from "@/lib/finance/payment-methods-i18n";
+import { syncOrderDepositField } from "@/lib/finance/order-cashflow-sync";
 
 export const dynamic = "force-dynamic";
 
@@ -124,6 +126,7 @@ export async function POST(req: NextRequest) {
       totalAmount?: number;
       depositAmount?: number;
       depositPaid?: boolean;
+      depositMethod?: string | null;
       status?: string;
       notes?: string | null;
     };
@@ -175,10 +178,13 @@ export async function POST(req: NextRequest) {
         depositAmount,
         remainingAmount,
         depositPaid: Boolean(body.depositPaid),
+        depositMethod: normalizePaymentMethodKey(body.depositMethod) ?? body.depositMethod?.trim() ?? null,
         status,
         notes: body.notes?.trim() || null,
       },
     });
+
+    await syncOrderDepositField(row, session.sub);
 
     await logActivity(session.sub, "future_order_create");
     return NextResponse.json({ ok: true, data: row });

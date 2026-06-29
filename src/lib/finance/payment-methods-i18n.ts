@@ -13,6 +13,17 @@ export const PAYMENT_METHOD_I18N: Record<string, string> = {
   CASH_REGISTER: "paymentMethods.CASH_REGISTER",
 };
 
+/** אמצעי תשלום לבחירה בתשלומי הזמנות / מקדמות */
+export const ORDER_PAYMENT_METHOD_OPTIONS = [
+  "CASH",
+  "TRANSFER",
+  "CREDIT",
+  "CHECK",
+  "BIT",
+  "PAYBOX",
+  "OTHER",
+] as const;
+
 /** מנרמל ערך DB / טקסט חופשי למפתח i18n */
 export function normalizePaymentMethodKey(raw: string | null | undefined): string | null {
   const k = (raw ?? "").trim();

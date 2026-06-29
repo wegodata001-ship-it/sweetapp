@@ -18,6 +18,9 @@ export type OrderPaymentKind = "DEPOSIT" | "PAYMENT" | "REFUND";
 
 export const ORDER_PAYMENT_KINDS: readonly OrderPaymentKind[] = ["DEPOSIT", "PAYMENT", "REFUND"];
 
+/** מסמן תשלום שמנוהל אוטומטית משדה המקדמה בטופס ההזמנה */
+export const AUTO_DEPOSIT_SOURCE = "ORDER_DEPOSIT_FIELD";
+
 export const ORDER_CASHFLOW_SOURCES = {
   deposit: "order_deposit",
   payment: "order_payment",
@@ -175,6 +178,148 @@ export async function reverseCashFlowForOrderPayment(
   } catch (e) {
     console.error("[order-cashflow-sync] reverseCashFlowForOrderPayment failed", {
       orderPaymentId: payment.id,
+      error: e instanceof Error ? e.message : String(e),
+    });
+  }
+}
+
+type OrderDepositInput = {
+  id: string;
+  orderNumber: number;
+  customerName: string | null;
+  depositPaid: boolean;
+  depositAmount: number;
+  depositMethod: string | null;
+  status: string;
+};
+
+function round2(n: number): number {
+  return Math.round((Number(n) || 0) * 100) / 100;
+}
+
+/**
+ * מסנכרן את שדה המקדמה של ההזמנה לתנועת תזרים אוטומטית (DEPOSIT) — append-only:
+ *  - מקדמה ששולמה ואין עדיין תנועה → יצירת תנועה (+).
+ *  - שינוי סכום/אמצעי → ביטול הישנה (תנועה נגדית) ויצירת חדשה (audit מלא, ללא עדכון שורות).
+ *  - בוטל הסימון "שולם"/ירד ל-0/בוטלה ההזמנה → ביטול התנועה (תנועה נגדית).
+ * idempotent: ריצה חוזרת ללא שינוי לא יוצרת כפילויות. best-effort.
+ */
+export async function syncOrderDepositField(
+  order: OrderDepositInput,
+  createdById?: string | null,
+): Promise<void> {
+  try {
+    const desiredAmount = round2(order.depositAmount);
+    const desiredMethod = order.depositMethod?.trim() || "CASH";
+    const wantDeposit =
+      Boolean(order.depositPaid) && desiredAmount > 0 && order.status !== "CANCELLED";
+
+    const orderInfo = {
+      id: order.id,
+      orderNumber: order.orderNumber,
+      customerName: order.customerName,
+    };
+
+    const active = (await prismaAny.orderPayment.findFirst({
+      where: { orderId: order.id, autoSource: AUTO_DEPOSIT_SOURCE, status: "ACTIVE" },
+      orderBy: { createdAt: "desc" },
+    })) as {
+      id: string;
+      kind: string;
+      amount: number;
+      paymentMethod: string | null;
+      paidAt: Date;
+      notes: string | null;
+    } | null;
+
+    const createAuto = async () => {
+      const payment = (await prismaAny.orderPayment.create({
+        data: {
+          orderId: order.id,
+          kind: "DEPOSIT",
+          amount: desiredAmount,
+          paymentMethod: desiredMethod,
+          paidAt: new Date(),
+          status: "ACTIVE",
+          autoSource: AUTO_DEPOSIT_SOURCE,
+          createdById: createdById ?? null,
+        },
+      })) as {
+        id: string;
+        kind: string;
+        amount: number;
+        paymentMethod: string | null;
+        paidAt: Date;
+        notes: string | null;
+      };
+      await createCashFlowForOrderPayment(payment, orderInfo);
+    };
+
+    const cancelActive = async () => {
+      if (!active) return;
+      const cancelledAt = new Date();
+      await prismaAny.orderPayment.update({
+        where: { id: active.id },
+        data: { status: "CANCELLED", cancelledAt, cancelledById: createdById ?? null },
+      });
+      await reverseCashFlowForOrderPayment(active, orderInfo, cancelledAt);
+    };
+
+    if (wantDeposit) {
+      if (!active) {
+        await createAuto();
+      } else {
+        const amountChanged = Math.abs(Number(active.amount) - desiredAmount) > 1e-9;
+        const methodChanged = (active.paymentMethod ?? "").trim() !== desiredMethod;
+        if (amountChanged || methodChanged) {
+          await cancelActive();
+          await createAuto();
+        }
+      }
+    } else if (active) {
+      await cancelActive();
+    }
+  } catch (e) {
+    console.error("[order-cashflow-sync] syncOrderDepositField failed", {
+      orderId: order.id,
+      error: e instanceof Error ? e.message : String(e),
+    });
+  }
+}
+
+/**
+ * ביטול הזמנה — יוצר תנועה נגדית לכל תשלום פעיל (אוטומטי וידני) ומסמן CANCELLED.
+ * לא מוחק רשומות. idempotent (אין תשלומים פעילים → no-op). best-effort.
+ */
+export async function reverseAllActiveOrderPayments(
+  order: { id: string; orderNumber: number; customerName: string | null },
+  cancelledById?: string | null,
+): Promise<void> {
+  try {
+    const actives = (await prismaAny.orderPayment.findMany({
+      where: { orderId: order.id, status: "ACTIVE" },
+    })) as Array<{
+      id: string;
+      kind: string;
+      amount: number;
+      paymentMethod: string | null;
+      paidAt: Date;
+      notes: string | null;
+    }>;
+    if (!actives.length) return;
+
+    const orderInfo = { id: order.id, orderNumber: order.orderNumber, customerName: order.customerName };
+    for (const p of actives) {
+      const cancelledAt = new Date();
+      await prismaAny.orderPayment.update({
+        where: { id: p.id },
+        data: { status: "CANCELLED", cancelledAt, cancelledById: cancelledById ?? null },
+      });
+      await reverseCashFlowForOrderPayment(p, orderInfo, cancelledAt);
+    }
+  } catch (e) {
+    console.error("[order-cashflow-sync] reverseAllActiveOrderPayments failed", {
+      orderId: order.id,
       error: e instanceof Error ? e.message : String(e),
     });
   }

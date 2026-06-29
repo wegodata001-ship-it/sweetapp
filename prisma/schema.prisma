@@ -722,6 +722,8 @@ model FutureOrder {
   depositAmount    Float     @default(0)
   remainingAmount  Float
   depositPaid      Boolean   @default(false)
+  /// אמצעי תשלום המקדמה (CASH/TRANSFER/CREDIT/CHECK/BIT/PAYBOX/OTHER) — לתזרים
+  depositMethod    String?
   /// PENDING | IN_PREPARATION | READY | COMPLETED | CANCELLED
   status           String    @default("PENDING")
   isCompleted      Boolean   @default(false)
@@ -769,6 +771,8 @@ model OrderPayment {
   kind          String      @default("PAYMENT")
   amount        Float
   paymentMethod String?
+  /// כשהתשלום מנוהל אוטומטית משדה ההזמנה (ORDER_DEPOSIT_FIELD) — לא לעריכה ידנית
+  autoSource    String?
   /// תאריך קבלת/החזר התשלום בפועל
   paidAt        DateTime    @default(now())
   notes         String?

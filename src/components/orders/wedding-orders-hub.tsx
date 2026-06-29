@@ -16,6 +16,7 @@ import { Fragment, memo, useCallback, useEffect, useMemo, useState, type Dispatc
 import { useI18n } from "@/components/i18n-provider";
 import type { FutureOrderRow } from "@/components/orders/orders-hub";
 import { OrderPaymentsPanel } from "@/components/orders/order-payments-panel";
+import { ORDER_PAYMENT_METHOD_OPTIONS, translatePaymentMethod } from "@/lib/finance/payment-methods-i18n";
 import { formatShekel } from "@/lib/format-shekel";
 import {
   computeRemainingAmount,
@@ -38,6 +39,7 @@ type FormState = {
   totalAmount: string;
   depositAmount: string;
   depositPaid: boolean;
+  depositMethod: string;
   status: FutureOrderStatus;
 };
 
@@ -52,6 +54,7 @@ const emptyForm = (): FormState => ({
   totalAmount: "",
   depositAmount: "",
   depositPaid: false,
+  depositMethod: "CASH",
   status: "IN_PREPARATION",
 });
 
@@ -79,6 +82,7 @@ function rowToForm(row: FutureOrderRow): FormState {
     totalAmount: String(row.totalAmount),
     depositAmount: String(row.depositAmount),
     depositPaid: row.depositPaid,
+    depositMethod: row.depositMethod ?? "CASH",
     status: (row.status as FutureOrderStatus) || "IN_PREPARATION",
   };
 }
@@ -204,6 +208,20 @@ const WeddingFormFields = memo(function WeddingFormFields({
           value={form.depositAmount}
           onChange={(e) => setForm((prev) => ({ ...prev, depositAmount: e.target.value }))}
         />
+      </label>
+      <label className="block">
+        <span className="mb-1 block text-xs font-bold text-[#4c1d95]">{tL("fieldDepositMethod")}</span>
+        <select
+          className={inputClass}
+          value={form.depositMethod}
+          onChange={(e) => setForm((prev) => ({ ...prev, depositMethod: e.target.value }))}
+        >
+          {ORDER_PAYMENT_METHOD_OPTIONS.map((m) => (
+            <option key={m} value={m}>
+              {translatePaymentMethod(m, t) ?? m}
+            </option>
+          ))}
+        </select>
       </label>
       <div className="flex flex-col justify-end rounded-xl border border-dashed border-[#c9a227]/50 bg-gradient-to-br from-[#fffbeb] to-[#faf5ff] px-3 py-2">
         <span className="text-xs font-bold text-[#6b21a8]">{tL("thRemaining")}</span>
@@ -385,6 +403,7 @@ export function WeddingOrdersHub() {
     totalAmount: Number(f.totalAmount) || 0,
     depositAmount: Number(f.depositAmount) || 0,
     depositPaid: f.depositPaid,
+    depositMethod: f.depositMethod,
     status: f.status,
   });
 
