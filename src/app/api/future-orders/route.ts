@@ -19,7 +19,10 @@ import {
   type OrderCategory,
 } from "@/lib/future-orders/helpers";
 import { normalizePaymentMethodKey } from "@/lib/finance/payment-methods-i18n";
-import { syncOrderDepositField } from "@/lib/finance/order-cashflow-sync";
+import {
+  backfillOrderDepositsOnce,
+  syncOrderDepositField,
+} from "@/lib/finance/order-cashflow-sync";
 
 export const dynamic = "force-dynamic";
 
@@ -91,6 +94,7 @@ export async function GET(req: NextRequest) {
     const where = and.length === 1 ? and[0] : { AND: and };
 
     await backfillOrderCategoriesOnce(prisma);
+    await backfillOrderDepositsOnce();
 
     const rows = await prisma.futureOrder.findMany({
       where,

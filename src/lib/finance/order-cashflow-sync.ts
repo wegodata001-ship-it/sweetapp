@@ -287,6 +287,39 @@ export async function syncOrderDepositField(
   }
 }
 
+let depositsBackfilled = false;
+
+/**
+ * Backfill חד-פעמי (פעם אחת לכל תהליך): מסנכרן מקדמות של הזמנות קיימות לתזרים.
+ * idempotent — syncOrderDepositField יוצר רק כשאין כבר תנועה פעילה, ללא כפילויות.
+ */
+export async function backfillOrderDepositsOnce(): Promise<void> {
+  if (depositsBackfilled) return;
+  depositsBackfilled = true;
+  try {
+    const orders = (await prismaAny.futureOrder.findMany({
+      where: { depositPaid: true, depositAmount: { gt: 0 }, status: { not: "CANCELLED" } },
+      select: {
+        id: true,
+        orderNumber: true,
+        customerName: true,
+        depositPaid: true,
+        depositAmount: true,
+        depositMethod: true,
+        status: true,
+      },
+    })) as OrderDepositInput[];
+    for (const order of orders) {
+      await syncOrderDepositField(order, null);
+    }
+  } catch (e) {
+    depositsBackfilled = false;
+    console.error("[order-cashflow-sync] backfillOrderDepositsOnce failed", {
+      error: e instanceof Error ? e.message : String(e),
+    });
+  }
+}
+
 /**
  * ביטול הזמנה — יוצר תנועה נגדית לכל תשלום פעיל (אוטומטי וידני) ומסמן CANCELLED.
  * לא מוחק רשומות. idempotent (אין תשלומים פעילים → no-op). best-effort.
