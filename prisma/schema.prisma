@@ -372,6 +372,10 @@ model CashFlowEntry {
   zReportId         String?
   /// סוג הוצאה ממסמך (SUPPLIER_PAYMENTS וכו׳) — רק לתנועות expense
   expenseType       String?
+  /// קישור להזמנה — רק לתנועות שמקורן בתשלום הזמנה (order_payment / order_deposit / order_refund)
+  relatedOrderId    String?
+  /// קישור לרשומת תשלום הזמנה (OrderPayment) — מבטיח אי-כפילות
+  orderPaymentId    String?
   zReport           FinancialDocument? @relation("CashFlowZReportFinancialDocument", fields: [zReportId], references: [id], onDelete: Cascade)
 
   @@index([entryDate])
@@ -382,6 +386,8 @@ model CashFlowEntry {
   @@index([relatedDocumentId])
   @@index([zReportId])
   @@index([source])
+  @@index([relatedOrderId])
+  @@index([orderPaymentId])
 }
 
 model GeneratedPdf {
@@ -729,11 +735,100 @@ model FutureOrder {
   guestCount       Int?
   /// DAILY_ORDER | WEDDING_ORDER
   orderCategory    String    @default("DAILY_ORDER")
+  /// קוד לקוח חיצוני — לצורך התאמת מערכות
+  customerCode     String?
+  /// שבוע עבודה (לדוגמה AH-127) — לצורך התאמת מערכות
+  weekCode         String?
+  /// מדינה (TURKEY | CHINA) — לצורך התאמת מערכות
+  country          String?
+  /// נתוני מערכת טורקיה — נמשכים בעת ייבוא התאמה (שלב 2 בעתיד). ריקים עד ייבוא.
+  turkeyOrderId      String?
+  turkeyCustomerCode String?
+  turkeyCustomerName String?
+  turkeyAmount       Float?
+  turkeyImportDate   DateTime?
+  turkeySyncWeek     String?
+  /// פנקס תשלומים בפועל על ההזמנה — מקור לתנועות תזרים (תוספת בלבד; לא משנה depositAmount)
+  payments         OrderPayment[]
 
   @@index([orderCategory])
   @@index([eventDate])
   @@index([status])
   @@index([isCompleted])
+  @@index([customerCode])
+  @@index([weekCode])
+  @@index([country])
+}
+
+/// פנקס תשלומים בפועל על הזמנה — append-only עם ביטול לוגי (audit).
+/// כל רשומה ACTIVE מייצרת תנועת תזרים; ביטול מייצר תנועה נגדית ולא מוחק.
+model OrderPayment {
+  id            String      @id @default(cuid())
+  orderId       String
+  /// DEPOSIT (מקדמה) | PAYMENT (תשלום) | REFUND (החזר ללקוח)
+  kind          String      @default("PAYMENT")
+  amount        Float
+  paymentMethod String?
+  /// תאריך קבלת/החזר התשלום בפועל
+  paidAt        DateTime    @default(now())
+  notes         String?
+  /// ACTIVE | CANCELLED — ביטול לוגי בלבד, שומר היסטוריה
+  status        String      @default("ACTIVE")
+  createdById   String?
+  createdAt     DateTime    @default(now())
+  cancelledAt   DateTime?
+  cancelledById String?
+  order         FutureOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+  @@index([status])
+  @@index([kind])
+  @@index([paidAt])
+}
+
+/// כותרת ייבוא להתאמת מערכות (WEGO מול מערכת חיצונית כמו טורקיה) — לפי שבוע ומדינה
+model SystemReconciliationImport {
+  id           String                    @id @default(cuid())
+  country      String
+  weekCode     String
+  fileName     String
+  filePath     String?
+  importedAt   DateTime                  @default(now())
+  importedById String?
+  totalRows    Int                       @default(0)
+  createdAt    DateTime                  @default(now())
+  updatedAt    DateTime                  @updatedAt
+  importedBy   User?                     @relation("ReconciliationImportedBy", fields: [importedById], references: [id])
+  rows         SystemReconciliationRow[]
+
+  @@index([country])
+  @@index([weekCode])
+  @@index([importedAt])
+  @@map("system_reconciliation_imports")
+}
+
+/// שורת ביניים מתוך הקובץ החיצוני — לא משנה הזמנות; רק השוואה
+model SystemReconciliationRow {
+  id                   String                     @id @default(cuid())
+  importId             String
+  country              String
+  weekCode             String
+  externalOrderId      String?
+  externalCustomerCode String?
+  externalCustomerName String?
+  externalAmount       Float?
+  externalDate         DateTime?
+  matchedOrderId       String?
+  /// MATCHED | AMOUNT_DIFFERENCE | MISSING_IN_WEGO | MISSING_IN_EXTERNAL | PENDING
+  status               String                     @default("PENDING")
+  differenceAmount     Float?
+  createdAt            DateTime                   @default(now())
+  import               SystemReconciliationImport @relation(fields: [importId], references: [id], onDelete: Cascade)
+
+  @@index([importId])
+  @@index([status])
+  @@index([externalCustomerCode])
+  @@map("system_reconciliation_rows")
 }
 
 /// מאגר משימות מקצועי — משימה אטומית חוזרת (ניקיון, סידור, בדיקה).
@@ -958,6 +1053,7 @@ model User {
   /// נוכחות LIVE — מצב עבודה
   lastSeenAt                   DateTime?
   accountantTransferLogs       AccountantTransferLog[] @relation("AccountantTransferLogPerformedBy")
+  reconciliationImports        SystemReconciliationImport[] @relation("ReconciliationImportedBy")
   activityLogs                 ActivityLog[]
   attendances                  Attendance[]
   attendanceEditsMade          AttendanceEditLog[]

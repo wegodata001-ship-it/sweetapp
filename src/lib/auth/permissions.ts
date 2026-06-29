@@ -48,6 +48,8 @@ export type PagePermission = PermissionKey | "SUPER_ADMIN_ONLY" | "ADMIN_ONLY";
 
 export const PAGE_ACCESS_RULES: { prefix: string; permission: PagePermission }[] = [
   { prefix: "/admin/users", permission: "SUPER_ADMIN_ONLY" },
+  { prefix: "/controls/reconciliation", permission: "financial_registration" },
+  { prefix: "/controls", permission: "financial_registration" },
   { prefix: "/finance/suppliers-prices", permission: "financial_registration" },
   { prefix: "/finance/register", permission: "financial_registration" },
   { prefix: "/finance/archive", permission: "financial_registration" },
@@ -81,6 +83,7 @@ export const PAGE_ACCESS_RULES: { prefix: string; permission: PagePermission }[]
 /** API — נתיב לפי קידומת */
 export const API_ACCESS_RULES: { prefix: string; permission: PermissionKey | "SUPER_ADMIN_ONLY" }[] = [
   { prefix: "/api/admin/users", permission: "SUPER_ADMIN_ONLY" },
+  { prefix: "/api/controls", permission: "financial_registration" },
   { prefix: "/api/procurement", permission: "financial_registration" },
   { prefix: "/api/documents", permission: "financial_registration" },
   { prefix: "/api/z-reports", permission: "financial_registration" },

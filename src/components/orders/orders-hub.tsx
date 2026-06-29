@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, type Dispatch, type SetStateAction } from "react";
 import { useI18n } from "@/components/i18n-provider";
+import { OrderPaymentsPanel } from "@/components/orders/order-payments-panel";
 import { formatShekel } from "@/lib/format-shekel";
 import {
   DAILY_GRADIENT,
@@ -895,6 +896,9 @@ export function OrdersHub({ module, canManage }: OrdersHubProps) {
                           </div>
                         </>
                       )}
+                      <div className="mt-4">
+                        <OrderPaymentsPanel orderId={row.id} canManage={canManage} onMutated={() => void load()} />
+                      </div>
                       <button
                         type="button"
                         className="mt-3 text-xs font-bold text-slate-500 hover:text-slate-800"

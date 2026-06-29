@@ -14,6 +14,7 @@ import {
   Package,
   PackageCheck,
   ReceiptText,
+  Scale,
   LineChart,
   StickyNote,
   TrendingUp,
@@ -81,6 +82,15 @@ export const financeNav: NavItem[] = [
     href: "/finance/suppliers-prices",
     permission: "financial_registration",
     icon: Truck,
+  },
+];
+
+export const controlsNav: NavItem[] = [
+  {
+    labelKey: "nav.systemReconciliation",
+    href: "/controls/reconciliation",
+    permission: "financial_registration",
+    icon: Scale,
   },
 ];
 
@@ -274,6 +284,7 @@ export function AppNavContent({ onNavigate, variant = "sidebar" }: AppNavContent
   const role = user?.role ?? "EMPLOYEE";
 
   const financeVisible = financeNav.filter((i) => canShowNavItem(i, role, permSet));
+  const controlsVisible = controlsNav.filter((i) => canShowNavItem(i, role, permSet));
   const managementVisible = managementNav.filter((i) => canShowNavItem(i, role, permSet));
   const adminVisible = adminOnlyNav.filter((i) => canShowNavItem(i, role, permSet));
 
@@ -445,6 +456,17 @@ export function AppNavContent({ onNavigate, variant = "sidebar" }: AppNavContent
           <SectionTitle>{t("nav.sectionFinance")}</SectionTitle>
           <div className="space-y-1">
             {financeVisible.map((item) => (
+              <NavLink key={item.href} item={item} onNavigate={onNavigate} compact={compact} />
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      {controlsVisible.length > 0 ? (
+        <div>
+          <SectionTitle>{t("nav.sectionControls")}</SectionTitle>
+          <div className="space-y-1">
+            {controlsVisible.map((item) => (
               <NavLink key={item.href} item={item} onNavigate={onNavigate} compact={compact} />
             ))}
           </div>

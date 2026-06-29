@@ -15,6 +15,7 @@ import {
 import { Fragment, memo, useCallback, useEffect, useMemo, useState, type Dispatch, type SetStateAction } from "react";
 import { useI18n } from "@/components/i18n-provider";
 import type { FutureOrderRow } from "@/components/orders/orders-hub";
+import { OrderPaymentsPanel } from "@/components/orders/order-payments-panel";
 import { formatShekel } from "@/lib/format-shekel";
 import {
   computeRemainingAmount,
@@ -826,6 +827,9 @@ export function WeddingOrdersHub() {
                                 </ul>
                               </div>
                             </dl>
+                          <div className="mt-4">
+                            <OrderPaymentsPanel orderId={row.id} canManage onMutated={() => void load()} />
+                          </div>
                           <button
                             type="button"
                             className="mt-3 text-xs font-bold text-violet-600 hover:text-violet-900"

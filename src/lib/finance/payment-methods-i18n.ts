@@ -9,6 +9,7 @@ export const PAYMENT_METHOD_I18N: Record<string, string> = {
   CHECK: "paymentMethods.CHECK",
   OTHER: "paymentMethods.OTHER",
   BIT: "paymentMethods.BIT",
+  PAYBOX: "paymentMethods.PAYBOX",
   CASH_REGISTER: "paymentMethods.CASH_REGISTER",
 };
 
@@ -21,6 +22,7 @@ export function normalizePaymentMethodKey(raw: string | null | undefined): strin
   if (upper === "CASH_REGISTER" || /cash_register/i.test(k)) return "CASH_REGISTER";
   if (/^מזומן$/i.test(k) || /^cash$/i.test(k) || /מזומן/i.test(k)) return "CASH";
   if (/^אשראי$/i.test(k) || /^credit$/i.test(k) || /אשראי/i.test(k)) return "CREDIT";
+  if (/^פייבוקס$/i.test(k) || /pay\s?box/i.test(k)) return "PAYBOX";
   if (/^ביט$/i.test(k) || /^bit$/i.test(k)) return "BIT";
   if (/העבר|בנק|transfer|bank/i.test(k)) return "TRANSFER";
   if (/צ.?ק|check/i.test(k)) return "CHECK";
