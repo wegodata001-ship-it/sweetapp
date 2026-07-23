@@ -271,8 +271,42 @@ export async function POST(req: NextRequest) {
 
     const shelf = await resolveShelf(body.locationId?.trim() ?? null, body.location?.trim());
     const locationId = shelf?.id ?? null;
+    const locationName = shelf?.name ?? body.location?.trim() ?? "";
 
     const created = await prismaAny.$transaction(async (tx: typeof prismaAny) => {
+      const countSession = await tx.inventoryCountSession.create({
+        data: {
+          locationId,
+          locationName,
+          countDate,
+          countedByUserId: session.sub,
+          status: "COMPLETED",
+        },
+        select: { id: true, sessionNumber: true },
+      });
+
+      // Snapshot שמות עובדים פעם אחת לכל הסשן
+      const allWorkerIds = new Set<string>();
+      for (const line of body.lines) {
+        for (const w of line.workers ?? []) {
+          const wid = w.inventoryLocationWorkerId?.trim();
+          if (wid) allWorkerIds.add(wid);
+        }
+      }
+      const workerSnap = new Map<string, { displayName: string; workArea: string }>();
+      if (allWorkerIds.size > 0) {
+        const workers = await tx.inventoryLocationWorker.findMany({
+          where: {
+            id: { in: [...allWorkerIds] },
+            ...(locationId ? { inventoryLocationId: locationId } : {}),
+          },
+          select: { id: true, displayName: true, workArea: true },
+        });
+        for (const w of workers) {
+          workerSnap.set(w.id, { displayName: w.displayName, workArea: w.workArea });
+        }
+      }
+
       const out: {
         id: string;
         inventoryProductId: string;
@@ -280,8 +314,19 @@ export async function POST(req: NextRequest) {
         currentQuantity: number;
         difference: number;
         locationId: string | null;
-        workers: { inventoryLocationWorkerId: string; countedQuantity: number }[];
+        workers: {
+          inventoryLocationWorkerId: string;
+          countedQuantity: number;
+          workerDisplayName: string;
+          workerWorkArea: string;
+        }[];
       }[] = [];
+
+      let shortageCount = 0;
+      let surplusCount = 0;
+      let matchCount = 0;
+      let totalCountedQty = 0;
+
       for (const line of body.lines) {
         const pid = (line.inventoryProductId ?? line.productId)?.trim();
         if (!pid) continue;
@@ -292,9 +337,25 @@ export async function POST(req: NextRequest) {
                 const wid = w.inventoryLocationWorkerId?.trim();
                 const qty = Number(w.countedQuantity);
                 if (!wid || !Number.isFinite(qty) || qty < 0) return null;
-                return { inventoryLocationWorkerId: wid, countedQuantity: qty };
+                const snap = workerSnap.get(wid);
+                if (!snap) return null;
+                return {
+                  inventoryLocationWorkerId: wid,
+                  countedQuantity: qty,
+                  workerDisplayName: snap.displayName,
+                  workerWorkArea: snap.workArea,
+                };
               })
-              .filter((w): w is { inventoryLocationWorkerId: string; countedQuantity: number } => !!w)
+              .filter(
+                (
+                  w,
+                ): w is {
+                  inventoryLocationWorkerId: string;
+                  countedQuantity: number;
+                  workerDisplayName: string;
+                  workerWorkArea: string;
+                } => !!w,
+              )
           : [];
 
         let currentQuantity: number;
@@ -309,23 +370,9 @@ export async function POST(req: NextRequest) {
 
         const product = await tx.inventoryProduct.findFirst({
           where: { id: pid },
-          select: { id: true },
+          select: { id: true, minimumQuantity: true },
         });
         if (!product) continue;
-
-        if (workerLines.length > 0 && locationId) {
-          const workerIds = workerLines.map((w) => w.inventoryLocationWorkerId);
-          const valid = await tx.inventoryLocationWorker.findMany({
-            where: {
-              id: { in: workerIds },
-              inventoryLocationId: locationId,
-            },
-            select: { id: true },
-          });
-          if (valid.length !== workerIds.length) {
-            throw new Error("עובד מיקום לא שייך למיקום הספירה");
-          }
-        }
 
         const previousForLoc = locationId
           ? (
@@ -358,6 +405,7 @@ export async function POST(req: NextRequest) {
           data: {
             inventoryProductId: pid,
             locationId,
+            sessionId: countSession.id,
             countDate,
             previousQuantity,
             currentQuantity,
@@ -370,12 +418,20 @@ export async function POST(req: NextRequest) {
                     create: workerLines.map((w) => ({
                       inventoryLocationWorkerId: w.inventoryLocationWorkerId,
                       countedQuantity: w.countedQuantity,
+                      workerDisplayName: w.workerDisplayName,
+                      workerWorkArea: w.workerWorkArea,
                     })),
                   },
                 }
               : {}),
           },
         });
+
+        if (difference < 0) shortageCount += 1;
+        else if (difference > 0) surplusCount += 1;
+        else matchCount += 1;
+        totalCountedQty += currentQuantity;
+
         out.push({
           id: row.id,
           inventoryProductId: pid,
@@ -386,19 +442,33 @@ export async function POST(req: NextRequest) {
           workers: workerLines,
         });
       }
-      return out;
-    });
 
-    if (created.length === 0) {
-      return NextResponse.json(
-        { ok: false, error: "לא נשמרו שורות — בדקו מזהי מוצר" },
-        { status: 400 },
-      );
-    }
+      if (out.length === 0) {
+        throw new Error("לא נשמרו שורות — בדקו מזהי מוצר");
+      }
+
+      await tx.inventoryCountSession.update({
+        where: { id: countSession.id },
+        data: {
+          productCount: out.length,
+          shortageCount,
+          surplusCount,
+          matchCount,
+          totalCountedQty,
+        },
+      });
+
+      return { sessionId: countSession.id, sessionNumber: countSession.sessionNumber, rows: out };
+    });
 
     return NextResponse.json({
       ok: true,
-      data: { saved: created.length, rows: created },
+      data: {
+        saved: created.rows.length,
+        sessionId: created.sessionId,
+        sessionNumber: created.sessionNumber,
+        rows: created.rows,
+      },
     });
   } catch (e) {
     return NextResponse.json(

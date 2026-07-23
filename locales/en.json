@@ -2866,6 +2866,11 @@
           "save": "Save",
           "cancel": "Cancel",
           "savedSuccess": "Inventory count saved and updated in the system",
+          "exportPdf": "PDF",
+          "exportExcel": "Excel",
+          "exportFailed": "Export failed",
+          "readOnlyBadge": "Read only",
+          "sessionNumber": "Count #{{n}}",
           "summaryTotal": "Total items",
           "summaryOk": "OK",
           "summaryBelowMinimum": "Below minimum",
@@ -2996,7 +3001,22 @@
         },
         "history": {
           "title": "Count history",
-          "empty": "No count history for this location"
+          "empty": "No count history for this location",
+          "loadFailed": "Failed to load history",
+          "exportFailed": "Export failed",
+          "colNumber": "Count #",
+          "colDate": "Date",
+          "colTime": "Time",
+          "colBy": "Counted by",
+          "colProducts": "Products",
+          "colShortage": "Short",
+          "colSurplus": "Surplus",
+          "colStatus": "Status",
+          "colActions": "Actions",
+          "statusCompleted": "Completed",
+          "view": "View",
+          "exportHint": "PDF / Excel per count",
+          "close": "Close"
         }
       },
       "count": {

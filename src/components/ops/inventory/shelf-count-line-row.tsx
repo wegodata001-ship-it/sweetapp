@@ -37,6 +37,7 @@ export type ShelfCountLineRowProps = {
   /** סה״כ ידני — רק כשאין עובדים (תאימות לאחור) */
   actualRaw: string;
   saving?: boolean;
+  readOnly?: boolean;
   variant?: CountRowVariant;
   showColumnLabels?: boolean;
   onWorkerQtyChange: (workerId: string, value: string) => void;
@@ -66,6 +67,60 @@ export function sumWorkerQuantities(
   return sum;
 }
 
+/** רוחבי עמודות משותפים — כותרת + שורות חייבות להשתמש באותו template */
+const COL = {
+  icon: "2.5rem",
+  product: "11rem",
+  metric: "5.25rem",
+  area: "5.75rem",
+  qty: "5.75rem",
+  counted: "5.75rem",
+  min: "5.25rem",
+  shortage: "6.75rem",
+  diff: "4.75rem",
+  actions: "8rem",
+} as const;
+
+export function countTableGridTemplate(workerCount: number): string {
+  const workerCols = Array.from(
+    { length: Math.max(0, workerCount) },
+    () => `${COL.metric} ${COL.area} ${COL.qty}`,
+  ).join(" ");
+  return [
+    COL.icon,
+    COL.product,
+    COL.metric,
+    COL.metric,
+    workerCols,
+    COL.counted,
+    COL.min,
+    COL.shortage,
+    COL.diff,
+    COL.actions,
+  ]
+    .filter((part) => part.length > 0)
+    .join(" ");
+}
+
+function CountTableGrid({
+  workers,
+  className,
+  children,
+}: {
+  workers: LocationWorkerDto[];
+  className?: string;
+  children: ReactNode;
+}) {
+  return (
+    <div
+      className={`grid min-w-max items-center gap-x-1.5 ${className ?? ""}`}
+      style={{ gridTemplateColumns: countTableGridTemplate(workers.length) }}
+    >
+      {children}
+    </div>
+  );
+}
+
 function Cell({
   label,
   value,
@@ -81,7 +136,7 @@ function Cell({
 }) {
   return (
     <div
-      className={`min-w-[5rem] shrink-0 rounded-xl bg-white/90 px-1.5 py-1 text-center ring-1 ring-[#e7ecf5] ${className ?? ""}`}
+      className={`min-w-0 rounded-xl bg-white/90 px-1.5 py-1 text-center ring-1 ring-[#e7ecf5] ${className ?? ""}`}
     >
       {showLabel ? (
         <span className="block truncate text-[9px] font-bold text-slate-500">{label}</span>
@@ -90,6 +145,18 @@ function Cell({
         {value}
       </p>
     </div>
+  );
+}
+
+function HeaderCell({
+  children,
+  className,
+}: {
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <div className={`min-w-0 truncate px-1 text-center ${className ?? ""}`}>{children}</div>
   );
 }
 
@@ -116,7 +183,7 @@ function StatBlock({
   );
 }
 
-/** כותרת עמודות דינמית — שם / אזור / כמות לכל עובד */
+/** כותרת עמודות דינמית — אותו Grid כמו שורות הנתונים */
 export function ShelfCountTableHeader({
   workers,
   t,
@@ -125,36 +192,31 @@ export function ShelfCountTableHeader({
   t: (key: string) => string;
 }) {
   return (
-    <div className="flex min-w-max items-center gap-2 rounded-2xl border border-[#e7ecf5] bg-[#f1f5f9] px-2.5 py-2 text-[10px] font-black text-slate-600 sm:px-3">
-      <div className="w-10 shrink-0 sm:w-9" aria-hidden />
-      <div className="min-w-[9rem] max-w-[12rem] shrink-0 text-end">{t("productCol")}</div>
-      <div className="flex shrink-0 items-stretch gap-1.5">
-        <div className="min-w-[5rem] shrink-0 px-1.5 text-center">{t("systemTotal")}</div>
-        <div className="min-w-[5rem] shrink-0 px-1.5 text-center">{t("locationExpected")}</div>
-        {workers.map((w) => {
-          const displayName = w.displayName || "—";
-          const workArea = (w.workArea || "").trim();
-          return (
-            <div key={w.id} className="contents">
-              <div className="min-w-[5rem] shrink-0 truncate px-1.5 text-center text-[#6c4cff]">
-                {displayName}
-              </div>
-              <div className="min-w-[5.5rem] shrink-0 truncate px-1.5 text-center">
-                {workArea || `${t("areaOf")} ${displayName}`}
-              </div>
-              <div className="min-w-[5.5rem] shrink-0 truncate px-1.5 text-center text-emerald-700">
-                {t("workerQty")}
-              </div>
-            </div>
-          );
-        })}
-        <div className="min-w-[5.5rem] shrink-0 px-1.5 text-center">{t("countedTotal")}</div>
-        <div className="min-w-[5rem] shrink-0 px-1.5 text-center">{t("minimum")}</div>
-        <div className="min-w-[6.5rem] shrink-0 px-1.5 text-center">{t("systemShortage")}</div>
-        <div className="min-w-[4.5rem] shrink-0 px-1.5 text-center">{t("diff")}</div>
-      </div>
-      <div className="min-w-[7rem] shrink-0 text-center">{t("actionsCol")}</div>
-    </div>
+    <CountTableGrid
+      workers={workers}
+      className="rounded-2xl border border-[#e7ecf5] bg-[#f1f5f9] px-2.5 py-2 text-[10px] font-black text-slate-600 sm:px-3"
+    >
+      <div aria-hidden />
+      <HeaderCell className="text-end">{t("productCol")}</HeaderCell>
+      <HeaderCell>{t("systemTotal")}</HeaderCell>
+      <HeaderCell>{t("locationExpected")}</HeaderCell>
+      {workers.map((w) => {
+        const displayName = w.displayName || "—";
+        const workArea = (w.workArea || "").trim();
+        return (
+          <div key={w.id} className="contents">
+            <HeaderCell className="text-[#6c4cff]">{displayName}</HeaderCell>
+            <HeaderCell>{workArea || `${t("areaOf")} ${displayName}`}</HeaderCell>
+            <HeaderCell className="text-emerald-700">{t("workerQty")}</HeaderCell>
+          </div>
+        );
+      })}
+      <HeaderCell>{t("countedTotal")}</HeaderCell>
+      <HeaderCell>{t("minimum")}</HeaderCell>
+      <HeaderCell>{t("systemShortage")}</HeaderCell>
+      <HeaderCell>{t("diff")}</HeaderCell>
+      <HeaderCell>{t("actionsCol")}</HeaderCell>
+    </CountTableGrid>
   );
 }
 
@@ -226,10 +288,12 @@ function WorkerQtyInput({
   value,
   onChange,
   className,
+  readOnly,
 }: {
   value: string;
   onChange: (v: string) => void;
   className?: string;
+  readOnly?: boolean;
 }) {
   return (
     <input
@@ -240,6 +304,8 @@ function WorkerQtyInput({
       className={className}
       placeholder="—"
       min={0}
+      readOnly={readOnly}
+      disabled={readOnly}
     />
   );
 }
@@ -257,6 +323,7 @@ function ShelfCountLineRowInner({
   workerQtys,
   actualRaw,
   saving,
+  readOnly = false,
   variant = "table",
   showColumnLabels = true,
   onWorkerQtyChange,
@@ -326,6 +393,7 @@ function ShelfCountLineRowInner({
                       <WorkerQtyInput
                         value={workerQtys[w.id] ?? ""}
                         onChange={(v) => onWorkerQtyChange(w.id, v)}
+                        readOnly={readOnly}
                         className="mt-0.5 h-12 w-full border-0 bg-transparent text-center text-xl font-black tabular-nums text-slate-900 outline-none"
                       />
                     </div>
@@ -342,6 +410,7 @@ function ShelfCountLineRowInner({
               <WorkerQtyInput
                 value={actualRaw}
                 onChange={onActualChange}
+                readOnly={readOnly}
                 className="mt-0.5 h-12 w-full border-0 bg-transparent text-center text-xl font-black tabular-nums text-slate-900 outline-none"
               />
             )}
@@ -378,22 +447,28 @@ function ShelfCountLineRowInner({
 
         <div className="mt-3 flex items-center justify-between gap-2 border-t border-[#e7ecf5]/80 pt-3">
           <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => onBump(-1)}
-              className="grid h-12 w-12 place-items-center rounded-2xl border border-[#e7ecf5] bg-white text-slate-700 active:scale-95"
-              aria-label="-1"
-            >
-              <Minus className="h-5 w-5" />
-            </button>
-            <button
-              type="button"
-              onClick={() => onBump(1)}
-              className="grid h-12 w-12 place-items-center rounded-2xl border border-[#e7ecf5] bg-white text-slate-700 active:scale-95"
-              aria-label="+1"
-            >
-              <Plus className="h-5 w-5" />
-            </button>
+            {!readOnly ? (
+              <>
+                <button
+                  type="button"
+                  onClick={() => onBump(-1)}
+                  className="grid h-12 w-12 place-items-center rounded-2xl border border-[#e7ecf5] bg-white text-slate-700 active:scale-95"
+                  aria-label="-1"
+                >
+                  <Minus className="h-5 w-5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onBump(1)}
+                  className="grid h-12 w-12 place-items-center rounded-2xl border border-[#e7ecf5] bg-white text-slate-700 active:scale-95"
+                  aria-label="+1"
+                >
+                  <Plus className="h-5 w-5" />
+                </button>
+              </>
+            ) : (
+              <span />
+            )}
           </div>
           <div className="flex flex-wrap justify-end gap-1.5">
             {minimumStatus === "below" ? (
@@ -417,23 +492,26 @@ function ShelfCountLineRowInner({
   }
 
   return (
-    <div
-      className={`flex min-w-max items-center gap-2 rounded-2xl border px-2.5 py-2 transition-shadow duration-200 sm:gap-2 sm:px-3 ${st.row}`}
+    <CountTableGrid
+      workers={workers}
+      className={`rounded-2xl border px-2.5 py-2 text-[10px] font-bold transition-shadow duration-200 sm:px-3 ${st.row}`}
     >
-      <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-white text-[#6c4cff] shadow-sm ring-1 ring-[#e7ecf5] sm:h-9 sm:w-9">
+      <div className="grid h-9 w-9 place-items-center justify-self-center rounded-xl bg-white text-[#6c4cff] shadow-sm ring-1 ring-[#e7ecf5]">
         <Package className="h-4 w-4" strokeWidth={1.5} aria-hidden />
       </div>
 
-      <div className="min-w-[9rem] max-w-[12rem] shrink-0 text-end">
+      <div className="min-w-0 text-end">
         <div className="flex items-start justify-end gap-1">
-          <button
-            type="button"
-            onClick={onEditProduct}
-            className="mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-lg text-slate-500 hover:bg-white"
-            aria-label={t("editProduct")}
-          >
-            <Pencil className="h-3.5 w-3.5" />
-          </button>
+          {!readOnly ? (
+            <button
+              type="button"
+              onClick={onEditProduct}
+              className="mt-0.5 grid h-7 w-7 shrink-0 place-items-center rounded-lg text-slate-500 hover:bg-white"
+              aria-label={t("editProduct")}
+            >
+              <Pencil className="h-3.5 w-3.5" />
+            </button>
+          ) : null}
           <div className="min-w-0">
             <p className="line-clamp-2 break-words text-sm font-black leading-tight text-slate-900 sm:text-[13px]">
               {name}
@@ -447,131 +525,125 @@ function ShelfCountLineRowInner({
         </div>
       </div>
 
-      <div className="flex shrink-0 items-stretch gap-1.5 text-[10px] font-bold">
-        <Cell label={t("systemTotal")} value={systemTotalQuantity} showLabel={showColumnLabels} />
-        <Cell label={t("locationExpected")} value={systemQty} showLabel={showColumnLabels} />
+      <Cell label={t("systemTotal")} value={systemTotalQuantity} showLabel={showColumnLabels} />
+      <Cell label={t("locationExpected")} value={systemQty} showLabel={showColumnLabels} />
 
-        {workers.map((w) => {
-          const displayName = w.displayName || "—";
-          const workArea = (w.workArea || "").trim();
-          const areaLabel = workArea || `${t("areaOf")} ${displayName}`;
-          return (
-            <div key={w.id} className="contents">
-              <Cell label={displayName} value={displayName} showLabel={showColumnLabels} />
-              <Cell
-                label={areaLabel}
-                value={workArea || "—"}
-                showLabel={showColumnLabels}
-                className="min-w-[5.5rem]"
+      {workers.map((w) => {
+        const displayName = w.displayName || "—";
+        const workArea = (w.workArea || "").trim();
+        const areaLabel = workArea || `${t("areaOf")} ${displayName}`;
+        return (
+          <div key={w.id} className="contents">
+            <Cell label={displayName} value={displayName} showLabel={showColumnLabels} />
+            <Cell label={areaLabel} value={workArea || "—"} showLabel={showColumnLabels} />
+            <div className="min-w-0 rounded-xl bg-white/90 px-1.5 py-1 text-center ring-1 ring-emerald-200">
+              {showColumnLabels ? (
+                <span className="block truncate text-[9px] font-bold text-emerald-700">
+                  {t("workerQty")}
+                </span>
+              ) : null}
+              <WorkerQtyInput
+                value={workerQtys[w.id] ?? ""}
+                onChange={(v) => onWorkerQtyChange(w.id, v)}
+                readOnly={readOnly}
+                className="w-full border-0 bg-transparent text-center text-sm font-black tabular-nums text-slate-900 outline-none"
               />
-              <div className="min-w-[5.5rem] shrink-0 rounded-xl bg-white/90 px-1.5 py-1 text-center ring-1 ring-emerald-200">
-                {showColumnLabels ? (
-                  <span className="block truncate text-[9px] font-bold text-emerald-700">
-                    {t("workerQty")}
-                  </span>
-                ) : null}
-                <WorkerQtyInput
-                  value={workerQtys[w.id] ?? ""}
-                  onChange={(v) => onWorkerQtyChange(w.id, v)}
-                  className="w-full border-0 bg-transparent text-center text-sm font-black tabular-nums text-slate-900 outline-none"
-                />
-              </div>
             </div>
-          );
-        })}
+          </div>
+        );
+      })}
 
-        <div className="min-w-[5.5rem] shrink-0 rounded-xl bg-emerald-50/90 px-1.5 py-1 text-center ring-1 ring-emerald-200">
-          {showColumnLabels ? (
-            <span className="block truncate text-[9px] font-bold text-emerald-800">
-              {t("countedTotal")}
-            </span>
-          ) : null}
-          {hasWorkers ? (
-            <p className="text-sm font-black tabular-nums text-emerald-800">{totalLabel}</p>
-          ) : (
-            <WorkerQtyInput
-              value={actualRaw}
-              onChange={onActualChange}
-              className="w-full border-0 bg-transparent text-center text-sm font-black tabular-nums text-slate-900 outline-none"
-            />
-          )}
-        </div>
-
-        <div
-          className={`min-w-[5rem] shrink-0 rounded-xl border px-1.5 py-1 text-center ${minimumClasses}`}
-        >
-          {showColumnLabels ? (
-            <span className="block truncate text-[9px] font-bold">{t("minimum")}</span>
-          ) : null}
-          <p className="text-sm font-black tabular-nums">{minimumQuantity}</p>
-        </div>
-
-        <div className="min-w-[6.5rem] shrink-0 rounded-xl bg-white/90 px-1.5 py-1 text-center ring-1 ring-[#e7ecf5]">
-          {showColumnLabels ? (
-            <span className="block truncate text-[9px] font-bold text-slate-500">
-              {t("systemShortage")}
-            </span>
-          ) : null}
-          <ShortageValue
-            systemShortage={systemShortage}
-            minimumQuantity={minimumQuantity}
-            systemTotalQuantity={systemTotalQuantity}
-            t={t}
+      <div className="min-w-0 rounded-xl bg-emerald-50/90 px-1.5 py-1 text-center ring-1 ring-emerald-200">
+        {showColumnLabels ? (
+          <span className="block truncate text-[9px] font-bold text-emerald-800">
+            {t("countedTotal")}
+          </span>
+        ) : null}
+        {hasWorkers ? (
+          <p className="text-sm font-black tabular-nums text-emerald-800">{totalLabel}</p>
+        ) : (
+          <WorkerQtyInput
+            value={actualRaw}
+            onChange={onActualChange}
+            readOnly={readOnly}
+            className="w-full border-0 bg-transparent text-center text-sm font-black tabular-nums text-slate-900 outline-none"
           />
-        </div>
+        )}
+      </div>
 
-        <Cell
-          label={t("diff")}
-          value={diffLabel}
-          showLabel={showColumnLabels}
-          className="min-w-[4.5rem]"
-          valueClassName={
-            diff === null
-              ? "text-slate-400"
-              : diff < 0
-                ? "text-rose-600"
-                : diff > 0
-                  ? "text-amber-600"
-                  : "text-emerald-600"
-          }
+      <div className={`min-w-0 rounded-xl border px-1.5 py-1 text-center ${minimumClasses}`}>
+        {showColumnLabels ? (
+          <span className="block truncate text-[9px] font-bold">{t("minimum")}</span>
+        ) : null}
+        <p className="text-sm font-black tabular-nums">{minimumQuantity}</p>
+      </div>
+
+      <div className="min-w-0 rounded-xl bg-white/90 px-1.5 py-1 text-center ring-1 ring-[#e7ecf5]">
+        {showColumnLabels ? (
+          <span className="block truncate text-[9px] font-bold text-slate-500">
+            {t("systemShortage")}
+          </span>
+        ) : null}
+        <ShortageValue
+          systemShortage={systemShortage}
+          minimumQuantity={minimumQuantity}
+          systemTotalQuantity={systemTotalQuantity}
+          t={t}
         />
       </div>
 
-      <div className="flex shrink-0 items-center gap-1">
-        <button
-          type="button"
-          onClick={() => onBump(-1)}
-          className="grid h-9 w-9 place-items-center rounded-xl border border-[#e7ecf5] bg-white text-slate-700 hover:bg-[#f6f8fc] active:scale-95"
-          aria-label="-1"
-        >
-          <Minus className="h-4 w-4" />
-        </button>
-        <button
-          type="button"
-          onClick={() => onBump(1)}
-          className="grid h-9 w-9 place-items-center rounded-xl border border-[#e7ecf5] bg-white text-slate-700 hover:bg-[#f6f8fc] active:scale-95"
-          aria-label="+1"
-        >
-          <Plus className="h-4 w-4" />
-        </button>
-        <div className="flex flex-wrap justify-end gap-1">
-          {minimumStatus === "below" ? (
-            <span className="inline-flex items-center gap-1 rounded-full bg-rose-50 px-2 py-0.5 text-[10px] font-black text-rose-700 ring-1 ring-rose-200">
-              <AlertTriangle className="h-3 w-3" aria-hidden />
-              {t("minimumWarning")}
-            </span>
-          ) : null}
-          <span className="inline-flex items-center gap-1 rounded-full bg-white/80 px-2 py-0.5 text-[10px] font-black text-slate-700 ring-1 ring-[#e7ecf5]">
-            {saving ? (
-              <Loader2 className="h-3 w-3 animate-spin" aria-hidden />
-            ) : (
-              <span className={`h-1.5 w-1.5 rounded-full ${st.dot}`} />
-            )}
-            {countStatusLabel(status, t)}
+      <Cell
+        label={t("diff")}
+        value={diffLabel}
+        showLabel={showColumnLabels}
+        valueClassName={
+          diff === null
+            ? "text-slate-400"
+            : diff < 0
+              ? "text-rose-600"
+              : diff > 0
+                ? "text-amber-600"
+                : "text-emerald-600"
+        }
+      />
+
+      <div className="flex min-w-0 flex-wrap items-center justify-center gap-1">
+        {!readOnly ? (
+          <>
+            <button
+              type="button"
+              onClick={() => onBump(-1)}
+              className="grid h-9 w-9 place-items-center rounded-xl border border-[#e7ecf5] bg-white text-slate-700 hover:bg-[#f6f8fc] active:scale-95"
+              aria-label="-1"
+            >
+              <Minus className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              onClick={() => onBump(1)}
+              className="grid h-9 w-9 place-items-center rounded-xl border border-[#e7ecf5] bg-white text-slate-700 hover:bg-[#f6f8fc] active:scale-95"
+              aria-label="+1"
+            >
+              <Plus className="h-4 w-4" />
+            </button>
+          </>
+        ) : null}
+        {minimumStatus === "below" ? (
+          <span className="inline-flex items-center gap-1 rounded-full bg-rose-50 px-2 py-0.5 text-[10px] font-black text-rose-700 ring-1 ring-rose-200">
+            <AlertTriangle className="h-3 w-3" aria-hidden />
+            {t("minimumWarning")}
           </span>
-        </div>
+        ) : null}
+        <span className="inline-flex items-center gap-1 rounded-full bg-white/80 px-2 py-0.5 text-[10px] font-black text-slate-700 ring-1 ring-[#e7ecf5]">
+          {saving ? (
+            <Loader2 className="h-3 w-3 animate-spin" aria-hidden />
+          ) : (
+            <span className={`h-1.5 w-1.5 rounded-full ${st.dot}`} />
+          )}
+          {countStatusLabel(status, t)}
+        </span>
       </div>
-    </div>
+    </CountTableGrid>
   );
 }
 

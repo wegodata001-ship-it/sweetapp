@@ -4,6 +4,8 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
   CheckCircle2,
+  FileSpreadsheet,
+  FileText,
   Loader2,
   Save,
   ScanLine,
@@ -14,6 +16,7 @@ import type {
   InventoryCountProductRow,
   LocationWorkerDto,
 } from "@/components/ops/inventory-count/types";
+import type { CountSessionDetail } from "@/lib/inventory/count-session-service";
 import {
   ShelfCountLineRow,
   ShelfCountTableHeader,
@@ -46,16 +49,42 @@ type Props = {
   shelfName: string;
   locationId?: string | null;
   countDate: string;
+  /** צפייה בספירה מההיסטוריה */
+  sessionId?: string | null;
+  readOnly?: boolean;
   onClose: () => void;
   onShelfStatsChange?: () => void;
   t: (key: string, vars?: Record<string, string | number>) => string;
 };
+
+async function downloadSessionExport(sessionId: string, format: "pdf" | "xlsx") {
+  const res = await fetch(
+    `/api/inventory/count-sessions/${encodeURIComponent(sessionId)}/export?format=${format}`,
+    { credentials: "same-origin" },
+  );
+  if (!res.ok) throw new Error("export failed");
+  const blob = await res.blob();
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  const raw =
+    res.headers.get("Content-Disposition")?.match(/filename\*=UTF-8''(.+)/)?.[1] ??
+    `count.${format}`;
+  try {
+    a.download = decodeURIComponent(raw);
+  } catch {
+    a.download = raw;
+  }
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
 
 function ShelfCountModalInner({
   open,
   shelfName,
   locationId,
   countDate,
+  sessionId = null,
+  readOnly = false,
   onClose,
   onShelfStatsChange,
   t,
@@ -63,6 +92,9 @@ function ShelfCountModalInner({
   const [products, setProducts] = useState<InventoryCountProductRow[]>([]);
   const [workers, setWorkers] = useState<LocationWorkerDto[]>([]);
   const [loading, setLoading] = useState(false);
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const [sessionNumber, setSessionNumber] = useState<number | null>(null);
+  const [exporting, setExporting] = useState<"pdf" | "xlsx" | null>(null);
   /** תאימות לאחור — כשאין עובדים במיקום */
   const [actualById, setActualById] = useState<Record<string, string>>({});
   /** productId → workerId → qty */
@@ -114,10 +146,77 @@ function ShelfCountModalInner({
     }
   }, [shelfName, locationId]);
 
+  const loadSession = useCallback(async (id: string) => {
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/inventory/count-sessions/${encodeURIComponent(id)}`, {
+        credentials: "same-origin",
+        cache: "no-store",
+      });
+      const j = (await res.json()) as { ok?: boolean; data?: CountSessionDetail; error?: string };
+      if (!res.ok || !j.ok || !j.data) {
+        setError(j.error ?? t("saveFailed"));
+        setProducts([]);
+        setWorkers([]);
+        return;
+      }
+      const detail = j.data;
+      setActiveSessionId(detail.id);
+      setSessionNumber(detail.sessionNumber);
+      const workerMap = new Map<string, LocationWorkerDto>();
+      const nextWorkerQty: Record<string, WorkerQtyMap> = {};
+      const nextActual: Record<string, string> = {};
+      for (const line of detail.lines) {
+        nextActual[line.inventoryProductId] = String(line.currentQuantity);
+        const wmap: WorkerQtyMap = {};
+        for (const w of line.workers) {
+          wmap[w.inventoryLocationWorkerId] = String(w.countedQuantity);
+          if (!workerMap.has(w.inventoryLocationWorkerId)) {
+            workerMap.set(w.inventoryLocationWorkerId, {
+              id: w.inventoryLocationWorkerId,
+              displayName: w.workerDisplayName,
+              workArea: w.workerWorkArea,
+              displayOrder: workerMap.size,
+            });
+          }
+        }
+        nextWorkerQty[line.inventoryProductId] = wmap;
+      }
+      setWorkers([...workerMap.values()]);
+      setWorkerQtyByProduct(nextWorkerQty);
+      setActualById(nextActual);
+      setProducts(
+        detail.lines.map((line) => ({
+          id: line.inventoryProductId,
+          name: line.name,
+          nameHe: line.nameHe,
+          nameAr: line.nameAr,
+          nameEn: line.nameEn,
+          barcode: line.barcode,
+          sku: line.sku,
+          location: detail.locationName,
+          locationId: detail.locationId,
+          unit: line.unit,
+          previousQuantity: line.previousQuantity,
+          systemTotalQuantity: line.previousQuantity,
+          systemShortage:
+            line.minimumQuantity > 0
+              ? Math.max(0, line.minimumQuantity - line.currentQuantity)
+              : 0,
+          minimumQuantity: line.minimumQuantity,
+          lastCountedAt: detail.createdAt,
+        })),
+      );
+    } catch {
+      setProducts([]);
+      setWorkers([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [t]);
+
   useEffect(() => {
     if (!open) return;
-    setActualById({});
-    setWorkerQtyByProduct({});
     setSavingIds(new Set());
     setConfirmCloseOpen(false);
     setWorkersOpen(false);
@@ -126,8 +225,18 @@ function ShelfCountModalInner({
     setError(null);
     setScanQ("");
     setScrollTop(0);
+    setExporting(null);
+    if (sessionId) {
+      setActiveSessionId(sessionId);
+      void loadSession(sessionId);
+      return;
+    }
+    setActualById({});
+    setWorkerQtyByProduct({});
+    setActiveSessionId(null);
+    setSessionNumber(null);
     void loadProducts();
-  }, [open, shelfName, loadProducts]);
+  }, [open, shelfName, sessionId, loadProducts, loadSession]);
 
   useEffect(() => {
     if (!open || !listRef.current) return;
@@ -327,6 +436,8 @@ function ShelfCountModalInner({
           error?: string;
           data?: {
             saved?: number;
+            sessionId?: string;
+            sessionNumber?: number;
             rows?: { inventoryProductId: string; currentQuantity: number }[];
           };
         };
@@ -343,6 +454,8 @@ function ShelfCountModalInner({
             return saved ? { ...product, previousQuantity: saved.currentQuantity } : product;
           }),
         );
+        if (j.data?.sessionId) setActiveSessionId(j.data.sessionId);
+        if (j.data?.sessionNumber != null) setSessionNumber(j.data.sessionNumber);
         setActualById({});
         setWorkerQtyByProduct({});
         setConfirmCloseOpen(false);
@@ -375,14 +488,31 @@ function ShelfCountModalInner({
 
   const requestClose = useCallback(() => {
     if (savingAll) return;
-    if (hasDirtyChanges) {
+    if (!readOnly && hasDirtyChanges) {
       setConfirmCloseOpen(true);
       return;
     }
     onClose();
-  }, [hasDirtyChanges, onClose, savingAll]);
+  }, [hasDirtyChanges, onClose, readOnly, savingAll]);
+
+  const exportSession = useCallback(
+    async (format: "pdf" | "xlsx") => {
+      if (!activeSessionId) return;
+      setExporting(format);
+      setError(null);
+      try {
+        await downloadSessionExport(activeSessionId, format);
+      } catch {
+        setError(t("exportFailed"));
+      } finally {
+        setExporting(null);
+      }
+    },
+    [activeSessionId, t],
+  );
 
   if (!open) return null;
+  const isReadOnly = readOnly || !!sessionId;
 
   return (
     <div className="fixed inset-0 z-[85] flex items-stretch justify-center bg-slate-950/55 p-0 backdrop-blur-md md:items-center md:p-3 lg:p-4">
@@ -404,20 +534,54 @@ function ShelfCountModalInner({
             <div className="min-w-0 flex-1 text-end">
               <p className="text-[10px] font-bold uppercase tracking-wide text-[#6c4cff]">
                 {t("kicker")}
+                {isReadOnly ? ` · ${t("readOnlyBadge")}` : ""}
               </p>
               <h2 className="truncate text-lg font-black text-slate-900 sm:text-xl">{shelfName}</h2>
+              {sessionNumber != null ? (
+                <p className="text-xs font-bold text-slate-500">
+                  {t("sessionNumber", { n: sessionNumber })}
+                </p>
+              ) : null}
             </div>
           </div>
 
           <div className="mt-3 flex flex-wrap gap-2">
+            {!isReadOnly ? (
+              <button
+                type="button"
+                disabled={!locationId}
+                onClick={() => setWorkersOpen(true)}
+                className="inline-flex min-h-11 flex-1 items-center justify-center gap-2 rounded-2xl border border-[#e7ecf5] bg-white px-3 text-xs font-black text-slate-700 disabled:opacity-40 sm:flex-none"
+              >
+                <Settings2 className="h-4 w-4" />
+                {t("editWorkers")}
+              </button>
+            ) : null}
             <button
               type="button"
-              disabled={!locationId}
-              onClick={() => setWorkersOpen(true)}
+              disabled={!activeSessionId || exporting !== null}
+              onClick={() => void exportSession("pdf")}
               className="inline-flex min-h-11 flex-1 items-center justify-center gap-2 rounded-2xl border border-[#e7ecf5] bg-white px-3 text-xs font-black text-slate-700 disabled:opacity-40 sm:flex-none"
             >
-              <Settings2 className="h-4 w-4" />
-              {t("editWorkers")}
+              {exporting === "pdf" ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <FileText className="h-4 w-4" />
+              )}
+              {t("exportPdf")}
+            </button>
+            <button
+              type="button"
+              disabled={!activeSessionId || exporting !== null}
+              onClick={() => void exportSession("xlsx")}
+              className="inline-flex min-h-11 flex-1 items-center justify-center gap-2 rounded-2xl border border-[#e7ecf5] bg-white px-3 text-xs font-black text-slate-700 disabled:opacity-40 sm:flex-none"
+            >
+              {exporting === "xlsx" ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <FileSpreadsheet className="h-4 w-4" />
+              )}
+              {t("exportExcel")}
             </button>
           </div>
 
@@ -519,12 +683,20 @@ function ShelfCountModalInner({
                       workerQtys={workerQtyByProduct[row.id] ?? {}}
                       actualRaw={actualById[row.id] ?? ""}
                       saving={savingIds.has(row.id)}
+                      readOnly={isReadOnly}
                       variant={rowVariant}
                       showColumnLabels={false}
-                      onWorkerQtyChange={(workerId, v) => setWorkerQty(row.id, workerId, v)}
-                      onActualChange={(v) => setActual(row.id, v)}
-                      onBump={(d) => bump(row.id, row.previousQuantity, d)}
-                      onEditProduct={() =>
+                      onWorkerQtyChange={(workerId, v) => {
+                        if (!isReadOnly) setWorkerQty(row.id, workerId, v);
+                      }}
+                      onActualChange={(v) => {
+                        if (!isReadOnly) setActual(row.id, v);
+                      }}
+                      onBump={(d) => {
+                        if (!isReadOnly) bump(row.id, row.previousQuantity, d);
+                      }}
+                      onEditProduct={() => {
+                        if (isReadOnly) return;
                         setEditProduct({
                           id: row.id,
                           nameHe: row.nameHe ?? row.name,
@@ -535,8 +707,8 @@ function ShelfCountModalInner({
                           unit: row.unit ?? "",
                           minimumQuantity: row.minimumQuantity,
                           maximumQuantity: row.maximumQuantity ?? null,
-                        })
-                      }
+                        });
+                      }}
                       t={t}
                     />
                   </div>
@@ -554,21 +726,23 @@ function ShelfCountModalInner({
             disabled={savingAll}
             className="min-h-12 rounded-2xl border border-slate-200 bg-white px-4 text-sm font-black text-slate-600 transition hover:bg-slate-50 disabled:opacity-50"
           >
-            {t("cancel")}
+            {isReadOnly ? t("cancel") : t("cancel")}
           </button>
-          <button
-            type="button"
-            onClick={() => void saveCount()}
-            disabled={savingAll || !hasDirtyChanges || hasInvalidChanges}
-            className="inline-flex min-h-12 flex-1 items-center justify-center gap-2 rounded-2xl bg-emerald-600 px-5 text-sm font-black text-white shadow-md shadow-emerald-600/20 transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50 sm:flex-none"
-          >
-            {savingAll ? (
-              <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-            ) : (
-              <Save className="h-4 w-4" aria-hidden />
-            )}
-            {t("saveCount")}
-          </button>
+          {!isReadOnly ? (
+            <button
+              type="button"
+              onClick={() => void saveCount()}
+              disabled={savingAll || !hasDirtyChanges || hasInvalidChanges}
+              className="inline-flex min-h-12 flex-1 items-center justify-center gap-2 rounded-2xl bg-emerald-600 px-5 text-sm font-black text-white shadow-md shadow-emerald-600/20 transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50 sm:flex-none"
+            >
+              {savingAll ? (
+                <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+              ) : (
+                <Save className="h-4 w-4" aria-hidden />
+              )}
+              {t("saveCount")}
+            </button>
+          ) : null}
         </footer>
       </div>
 

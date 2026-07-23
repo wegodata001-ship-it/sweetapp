@@ -137,39 +137,91 @@ export async function uniqueShelfCopyName(baseName: string): Promise<string> {
 
 export async function summarizeShelf(shelf: ResolvedShelf) {
   const where = productsOnShelfWhere(shelf);
-  const rows = await prismaAny.inventoryProduct.findMany({
-    where,
-    select: {
-      id: true,
-      counts: {
-        where: shelf.id ? { OR: [{ locationId: shelf.id }, { locationId: null }] } : undefined,
-        orderBy: { countDate: "desc" },
-        take: 5,
-        select: { difference: true, locationId: true, countDate: true },
+  const [loc, rows] = await Promise.all([
+    shelf.id
+      ? prismaAny.inventoryLocation.findUnique({
+          where: { id: shelf.id },
+          select: {
+            id: true,
+            name: true,
+            code: true,
+            description: true,
+            locationType: true,
+            targetProductCount: true,
+            color: true,
+            isActive: true,
+            createdAt: true,
+          },
+        })
+      : prismaAny.inventoryLocation.findFirst({
+          where: { name: { equals: shelf.name, mode: "insensitive" }, isActive: true },
+          select: {
+            id: true,
+            name: true,
+            code: true,
+            description: true,
+            locationType: true,
+            targetProductCount: true,
+            color: true,
+            isActive: true,
+            createdAt: true,
+          },
+        }),
+    prismaAny.inventoryProduct.findMany({
+      where,
+      select: {
+        id: true,
+        counts: {
+          where: shelf.id ? { OR: [{ locationId: shelf.id }, { locationId: null }] } : undefined,
+          orderBy: { countDate: "desc" },
+          take: 5,
+          select: { difference: true, locationId: true, countDate: true },
+        },
       },
-    },
-  });
+    }),
+  ]);
   let shortageCount = 0;
   let surplusCount = 0;
   let okCount = 0;
+  let countedProductCount = 0;
+  let lastCountAt: Date | null = null;
   for (const p of rows) {
     // העדפה לספירה עם locationId של המדף; אחרת ספירה ללא מיקום (legacy)
     const latest =
       (shelf.id ? p.counts.find((c: { locationId: string | null }) => c.locationId === shelf.id) : null) ??
       p.counts[0];
     if (!latest) continue;
+    countedProductCount += 1;
     const diff = latest.difference;
     if (diff < 0) shortageCount += 1;
     else if (diff > 0) surplusCount += 1;
     else okCount += 1;
+    if (!lastCountAt || latest.countDate > lastCountAt) lastCountAt = latest.countDate;
   }
   const productCount = rows.length;
   return {
-    name: shelf.name,
+    name: loc?.name ?? shelf.name,
+    locationId: loc?.id ?? shelf.id,
+    code: loc?.code ?? null,
+    description: loc?.description ?? null,
+    locationType: loc?.locationType ?? "WAREHOUSE",
+    targetProductCount: loc?.targetProductCount ?? null,
+    /** צבע שמור ב־DB — לא לדרוס ברירת מחדל אם קיים */
+    color: loc?.color ?? null,
+    isActive: loc?.isActive ?? true,
+    createdAt: loc?.createdAt ? loc.createdAt.toISOString() : null,
     productCount,
     shortageCount,
     surplusCount,
     okCount,
     matchPct: productCount > 0 ? Math.round((okCount / productCount) * 100) : 100,
+    countedProductCount,
+    lastCountAt: lastCountAt ? lastCountAt.toISOString() : null,
+    countStatus:
+      productCount > 0 && countedProductCount >= productCount
+        ? ("COMPLETED" as const)
+        : countedProductCount > 0
+          ? ("IN_PROGRESS" as const)
+          : ("NOT_STARTED" as const),
   };
 }

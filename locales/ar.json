@@ -2866,6 +2866,11 @@
           "save": "حفظ",
           "cancel": "إلغاء",
           "savedSuccess": "تم حفظ جرد المخزون وتحديثه في النظام",
+          "exportPdf": "PDF",
+          "exportExcel": "Excel",
+          "exportFailed": "فشل التصدير",
+          "readOnlyBadge": "عرض فقط",
+          "sessionNumber": "جرد رقم {{n}}",
           "summaryTotal": "إجمالي الأصناف",
           "summaryOk": "سليمة",
           "summaryBelowMinimum": "تحت الحد الأدنى",
@@ -2996,7 +3001,22 @@
         },
         "history": {
           "title": "سجل الجرد",
-          "empty": "لا يوجد سجل جرد لهذا الموقع"
+          "empty": "لا يوجد سجل جرد لهذا الموقع",
+          "loadFailed": "فشل تحميل السجل",
+          "exportFailed": "فشل التصدير",
+          "colNumber": "رقم الجرد",
+          "colDate": "التاريخ",
+          "colTime": "الوقت",
+          "colBy": "من نفّذ",
+          "colProducts": "منتجات",
+          "colShortage": "نقص",
+          "colSurplus": "زيادة",
+          "colStatus": "الحالة",
+          "colActions": "إجراءات",
+          "statusCompleted": "مكتمل",
+          "view": "عرض",
+          "exportHint": "PDF / Excel لكل جرد",
+          "close": "إغلاق"
         }
       },
       "count": {

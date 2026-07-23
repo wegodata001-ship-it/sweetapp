@@ -110,6 +110,11 @@ export function InventoryWarehouseDashboard() {
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [transferOpen, setTransferOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [viewSessionId, setViewSessionId] = useState<string | null>(null);
+  const [viewSessionShelf, setViewSessionShelf] = useState<{
+    name: string;
+    locationId: string | null;
+  } | null>(null);
   const [detailShelf, setDetailShelf] = useState<ShelfGridModel | null>(null);
   const [busyShelfName, setBusyShelfName] = useState<string | null>(null);
   const [exitingNames, setExitingNames] = useState<Set<string>>(new Set());
@@ -230,8 +235,33 @@ export function InventoryWarehouseDashboard() {
 
   const upsertSummary = useCallback((summary: ShelfSummary) => {
     setShelfSummaries((prev) => {
-      const next = prev.filter((s) => s.name.trim() !== summary.name.trim());
-      next.push(summary);
+      const idx = prev.findIndex(
+        (s) =>
+          (summary.locationId && s.locationId === summary.locationId) ||
+          s.name.trim().toLowerCase() === summary.name.trim().toLowerCase(),
+      );
+      const merged: ShelfSummary =
+        idx >= 0
+          ? {
+              ...prev[idx],
+              ...summary,
+              // שמירת צבע/מטא אם הסיכום החלקי לא החזיר אותם
+              color: summary.color !== undefined ? summary.color : prev[idx].color,
+              locationId: summary.locationId ?? prev[idx].locationId,
+              code: summary.code !== undefined ? summary.code : prev[idx].code,
+              description:
+                summary.description !== undefined
+                  ? summary.description
+                  : prev[idx].description,
+              locationType: summary.locationType ?? prev[idx].locationType,
+              targetProductCount:
+                summary.targetProductCount !== undefined
+                  ? summary.targetProductCount
+                  : prev[idx].targetProductCount,
+              isActive: summary.isActive ?? prev[idx].isActive,
+            }
+          : summary;
+      const next = idx >= 0 ? prev.map((s, i) => (i === idx ? merged : s)) : [...prev, merged];
       return next.sort((a, b) => a.name.localeCompare(b.name, "he"));
     });
   }, []);
@@ -648,6 +678,20 @@ export function InventoryWarehouseDashboard() {
         t={(k, v) => t(`ops.inventory.warehouse.modal.${k}`, v)}
       />
 
+      <ShelfCountModal
+        open={viewSessionId !== null && viewSessionShelf !== null}
+        shelfName={viewSessionShelf?.name ?? ""}
+        locationId={viewSessionShelf?.locationId ?? null}
+        countDate={countDate}
+        sessionId={viewSessionId}
+        readOnly
+        onClose={() => {
+          setViewSessionId(null);
+          setViewSessionShelf(null);
+        }}
+        t={(k, v) => t(`ops.inventory.warehouse.modal.${k}`, v)}
+      />
+
       <ShelfAddProductsModal
         open={addProductsOpen && actionShelf !== null}
         shelfName={actionShelf?.name ?? ""}
@@ -690,9 +734,19 @@ export function InventoryWarehouseDashboard() {
       <ShelfHistoryModal
         open={historyOpen && actionShelf !== null}
         shelfName={actionShelf?.name ?? ""}
+        locationId={actionShelf?.locationId ?? null}
         onClose={() => {
           setHistoryOpen(false);
           setActionShelf(null);
+        }}
+        onOpenSession={(sessionId) => {
+          if (!actionShelf) return;
+          setViewSessionShelf({
+            name: actionShelf.name,
+            locationId: actionShelf.locationId ?? null,
+          });
+          setViewSessionId(sessionId);
+          setHistoryOpen(false);
         }}
         t={(k) => tW(`history.${k}`)}
         locale={locale}

@@ -116,8 +116,9 @@ function ShelfGridCardInner({
   const StatusIcon = ui.Icon;
   const ringPct = countProgressPct ?? shelf.matchPct;
   const accentClass = isCounting ? ui.accentActive : ui.accent;
-  const idleBg = shelf.color
-    ? `linear-gradient(135deg, ${shelf.color} 0%, #0f172a 100%)`
+  const savedColor = shelf.color?.trim() || null;
+  const idleBg = savedColor
+    ? `linear-gradient(145deg, ${savedColor} 0%, ${savedColor} 48%, #0b1220 100%)`
     : CARD_IDLE_BG;
 
   const countStatus = isCounting ? "IN_PROGRESS" : shelf.countStatus ?? "NOT_STARTED";
@@ -143,6 +144,13 @@ function ShelfGridCardInner({
       dir="rtl"
       onClick={() => onCardClick?.()}
     >
+      {savedColor ? (
+        <div
+          className="absolute inset-y-0 start-0 w-1.5 rounded-s-[24px]"
+          style={{ background: savedColor }}
+          aria-hidden
+        />
+      ) : null}
       {isCounting ? (
         <div
           className="absolute inset-x-0 top-0 h-[4px] bg-gradient-to-l from-[#2563eb] to-[#06b6d4]"

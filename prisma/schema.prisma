@@ -482,6 +482,7 @@ model InventoryLocation {
   productPlacements  InventoryProductOnLocation[]
   counts             InventoryCount[]             @relation("InventoryCountLocation")
   workers            InventoryLocationWorker[]
+  countSessions      InventoryCountSession[]
 
   @@index([locationType])
   @@index([isActive])
@@ -561,9 +562,38 @@ model InventoryProductOnLocation {
   @@index([inventoryProductId])
 }
 
+/// סשן ספירה (קבוצת שורות) — היסטוריה / PDF / Excel. Additive; לא נוגע בספירות ישנות.
+model InventoryCountSession {
+  id              String             @id @default(cuid())
+  /// מספר ספירה רץ (לתצוגה)
+  sessionNumber   Int                @default(autoincrement())
+  locationId      String?
+  /// Snapshot שם מיקום בעת הספירה
+  locationName    String             @default("")
+  countDate       DateTime
+  createdAt       DateTime           @default(now())
+  countedByUserId String?
+  productCount    Int                @default(0)
+  shortageCount   Int                @default(0)
+  surplusCount    Int                @default(0)
+  matchCount      Int                @default(0)
+  totalCountedQty Float              @default(0)
+  /// COMPLETED
+  status          String             @default("COMPLETED")
+  countedBy       User?              @relation("InventoryCountSessionCountedBy", fields: [countedByUserId], references: [id])
+  location        InventoryLocation? @relation(fields: [locationId], references: [id], onDelete: SetNull)
+  lines           InventoryCount[]
+
+  @@unique([sessionNumber])
+  @@index([locationId, createdAt])
+  @@index([createdAt])
+  @@index([countedByUserId])
+  @@index([sessionNumber])
+}
+
 /// כל ספירה נשמרת; משווה לספירה הקודמת של אותו פריט (ובמיקום אם הוגדר)
 model InventoryCount {
-  id                 String             @id @default(cuid())
+  id                 String                 @id @default(cuid())
   difference         Float
   note               String?
   inventoryProductId String
@@ -571,13 +601,16 @@ model InventoryCount {
   /// סה״כ נספר (= סכום כמויות העובדים כשיש פירוט)
   currentQuantity    Float
   countDate          DateTime
-  createdAt          DateTime           @default(now())
+  createdAt          DateTime               @default(now())
   countedByUserId    String?
   /// מיקום הספירה — מאפשר ספירה נפרדת לכל מיקום אחסון
   locationId         String?
-  countedBy          User?              @relation("InventoryCountCountedBy", fields: [countedByUserId], references: [id])
-  inventoryProduct   InventoryProduct   @relation(fields: [inventoryProductId], references: [id], onDelete: Cascade)
-  location           InventoryLocation? @relation("InventoryCountLocation", fields: [locationId], references: [id], onDelete: SetNull)
+  /// קישור אופציונלי לסשן (null = ספירות ישנות לפני הסשנים)
+  sessionId          String?
+  countedBy          User?                  @relation("InventoryCountCountedBy", fields: [countedByUserId], references: [id])
+  inventoryProduct   InventoryProduct       @relation(fields: [inventoryProductId], references: [id], onDelete: Cascade)
+  location           InventoryLocation?     @relation("InventoryCountLocation", fields: [locationId], references: [id], onDelete: SetNull)
+  session            InventoryCountSession? @relation(fields: [sessionId], references: [id], onDelete: SetNull)
   workerLines        InventoryCountWorker[]
 
   @@index([inventoryProductId])
@@ -587,6 +620,7 @@ model InventoryCount {
   @@index([countedByUserId])
   @@index([locationId])
   @@index([inventoryProductId, locationId])
+  @@index([sessionId])
 }
 
 /// פירוט ספירה לפי עובד מיקום — עובד אחד → כמות אחת (לביקורת)
@@ -595,6 +629,9 @@ model InventoryCountWorker {
   inventoryCountId          String
   inventoryLocationWorkerId String
   countedQuantity           Float
+  /// Snapshot בעת הספירה — לא משתנה אם העובד עודכן אחר כך
+  workerDisplayName         String                  @default("")
+  workerWorkArea            String                  @default("")
   createdAt                 DateTime                @default(now())
   updatedAt                 DateTime                @updatedAt
   inventoryCount            InventoryCount          @relation(fields: [inventoryCountId], references: [id], onDelete: Cascade)
@@ -1165,6 +1202,7 @@ model User {
   accountantEmailLogs          AccountantEmailLog[]    @relation("AccountantEmailLogSentBy")
   generatedReports             GeneratedReport[]       @relation("GeneratedReportCreatedBy")
   inventoryCountsRecorded      InventoryCount[]        @relation("InventoryCountCountedBy")
+  inventoryCountSessions       InventoryCountSession[] @relation("InventoryCountSessionCountedBy")
   inventoryMovements           InventoryMovement[]
   loginAudits                  LoginAudit[]
   notificationsReceived        Notification[]          @relation("NotificationRecipient")
