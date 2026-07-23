@@ -19,68 +19,33 @@ type Options = {
   debounceMs?: number;
 };
 
-export function useInventoryCountAutosave({ countDate, onSaved, debounceMs = 450 }: Options) {
+/**
+ * Legacy autosave ל־count-line — כבוי.
+ * שמירת ספירה חיה: ShelfCountModal → POST /api/inventory/monthly-count
+ */
+export function useInventoryCountAutosave({ onSaved: _onSaved, debounceMs = 450 }: Options) {
   const { showToast } = useToast();
   const timersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
-  const inflightRef = useRef<Set<string>>(new Set());
-  const lastSavedRef = useRef<Record<string, number>>({});
-  const lastToastAtRef = useRef(0);
+  const warnedRef = useRef(false);
 
   const persistLine = useCallback(
     async (
       productId: string,
-      qty: number,
+      _qty: number,
       setState: (id: string, state: CountSaveState) => void,
     ): Promise<SaveLineResult | null> => {
-      if (inflightRef.current.has(productId)) return null;
-      if (lastSavedRef.current[productId] === qty) {
-        setState(productId, "saved");
-        return null;
-      }
-
-      inflightRef.current.add(productId);
-      setState(productId, "saving");
-      try {
-        const res = await fetch("/api/inventory/count-line", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          credentials: "same-origin",
-          body: JSON.stringify({
-            inventoryProductId: productId,
-            currentQuantity: qty,
-            countDate,
-          }),
+      setState(productId, "error");
+      if (!warnedRef.current) {
+        warnedRef.current = true;
+        showToast({
+          tone: "error",
+          title: "שמירה אוטומטית הוצאה משימוש — שמרו דרך מסך הספירה",
+          durationMs: 2800,
         });
-        const j = (await res.json()) as {
-          ok?: boolean;
-          error?: string;
-          data?: SaveLineResult & { skipped?: boolean };
-        };
-        if (!res.ok || !j.ok || !j.data) {
-          setState(productId, "error");
-          showToast({ tone: "error", title: j.error ?? "שגיאת שמירה", durationMs: 2200 });
-          return null;
-        }
-        lastSavedRef.current[productId] = qty;
-        setState(productId, "saved");
-        if (!j.data.skipped) {
-          onSaved?.(j.data);
-          const now = Date.now();
-          if (now - lastToastAtRef.current > 1800) {
-            lastToastAtRef.current = now;
-            showToast({ tone: "success", title: "נשמר", durationMs: 1100 });
-          }
-        }
-        return j.data;
-      } catch {
-        setState(productId, "error");
-        showToast({ tone: "error", title: "שגיאת רשת", durationMs: 2200 });
-        return null;
-      } finally {
-        inflightRef.current.delete(productId);
       }
+      return null;
     },
-    [countDate, onSaved, showToast],
+    [showToast],
   );
 
   const scheduleSave = useCallback(
@@ -114,9 +79,7 @@ export function useInventoryCountAutosave({ countDate, onSaved, debounceMs = 450
     [persistLine],
   );
 
-  const seedSaved = useCallback((productId: string, qty: number) => {
-    lastSavedRef.current[productId] = qty;
-  }, []);
+  const seedSaved = useCallback((_productId: string, _qty: number) => {}, []);
 
   return { scheduleSave, persistLine, flushAll, seedSaved };
 }

@@ -30,6 +30,8 @@ const TABLE_ROW_HEIGHT = 104;
 const CARD_ROW_HEIGHT = 380;
 const REFRESH_SHELVES_MS = 1200;
 const MOBILE_MQ = "(max-width: 767px)";
+/** עמוד ראשון קטן — אין pageSize 500; המשך ב־infinite scroll */
+const COUNT_PAGE_SIZE = 80;
 
 function useIsMobileLayout() {
   const [isMobile, setIsMobile] = useState(false);
@@ -92,6 +94,10 @@ function ShelfCountModalInner({
   const [products, setProducts] = useState<InventoryCountProductRow[]>([]);
   const [workers, setWorkers] = useState<LocationWorkerDto[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [listTotal, setListTotal] = useState(0);
+  const [hasMore, setHasMore] = useState(false);
+  const [nextPage, setNextPage] = useState(2);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [sessionNumber, setSessionNumber] = useState<number | null>(null);
   const [exporting, setExporting] = useState<"pdf" | "xlsx" | null>(null);
@@ -118,6 +124,7 @@ function ShelfCountModalInner({
   const listRef = useRef<HTMLDivElement>(null);
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const rowRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+  const loadingMoreRef = useRef(false);
   const tRef = useRef(t);
   tRef.current = t;
 
@@ -141,6 +148,11 @@ function ShelfCountModalInner({
     setScrollTop(0);
     setExporting(null);
     setLoading(true);
+    setLoadingMore(false);
+    loadingMoreRef.current = false;
+    setHasMore(false);
+    setNextPage(2);
+    setListTotal(0);
 
     const finish = () => {
       if (!cancelled) setLoading(false);
@@ -191,28 +203,29 @@ function ShelfCountModalInner({
           setWorkers([...workerMap.values()]);
           setWorkerQtyByProduct(nextWorkerQty);
           setActualById(nextActual);
-          setProducts(
-            detail.lines.map((line) => ({
-              id: line.inventoryProductId,
-              name: line.name,
-              nameHe: line.nameHe,
-              nameAr: line.nameAr,
-              nameEn: line.nameEn,
-              barcode: line.barcode,
-              sku: line.sku,
-              location: detail.locationName,
-              locationId: detail.locationId,
-              unit: line.unit,
-              previousQuantity: line.previousQuantity,
-              systemTotalQuantity: line.previousQuantity,
-              systemShortage:
-                line.minimumQuantity > 0
-                  ? Math.max(0, line.minimumQuantity - line.currentQuantity)
-                  : 0,
-              minimumQuantity: line.minimumQuantity,
-              lastCountedAt: detail.createdAt,
-            })),
-          );
+          const sessionProducts = detail.lines.map((line) => ({
+            id: line.inventoryProductId,
+            name: line.name,
+            nameHe: line.nameHe,
+            nameAr: line.nameAr,
+            nameEn: line.nameEn,
+            barcode: line.barcode,
+            sku: line.sku,
+            location: detail.locationName,
+            locationId: detail.locationId,
+            unit: line.unit,
+            previousQuantity: line.previousQuantity,
+            systemTotalQuantity: line.previousQuantity,
+            systemShortage:
+              line.minimumQuantity > 0
+                ? Math.max(0, line.minimumQuantity - line.currentQuantity)
+                : 0,
+            minimumQuantity: line.minimumQuantity,
+            lastCountedAt: detail.createdAt,
+          }));
+          setProducts(sessionProducts);
+          setListTotal(sessionProducts.length);
+          setHasMore(false);
           return;
         }
 
@@ -227,7 +240,10 @@ function ShelfCountModalInner({
           return;
         }
 
-        const params = new URLSearchParams({ page: "1", pageSize: "500" });
+        const params = new URLSearchParams({
+          page: "1",
+          pageSize: String(COUNT_PAGE_SIZE),
+        });
         if (locationId?.trim()) params.set("locationId", locationId.trim());
         if (shelfName.trim()) params.set("location", shelfName.trim());
         const res = await fetch(`/api/inventory/monthly-count?${params}`, {
@@ -236,7 +252,13 @@ function ShelfCountModalInner({
         });
         const j = (await res.json()) as {
           data?: InventoryCountProductRow[];
-          meta?: { workers?: LocationWorkerDto[] };
+          meta?: {
+            workers?: LocationWorkerDto[];
+            total?: number;
+            hasMore?: boolean;
+            page?: number;
+            pageSize?: number;
+          };
           ok?: boolean;
           error?: string;
         };
@@ -247,8 +269,12 @@ function ShelfCountModalInner({
           setWorkers([]);
           return;
         }
-        setProducts(j.data ?? []);
+        const rows = j.data ?? [];
+        setProducts(rows);
         setWorkers(j.meta?.workers ?? []);
+        setListTotal(j.meta?.total ?? rows.length);
+        setHasMore(Boolean(j.meta?.hasMore));
+        setNextPage(2);
       } catch (e) {
         if (cancelled || (e instanceof DOMException && e.name === "AbortError")) return;
         setProducts([]);
@@ -265,6 +291,50 @@ function ShelfCountModalInner({
     };
   }, [open, shelfName, locationId, sessionId]);
 
+  const loadMoreProducts = useCallback(async () => {
+    if (sessionId || readOnly) return;
+    if (!hasMore || loading || loadingMoreRef.current) return;
+    if (!shelfName.trim() && !locationId?.trim()) return;
+
+    loadingMoreRef.current = true;
+    setLoadingMore(true);
+    try {
+      const params = new URLSearchParams({
+        page: String(nextPage),
+        pageSize: String(COUNT_PAGE_SIZE),
+      });
+      if (locationId?.trim()) params.set("locationId", locationId.trim());
+      if (shelfName.trim()) params.set("location", shelfName.trim());
+      const res = await fetch(`/api/inventory/monthly-count?${params}`, {
+        credentials: "same-origin",
+      });
+      const j = (await res.json()) as {
+        data?: InventoryCountProductRow[];
+        meta?: { total?: number; hasMore?: boolean };
+        ok?: boolean;
+      };
+      if (!res.ok) return;
+      const rows = j.data ?? [];
+      setProducts((prev) => {
+        const seen = new Set(prev.map((p) => p.id));
+        const merged = [...prev];
+        for (const row of rows) {
+          if (!seen.has(row.id)) {
+            seen.add(row.id);
+            merged.push(row);
+          }
+        }
+        return merged;
+      });
+      setListTotal(j.meta?.total ?? listTotal);
+      setHasMore(Boolean(j.meta?.hasMore));
+      setNextPage((p) => p + 1);
+    } finally {
+      loadingMoreRef.current = false;
+      setLoadingMore(false);
+    }
+  }, [hasMore, listTotal, loading, locationId, nextPage, readOnly, sessionId, shelfName]);
+
   useEffect(() => {
     if (!open || !listRef.current) return;
     const el = listRef.current;
@@ -273,6 +343,17 @@ function ShelfCountModalInner({
     setViewportH(el.clientHeight);
     return () => ro.disconnect();
   }, [open, loading, products.length]);
+
+  /** אם הרשימה קצרה מהמסך ועדיין יש עמודים — טען אוטומטית (אין גלילה) */
+  useEffect(() => {
+    if (!open || loading || sessionId || readOnly) return;
+    if (!hasMore || loadingMore) return;
+    const el = listRef.current;
+    if (!el) return;
+    if (el.scrollHeight <= el.clientHeight + 80) {
+      void loadMoreProducts();
+    }
+  }, [open, loading, sessionId, readOnly, hasMore, loadingMore, products.length, loadMoreProducts]);
 
   const scheduleShelfRefresh = useCallback(() => {
     if (!onShelfStatsChange) return;
@@ -394,12 +475,14 @@ function ShelfCountModalInner({
       const systemTotal = product.systemTotalQuantity ?? product.previousQuantity;
       if (systemTotal < product.minimumQuantity) below += 1;
     }
+    const total = listTotal > 0 ? listTotal : products.length;
     return {
-      total: products.length,
+      total,
       below,
       ok: Math.max(0, products.length - below),
+      loaded: products.length,
     };
-  }, [products]);
+  }, [listTotal, products]);
 
   const saveCount = useCallback(
     async (opts?: { closeAfterSave?: boolean }) => {
@@ -661,7 +744,12 @@ function ShelfCountModalInner({
           className={`min-h-0 flex-1 overflow-y-auto overscroll-contain p-3 sm:p-4 ${
             isMobile ? "overflow-x-hidden" : "overflow-x-auto"
           }`}
-          onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}
+          onScroll={(e) => {
+            const el = e.currentTarget;
+            setScrollTop(el.scrollTop);
+            const nearBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 480;
+            if (nearBottom) void loadMoreProducts();
+          }}
         >
           {loading ? (
             <div className="flex justify-center py-16">
@@ -742,6 +830,11 @@ function ShelfCountModalInner({
                 ))}
               </div>
               {useVirtual ? <div style={{ height: padBottom }} aria-hidden /> : null}
+              {loadingMore ? (
+                <div className="flex justify-center py-4">
+                  <Loader2 className="h-6 w-6 animate-spin text-[#6c4cff]" />
+                </div>
+              ) : null}
             </div>
           )}
         </div>

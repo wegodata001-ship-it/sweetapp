@@ -143,20 +143,21 @@ export async function DELETE(_req: NextRequest, ctx: { params: Promise<{ id: str
 
   const { id } = await ctx.params;
   try {
-    const products = await prismaAny.inventoryProduct.findMany({
-      where: { locationId: id },
-      select: { id: true },
-    });
-    const productIds = products.map((p: { id: string }) => p.id);
-    const countRows =
-      productIds.length > 0
-        ? await prismaAny.inventoryCount.count({
-            where: { inventoryProductId: { in: productIds } },
-          })
-        : 0;
+    const [primaryProducts, placements, countsAtLocation, workers, sessions] =
+      await Promise.all([
+        prismaAny.inventoryProduct.count({ where: { locationId: id } }),
+        prismaAny.inventoryProductOnLocation.count({ where: { locationId: id } }),
+        prismaAny.inventoryCount.count({ where: { locationId: id } }),
+        prismaAny.inventoryLocationWorker.count({ where: { inventoryLocationId: id } }),
+        prismaAny.inventoryCountSession.count({ where: { locationId: id } }),
+      ]);
 
-    // מחיקה בטוחה: אם יש מוצרים / ספירות / היסטוריה — רק השבתה
-    if (productIds.length > 0 || countRows > 0) {
+    const linkedProducts = primaryProducts + placements;
+    const linkedCounts = countsAtLocation + sessions;
+
+    // מחיקה בטוחה: מוצרים / placements / ספירות / עובדים / סשנים → השבתה בלבד
+    // (מונע 500 מ־InventoryCountWorker Restrict על hard delete)
+    if (linkedProducts > 0 || linkedCounts > 0 || workers > 0) {
       await prismaAny.inventoryLocation.update({
         where: { id },
         data: { isActive: false },
@@ -165,8 +166,9 @@ export async function DELETE(_req: NextRequest, ctx: { params: Promise<{ id: str
         ok: true,
         data: {
           deactivated: true,
-          linkedProducts: productIds.length,
-          linkedCounts: countRows,
+          linkedProducts,
+          linkedCounts,
+          linkedWorkers: workers,
         },
       });
     }

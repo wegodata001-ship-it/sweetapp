@@ -359,14 +359,16 @@ function ShelfCountLineRowInner({
               </p>
             ) : null}
           </div>
-          <button
-            type="button"
-            onClick={onEditProduct}
-            className="grid h-11 w-11 shrink-0 place-items-center rounded-xl border border-[#e7ecf5] bg-white text-slate-600"
-            aria-label={t("editProduct")}
-          >
-            <Pencil className="h-4 w-4" />
-          </button>
+          {!readOnly ? (
+            <button
+              type="button"
+              onClick={onEditProduct}
+              className="grid h-11 w-11 shrink-0 place-items-center rounded-xl border border-[#e7ecf5] bg-white text-slate-600"
+              aria-label={t("editProduct")}
+            >
+              <Pencil className="h-4 w-4" />
+            </button>
+          ) : null}
         </div>
 
         <div className="mt-3 grid grid-cols-2 gap-2">

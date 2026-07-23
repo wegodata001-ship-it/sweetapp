@@ -244,9 +244,10 @@ export async function POST(req: NextRequest) {
     });
     return NextResponse.json({ ok: true, data: row });
   } catch (e) {
-    return NextResponse.json(
-      { ok: false, error: e instanceof Error ? e.message : "שגיאה" },
-      { status: 500 },
-    );
+    const msg = e instanceof Error ? e.message : "שגיאה";
+    if (msg.includes("Unique constraint") || msg.includes("unique constraint")) {
+      return NextResponse.json({ ok: false, error: "שם מוצר כבר קיים" }, { status: 400 });
+    }
+    return NextResponse.json({ ok: false, error: msg }, { status: 500 });
   }
 }
