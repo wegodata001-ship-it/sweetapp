@@ -118,105 +118,19 @@ function ShelfCountModalInner({
   const listRef = useRef<HTMLDivElement>(null);
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const rowRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+  const tRef = useRef(t);
+  tRef.current = t;
 
-  const loadProducts = useCallback(async () => {
-    if (!shelfName.trim() && !locationId?.trim()) return;
-    setLoading(true);
-    try {
-      const params = new URLSearchParams({
-        page: "1",
-        pageSize: "500",
-      });
-      if (locationId?.trim()) params.set("locationId", locationId.trim());
-      if (shelfName.trim()) params.set("location", shelfName.trim());
-      const res = await fetch(`/api/inventory/monthly-count?${params}`, {
-        credentials: "same-origin",
-      });
-      const j = (await res.json()) as {
-        data?: InventoryCountProductRow[];
-        meta?: { workers?: LocationWorkerDto[] };
-      };
-      setProducts(j.data ?? []);
-      setWorkers(j.meta?.workers ?? []);
-    } catch {
-      setProducts([]);
-      setWorkers([]);
-    } finally {
-      setLoading(false);
-    }
-  }, [shelfName, locationId]);
-
-  const loadSession = useCallback(async (id: string) => {
-    setLoading(true);
-    try {
-      const res = await fetch(`/api/inventory/count-sessions/${encodeURIComponent(id)}`, {
-        credentials: "same-origin",
-        cache: "no-store",
-      });
-      const j = (await res.json()) as { ok?: boolean; data?: CountSessionDetail; error?: string };
-      if (!res.ok || !j.ok || !j.data) {
-        setError(j.error ?? t("saveFailed"));
-        setProducts([]);
-        setWorkers([]);
-        return;
-      }
-      const detail = j.data;
-      setActiveSessionId(detail.id);
-      setSessionNumber(detail.sessionNumber);
-      const workerMap = new Map<string, LocationWorkerDto>();
-      const nextWorkerQty: Record<string, WorkerQtyMap> = {};
-      const nextActual: Record<string, string> = {};
-      for (const line of detail.lines) {
-        nextActual[line.inventoryProductId] = String(line.currentQuantity);
-        const wmap: WorkerQtyMap = {};
-        for (const w of line.workers) {
-          wmap[w.inventoryLocationWorkerId] = String(w.countedQuantity);
-          if (!workerMap.has(w.inventoryLocationWorkerId)) {
-            workerMap.set(w.inventoryLocationWorkerId, {
-              id: w.inventoryLocationWorkerId,
-              displayName: w.workerDisplayName,
-              workArea: w.workerWorkArea,
-              displayOrder: workerMap.size,
-            });
-          }
-        }
-        nextWorkerQty[line.inventoryProductId] = wmap;
-      }
-      setWorkers([...workerMap.values()]);
-      setWorkerQtyByProduct(nextWorkerQty);
-      setActualById(nextActual);
-      setProducts(
-        detail.lines.map((line) => ({
-          id: line.inventoryProductId,
-          name: line.name,
-          nameHe: line.nameHe,
-          nameAr: line.nameAr,
-          nameEn: line.nameEn,
-          barcode: line.barcode,
-          sku: line.sku,
-          location: detail.locationName,
-          locationId: detail.locationId,
-          unit: line.unit,
-          previousQuantity: line.previousQuantity,
-          systemTotalQuantity: line.previousQuantity,
-          systemShortage:
-            line.minimumQuantity > 0
-              ? Math.max(0, line.minimumQuantity - line.currentQuantity)
-              : 0,
-          minimumQuantity: line.minimumQuantity,
-          lastCountedAt: detail.createdAt,
-        })),
-      );
-    } catch {
-      setProducts([]);
-      setWorkers([]);
-    } finally {
-      setLoading(false);
-    }
-  }, [t]);
-
+  /**
+   * טעינה יחידה בפתיחה — ללא תלות ב־t / callbacks לא יציבים.
+   * (ההורה מרענן כל שנייה לטיימר ספירה; t inline היה גורם ללולאת refetch + loading אינסופי)
+   */
   useEffect(() => {
     if (!open) return;
+
+    let cancelled = false;
+    const ac = new AbortController();
+
     setSavingIds(new Set());
     setConfirmCloseOpen(false);
     setWorkersOpen(false);
@@ -226,17 +140,130 @@ function ShelfCountModalInner({
     setScanQ("");
     setScrollTop(0);
     setExporting(null);
-    if (sessionId) {
-      setActiveSessionId(sessionId);
-      void loadSession(sessionId);
-      return;
-    }
-    setActualById({});
-    setWorkerQtyByProduct({});
-    setActiveSessionId(null);
-    setSessionNumber(null);
-    void loadProducts();
-  }, [open, shelfName, sessionId, loadProducts, loadSession]);
+    setLoading(true);
+
+    const finish = () => {
+      if (!cancelled) setLoading(false);
+    };
+
+    void (async () => {
+      try {
+        if (sessionId) {
+          setActiveSessionId(sessionId);
+          const res = await fetch(
+            `/api/inventory/count-sessions/${encodeURIComponent(sessionId)}`,
+            { credentials: "same-origin", cache: "no-store", signal: ac.signal },
+          );
+          const j = (await res.json()) as {
+            ok?: boolean;
+            data?: CountSessionDetail;
+            error?: string;
+          };
+          if (cancelled) return;
+          if (!res.ok || !j.ok || !j.data) {
+            setError(j.error ?? tRef.current("saveFailed"));
+            setProducts([]);
+            setWorkers([]);
+            return;
+          }
+          const detail = j.data;
+          setActiveSessionId(detail.id);
+          setSessionNumber(detail.sessionNumber);
+          const workerMap = new Map<string, LocationWorkerDto>();
+          const nextWorkerQty: Record<string, WorkerQtyMap> = {};
+          const nextActual: Record<string, string> = {};
+          for (const line of detail.lines) {
+            nextActual[line.inventoryProductId] = String(line.currentQuantity);
+            const wmap: WorkerQtyMap = {};
+            for (const w of line.workers) {
+              wmap[w.inventoryLocationWorkerId] = String(w.countedQuantity);
+              if (!workerMap.has(w.inventoryLocationWorkerId)) {
+                workerMap.set(w.inventoryLocationWorkerId, {
+                  id: w.inventoryLocationWorkerId,
+                  displayName: w.workerDisplayName,
+                  workArea: w.workerWorkArea,
+                  displayOrder: workerMap.size,
+                });
+              }
+            }
+            nextWorkerQty[line.inventoryProductId] = wmap;
+          }
+          setWorkers([...workerMap.values()]);
+          setWorkerQtyByProduct(nextWorkerQty);
+          setActualById(nextActual);
+          setProducts(
+            detail.lines.map((line) => ({
+              id: line.inventoryProductId,
+              name: line.name,
+              nameHe: line.nameHe,
+              nameAr: line.nameAr,
+              nameEn: line.nameEn,
+              barcode: line.barcode,
+              sku: line.sku,
+              location: detail.locationName,
+              locationId: detail.locationId,
+              unit: line.unit,
+              previousQuantity: line.previousQuantity,
+              systemTotalQuantity: line.previousQuantity,
+              systemShortage:
+                line.minimumQuantity > 0
+                  ? Math.max(0, line.minimumQuantity - line.currentQuantity)
+                  : 0,
+              minimumQuantity: line.minimumQuantity,
+              lastCountedAt: detail.createdAt,
+            })),
+          );
+          return;
+        }
+
+        setActualById({});
+        setWorkerQtyByProduct({});
+        setActiveSessionId(null);
+        setSessionNumber(null);
+
+        if (!shelfName.trim() && !locationId?.trim()) {
+          setProducts([]);
+          setWorkers([]);
+          return;
+        }
+
+        const params = new URLSearchParams({ page: "1", pageSize: "500" });
+        if (locationId?.trim()) params.set("locationId", locationId.trim());
+        if (shelfName.trim()) params.set("location", shelfName.trim());
+        const res = await fetch(`/api/inventory/monthly-count?${params}`, {
+          credentials: "same-origin",
+          signal: ac.signal,
+        });
+        const j = (await res.json()) as {
+          data?: InventoryCountProductRow[];
+          meta?: { workers?: LocationWorkerDto[] };
+          ok?: boolean;
+          error?: string;
+        };
+        if (cancelled) return;
+        if (!res.ok) {
+          setError(j.error ?? tRef.current("saveFailed"));
+          setProducts([]);
+          setWorkers([]);
+          return;
+        }
+        setProducts(j.data ?? []);
+        setWorkers(j.meta?.workers ?? []);
+      } catch (e) {
+        if (cancelled || (e instanceof DOMException && e.name === "AbortError")) return;
+        setProducts([]);
+        setWorkers([]);
+        setError(tRef.current("saveFailed"));
+      } finally {
+        finish();
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      ac.abort();
+    };
+  }, [open, shelfName, locationId, sessionId]);
 
   useEffect(() => {
     if (!open || !listRef.current) return;

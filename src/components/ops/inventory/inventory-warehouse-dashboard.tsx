@@ -86,6 +86,12 @@ export function InventoryWarehouseDashboard() {
     t(`ops.inventory.warehouse.${key}`, vars);
   const tCard = (key: string, vars?: Record<string, string | number>) =>
     t(`ops.inventory.warehouse.card.${key}`, vars);
+  /** יציב — מונע re-fetch במודל הספירה כשההורה מתרנדר כל שנייה (טיימר) */
+  const tModal = useCallback(
+    (key: string, vars?: Record<string, string | number>) =>
+      t(`ops.inventory.warehouse.modal.${key}`, vars),
+    [t],
+  );
   const locale = bcp47 === "ar" ? "ar-IL" : bcp47 === "en" ? "en-GB" : "he-IL";
 
   const canManage = canManageInventory(user);
@@ -675,7 +681,7 @@ export function InventoryWarehouseDashboard() {
         countDate={countDate}
         onClose={closeShelfCount}
         onShelfStatsChange={loadShelves}
-        t={(k, v) => t(`ops.inventory.warehouse.modal.${k}`, v)}
+        t={tModal}
       />
 
       <ShelfCountModal
@@ -689,7 +695,7 @@ export function InventoryWarehouseDashboard() {
           setViewSessionId(null);
           setViewSessionShelf(null);
         }}
-        t={(k, v) => t(`ops.inventory.warehouse.modal.${k}`, v)}
+        t={tModal}
       />
 
       <ShelfAddProductsModal
