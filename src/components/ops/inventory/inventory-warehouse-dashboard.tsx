@@ -251,7 +251,9 @@ export function InventoryWarehouseDashboard() {
           description: shelf.description ?? null,
           locationType: "WAREHOUSE",
           isActive: true,
+          workers: [],
         });
+        setFormOpen(true);
       } else {
         setFormMode("edit");
         setFormInitial({
@@ -263,9 +265,26 @@ export function InventoryWarehouseDashboard() {
           targetProductCount: shelf.targetProductCount ?? null,
           color: shelf.color ?? null,
           isActive: shelf.isActive ?? true,
+          workers: [],
         });
+        setFormOpen(true);
+        void (async () => {
+          try {
+            const res = await fetch(
+              `/api/inventory/locations/${encodeURIComponent(shelf.locationId!)}/workers`,
+              { credentials: "same-origin" },
+            );
+            const j = (await res.json()) as {
+              data?: { id: string; name: string; area: string; sortOrder: number }[];
+            };
+            setFormInitial((prev) =>
+              prev ? { ...prev, workers: j.data ?? [] } : prev,
+            );
+          } catch {
+            /* keep empty workers */
+          }
+        })();
       }
-      setFormOpen(true);
     }
     if (action === "addProducts") setAddProductsOpen(true);
     if (action === "delete") setDeleteOpen(true);

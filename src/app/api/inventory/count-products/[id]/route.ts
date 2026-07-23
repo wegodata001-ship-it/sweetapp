@@ -15,31 +15,38 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
     const { id } = await ctx.params;
     const body = (await req.json()) as {
       name?: string;
+      nameHe?: string | null;
+      nameAr?: string | null;
+      nameEn?: string | null;
+      barcode?: string | null;
+      sku?: string | null;
       locationId?: string | null;
       location?: string | null;
       unit?: string | null;
       category?: string | null;
       minimumQuantity?: number;
-      worker1Name?: string | null;
-      worker1Location?: string | null;
-      worker2Name?: string | null;
-      worker2Location?: string | null;
-      worker3Name?: string | null;
-      worker3Location?: string | null;
+      maximumQuantity?: number | null;
     };
     const data: Record<string, unknown> = {};
-    if (body.name !== undefined) {
-      const name = body.name.trim();
-      if (!name) return NextResponse.json({ ok: false, error: "שם פריט חובה" }, { status: 400 });
-      data.name = name;
+    if (body.nameHe !== undefined || body.name !== undefined) {
+      const nameHe = (body.nameHe ?? body.name)?.trim() || "";
+      if (!nameHe) return NextResponse.json({ ok: false, error: "שם פריט חובה" }, { status: 400 });
+      data.name = nameHe;
+      data.nameHe = nameHe;
     }
+    if (body.nameAr !== undefined) data.nameAr = body.nameAr?.trim() || null;
+    if (body.nameEn !== undefined) data.nameEn = body.nameEn?.trim() || null;
+    if (body.barcode !== undefined) data.barcode = body.barcode?.trim() || null;
+    if (body.sku !== undefined) data.sku = body.sku?.trim() || null;
     if (body.locationId !== undefined) {
       const lid = body.locationId?.trim() || null;
       if (!lid) {
         data.locationId = null;
         if (body.location !== undefined) {
           const loc = body.location?.trim();
-          if (!loc) return NextResponse.json({ ok: false, error: "מיקום חובה כשאין locationId" }, { status: 400 });
+          if (!loc) {
+            return NextResponse.json({ ok: false, error: "מיקום חובה כשאין locationId" }, { status: 400 });
+          }
           data.location = loc;
         }
       } else {
@@ -70,17 +77,15 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
       }
       data.minimumQuantity = n;
     }
-    const workerKeys = [
-      "worker1Name",
-      "worker1Location",
-      "worker2Name",
-      "worker2Location",
-      "worker3Name",
-      "worker3Location",
-    ] as const;
-    for (const key of workerKeys) {
-      if (body[key] !== undefined) {
-        data[key] = body[key]?.trim() || null;
+    if (body.maximumQuantity !== undefined) {
+      if (body.maximumQuantity == null || body.maximumQuantity === ("" as unknown)) {
+        data.maximumQuantity = null;
+      } else {
+        const n = Number(body.maximumQuantity);
+        if (!Number.isFinite(n) || n < 0) {
+          return NextResponse.json({ ok: false, error: "מקסימום לא תקין" }, { status: 400 });
+        }
+        data.maximumQuantity = n;
       }
     }
 

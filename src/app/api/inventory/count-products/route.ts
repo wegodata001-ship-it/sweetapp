@@ -133,20 +133,24 @@ export async function POST(req: NextRequest) {
   try {
     const body = (await req.json()) as {
       name?: string;
+      nameHe?: string | null;
+      nameAr?: string | null;
+      nameEn?: string | null;
+      barcode?: string | null;
+      sku?: string | null;
       locationId?: string | null;
       location?: string | null;
       unit?: string | null;
       category?: string | null;
       minimumQuantity?: number;
-      worker1Name?: string | null;
-      worker1Location?: string | null;
-      worker2Name?: string | null;
-      worker2Location?: string | null;
-      worker3Name?: string | null;
-      worker3Location?: string | null;
+      maximumQuantity?: number | null;
+      workers?: { name?: string; area?: string | null }[];
+      initialQuantity?: number | null;
+      countDate?: string | null;
     };
-    const name = body.name?.trim();
-    if (!name) return NextResponse.json({ ok: false, error: "חסר שם פריט" }, { status: 400 });
+    const nameHe = (body.nameHe ?? body.name)?.trim() || "";
+    if (!nameHe) return NextResponse.json({ ok: false, error: "חסר שם פריט" }, { status: 400 });
+    const name = nameHe;
 
     let locationId: string | null = body.locationId?.trim() || null;
     let locationText = "";
@@ -180,22 +184,32 @@ export async function POST(req: NextRequest) {
       }
       minimumQuantity = n;
     }
+    let maximumQuantity: number | null = null;
+    if (body.maximumQuantity !== undefined && body.maximumQuantity !== null) {
+      const n = Number(body.maximumQuantity);
+      if (!Number.isFinite(n) || n < 0) {
+        return NextResponse.json({ ok: false, error: "מקסימום לא תקין" }, { status: 400 });
+      }
+      maximumQuantity = n;
+    }
+
+    const { replaceLocationWorkers } = await import("@/lib/inventory/location-workers");
 
     const row = await prismaAny.$transaction(async (tx: typeof prismaAny) => {
       const created = await tx.inventoryProduct.create({
         data: {
           name,
+          nameHe,
+          nameAr: body.nameAr?.trim() || null,
+          nameEn: body.nameEn?.trim() || null,
+          barcode: body.barcode?.trim() || null,
+          sku: body.sku?.trim() || null,
           location: locationText,
           locationId,
           category,
           minimumQuantity,
+          maximumQuantity,
           unit: body.unit?.trim() || null,
-          worker1Name: body.worker1Name?.trim() || null,
-          worker1Location: body.worker1Location?.trim() || null,
-          worker2Name: body.worker2Name?.trim() || null,
-          worker2Location: body.worker2Location?.trim() || null,
-          worker3Name: body.worker3Name?.trim() || null,
-          worker3Location: body.worker3Location?.trim() || null,
         },
       });
       if (locationId) {
@@ -208,6 +222,35 @@ export async function POST(req: NextRequest) {
           },
           create: { inventoryProductId: created.id, locationId },
           update: {},
+        });
+        if (Array.isArray(body.workers)) {
+          await replaceLocationWorkers(
+            locationId,
+            body.workers.map((w) => ({
+              name: w.name ?? "",
+              area: w.area ?? "",
+            })),
+            tx,
+          );
+        }
+      }
+      const initial =
+        body.initialQuantity !== undefined && body.initialQuantity !== null
+          ? Number(body.initialQuantity)
+          : null;
+      if (initial !== null && Number.isFinite(initial) && initial >= 0) {
+        const countDate = body.countDate?.trim() ? new Date(body.countDate) : new Date();
+        await tx.inventoryCount.create({
+          data: {
+            inventoryProductId: created.id,
+            locationId,
+            countDate: Number.isNaN(countDate.getTime()) ? new Date() : countDate,
+            previousQuantity: 0,
+            currentQuantity: initial,
+            difference: initial,
+            note: null,
+            countedByUserId: session.sub,
+          },
         });
       }
       return created;

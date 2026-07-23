@@ -479,15 +479,38 @@ model InventoryLocation {
   /// שיוך N:M — מוצר יכול להיות במספר מיקומים
   productPlacements  InventoryProductOnLocation[]
   counts             InventoryCount[]             @relation("InventoryCountLocation")
+  workers            InventoryLocationWorker[]
 
   @@index([locationType])
   @@index([isActive])
+}
+
+/// עובדים דינמיים לפי מיקום אחסון (ללא הגבלה, ללא שמות קבועים בקוד)
+model InventoryLocationWorker {
+  id         String            @id @default(cuid())
+  locationId String
+  /// שם העובד — מוצג ככותרת בספירה
+  name       String
+  /// אזור אחריות — מוצג ככותרת משנה בספירה
+  area       String            @default("")
+  sortOrder  Int               @default(0)
+  createdAt  DateTime          @default(now())
+  location   InventoryLocation @relation(fields: [locationId], references: [id], onDelete: Cascade)
+
+  @@index([locationId, sortOrder])
+  @@index([locationId])
 }
 
 /// חומרי גלם ומלאי פנימי לספירה — לא מוצרי מכירה
 model InventoryProduct {
   id                String                       @id @default(cuid())
   name              String                       @unique
+  /// שמות רב־לשוניים (name נשאר כמפתח תצוגה ראשי / עברית)
+  nameHe            String?
+  nameAr            String?
+  nameEn            String?
+  barcode           String?
+  sku               String?
   /// טקסט חופשי לשורות ישנות לפני שיוך ל־InventoryLocation
   location          String                       @default("")
   unit              String?
@@ -495,9 +518,10 @@ model InventoryProduct {
   /// חומרי גלם | אריזות | קירור | מדבקות | כללי
   category          String                       @default("כללי")
   minimumQuantity   Float                        @default(0)
+  maximumQuantity   Float?
   /// מיקום ראשי ישן (אופציונלי) — לתאימות; השיוך המלא ב־InventoryProductOnLocation
   locationId        String?
-  /// אחריות עובדים (עד 3) + מיקום אצלם — לתצוגה בספירה
+  /// שדות עובדים ישנים — נשמרים לתאימות; התצוגה מ־InventoryLocationWorker
   worker1Name       String?
   worker1Location   String?
   worker2Name       String?
@@ -510,6 +534,8 @@ model InventoryProduct {
 
   @@index([locationId])
   @@index([category])
+  @@index([barcode])
+  @@index([sku])
 }
 
 /// שיוך מוצר↔מיקום (N:M) — מוצר אחד במספר מיקומי אחסון

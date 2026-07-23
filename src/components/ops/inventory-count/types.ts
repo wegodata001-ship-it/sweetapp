@@ -19,9 +19,21 @@ export type ShelfSummary = {
   countStatus?: "NOT_STARTED" | "IN_PROGRESS" | "COMPLETED";
 };
 
+export type LocationWorkerDto = {
+  id: string;
+  name: string;
+  area: string;
+  sortOrder: number;
+};
+
 export type InventoryCountProductRow = {
   id: string;
   name: string;
+  nameHe?: string | null;
+  nameAr?: string | null;
+  nameEn?: string | null;
+  barcode?: string | null;
+  sku?: string | null;
   location: string;
   locationId?: string | null;
   unit: string | null;
@@ -31,13 +43,8 @@ export type InventoryCountProductRow = {
   /** כמה חסר במערכת מול המינימום */
   systemShortage?: number;
   minimumQuantity: number;
+  maximumQuantity?: number | null;
   lastCountedAt: string | null;
-  worker1Name?: string | null;
-  worker1Location?: string | null;
-  worker2Name?: string | null;
-  worker2Location?: string | null;
-  worker3Name?: string | null;
-  worker3Location?: string | null;
 };
 
 export type MonthlyCountRow = InventoryCountProductRow & {

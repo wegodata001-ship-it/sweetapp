@@ -3,6 +3,11 @@ import { prismaAny } from "@/lib/prisma";
 import { requireDb } from "@/lib/api-route";
 import { getSessionFromCookie } from "@/lib/auth/get-session";
 import { isLocationType } from "@/lib/inventory/location-types";
+import {
+  replaceLocationWorkers,
+  WORKER_SELECT,
+  type LocationWorkerInput,
+} from "@/lib/inventory/location-workers";
 
 const LOCATION_SELECT = {
   id: true,
@@ -15,6 +20,7 @@ const LOCATION_SELECT = {
   icon: true,
   isActive: true,
   createdAt: true,
+  workers: { orderBy: { sortOrder: "asc" as const }, select: WORKER_SELECT },
 } as const;
 
 function serializeLocation(r: { createdAt: Date; [k: string]: unknown }) {
@@ -42,6 +48,7 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
     color?: string | null;
     icon?: string | null;
     isActive?: boolean;
+    workers?: LocationWorkerInput[];
   };
 
   const data: Record<string, unknown> = {};
@@ -71,7 +78,7 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
   if (body.icon !== undefined) data.icon = body.icon?.trim() || null;
   if (typeof body.isActive === "boolean") data.isActive = body.isActive;
 
-  if (Object.keys(data).length === 0) {
+  if (Object.keys(data).length === 0 && body.workers === undefined) {
     return NextResponse.json({ ok: false, error: "אין שדות לעדכון" }, { status: 400 });
   }
 
@@ -85,10 +92,17 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
       return NextResponse.json({ ok: false, error: "לא נמצא" }, { status: 404 });
     }
 
-    const row = await prismaAny.inventoryLocation.update({
-      where: { id },
-      data,
-      select: LOCATION_SELECT,
+    const row = await prismaAny.$transaction(async (tx: typeof prismaAny) => {
+      if (Object.keys(data).length > 0) {
+        await tx.inventoryLocation.update({ where: { id }, data });
+      }
+      if (body.workers !== undefined) {
+        await replaceLocationWorkers(id, body.workers, tx);
+      }
+      return tx.inventoryLocation.findUniqueOrThrow({
+        where: { id },
+        select: LOCATION_SELECT,
+      });
     });
 
     if (typeof data.name === "string" && data.name !== existing.name) {

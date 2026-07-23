@@ -3,6 +3,11 @@ import { prismaAny } from "@/lib/prisma";
 import { requireDb } from "@/lib/api-route";
 import { getSessionFromCookie } from "@/lib/auth/get-session";
 import { isLocationType } from "@/lib/inventory/location-types";
+import {
+  replaceLocationWorkers,
+  WORKER_SELECT,
+  type LocationWorkerInput,
+} from "@/lib/inventory/location-workers";
 
 const LOCATION_SELECT = {
   id: true,
@@ -15,6 +20,7 @@ const LOCATION_SELECT = {
   icon: true,
   isActive: true,
   createdAt: true,
+  workers: { orderBy: { sortOrder: "asc" as const }, select: WORKER_SELECT },
 } as const;
 
 function serializeLocation(r: {
@@ -106,6 +112,7 @@ export async function POST(req: NextRequest) {
       color?: string | null;
       icon?: string | null;
       isActive?: boolean;
+      workers?: LocationWorkerInput[];
     };
     const name = body.name?.trim();
     if (!name) return NextResponse.json({ ok: false, error: "חסר שם מיקום" }, { status: 400 });
@@ -115,18 +122,27 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: parsed.error }, { status: 400 });
     }
 
-    const row = await prismaAny.inventoryLocation.create({
-      data: {
-        name,
-        code: (parsed.data?.code as string | null | undefined) ?? null,
-        description: (parsed.data?.description as string | null | undefined) ?? null,
-        locationType: (parsed.data?.locationType as string | undefined) ?? "WAREHOUSE",
-        targetProductCount: (parsed.data?.targetProductCount as number | null | undefined) ?? null,
-        color: (parsed.data?.color as string | null | undefined) ?? null,
-        icon: (parsed.data?.icon as string | null | undefined) ?? null,
-        isActive: typeof body.isActive === "boolean" ? body.isActive : true,
-      },
-      select: LOCATION_SELECT,
+    const row = await prismaAny.$transaction(async (tx: typeof prismaAny) => {
+      const created = await tx.inventoryLocation.create({
+        data: {
+          name,
+          code: (parsed.data?.code as string | null | undefined) ?? null,
+          description: (parsed.data?.description as string | null | undefined) ?? null,
+          locationType: (parsed.data?.locationType as string | undefined) ?? "WAREHOUSE",
+          targetProductCount: (parsed.data?.targetProductCount as number | null | undefined) ?? null,
+          color: (parsed.data?.color as string | null | undefined) ?? null,
+          icon: (parsed.data?.icon as string | null | undefined) ?? null,
+          isActive: typeof body.isActive === "boolean" ? body.isActive : true,
+        },
+        select: { id: true },
+      });
+      if (body.workers) {
+        await replaceLocationWorkers(created.id, body.workers, tx);
+      }
+      return tx.inventoryLocation.findUniqueOrThrow({
+        where: { id: created.id },
+        select: LOCATION_SELECT,
+      });
     });
 
     // קישור מוצרים ישנים עם אותו שם מיקום (טקסט) ל־FK — ללא מחיקת ספירות

@@ -10,6 +10,7 @@ import {
   type StockFilterTier,
 } from "@/lib/inventory/product-filters";
 import { productsOnShelfWhere, resolveShelf } from "@/lib/inventory/shelf-service";
+import { listLocationWorkers } from "@/lib/inventory/location-workers";
 
 /** סה״כ מערכת = סכום הכמויות האחרונות לכל מיקום של המוצר */
 async function systemTotalsForProducts(
@@ -89,16 +90,16 @@ export async function GET(req: NextRequest) {
       select: {
         id: true,
         name: true,
+        nameHe: true,
+        nameAr: true,
+        nameEn: true,
+        barcode: true,
+        sku: true,
         location: true,
         locationId: true,
         unit: true,
         minimumQuantity: true,
-        worker1Name: true,
-        worker1Location: true,
-        worker2Name: true,
-        worker2Location: true,
-        worker3Name: true,
-        worker3Location: true,
+        maximumQuantity: true,
         inventoryLocation: { select: { name: true } },
         counts: {
           where: shelf.id
@@ -116,10 +117,16 @@ export async function GET(req: NextRequest) {
     });
 
     const totals = await systemTotalsForProducts(products.map((p: { id: string }) => p.id));
+    const locationWorkers = shelf.id ? await listLocationWorkers(shelf.id) : [];
 
     type MonthlyMapped = {
       id: string;
       name: string;
+      nameHe: string | null;
+      nameAr: string | null;
+      nameEn: string | null;
+      barcode: string | null;
+      sku: string | null;
       location: string;
       locationId: string | null;
       unit: string | null;
@@ -127,13 +134,8 @@ export async function GET(req: NextRequest) {
       systemTotalQuantity: number;
       systemShortage: number;
       minimumQuantity: number;
+      maximumQuantity: number | null;
       lastCountedAt: string | null;
-      worker1Name: string | null;
-      worker1Location: string | null;
-      worker2Name: string | null;
-      worker2Location: string | null;
-      worker3Name: string | null;
-      worker3Location: string | null;
       stockTier: ReturnType<typeof classifyStockTier>;
     };
 
@@ -141,16 +143,16 @@ export async function GET(req: NextRequest) {
       (p: {
         id: string;
         name: string;
+        nameHe: string | null;
+        nameAr: string | null;
+        nameEn: string | null;
+        barcode: string | null;
+        sku: string | null;
         location: string;
         locationId: string | null;
         unit: string | null;
         minimumQuantity: number;
-        worker1Name: string | null;
-        worker1Location: string | null;
-        worker2Name: string | null;
-        worker2Location: string | null;
-        worker3Name: string | null;
-        worker3Location: string | null;
+        maximumQuantity: number | null;
         inventoryLocation?: { name: string } | null;
         counts: { currentQuantity: number; countDate: Date; locationId: string | null }[];
       }) => {
@@ -168,7 +170,12 @@ export async function GET(req: NextRequest) {
         const tier = classifyStockTier(locationQty, p.minimumQuantity);
         return {
           id: p.id,
-          name: p.name,
+          name: p.nameHe?.trim() || p.name,
+          nameHe: p.nameHe,
+          nameAr: p.nameAr,
+          nameEn: p.nameEn,
+          barcode: p.barcode,
+          sku: p.sku,
           location: locationName,
           locationId: shelf.id,
           unit: p.unit,
@@ -176,15 +183,10 @@ export async function GET(req: NextRequest) {
           systemTotalQuantity: systemTotal,
           systemShortage,
           minimumQuantity: p.minimumQuantity,
+          maximumQuantity: p.maximumQuantity,
           lastCountedAt: latestForShelf?.countDate
             ? new Date(latestForShelf.countDate).toISOString()
             : null,
-          worker1Name: p.worker1Name,
-          worker1Location: p.worker1Location,
-          worker2Name: p.worker2Name,
-          worker2Location: p.worker2Location,
-          worker3Name: p.worker3Name,
-          worker3Location: p.worker3Location,
           stockTier: tier,
         };
       },
@@ -204,7 +206,15 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({
       ok: true,
       data: paged,
-      meta: { total, page, pageSize, stock, locationId: shelf.id, locationName: shelf.name },
+      meta: {
+        total,
+        page,
+        pageSize,
+        stock,
+        locationId: shelf.id,
+        locationName: shelf.name,
+        workers: locationWorkers,
+      },
     });
   } catch (e) {
     return NextResponse.json(

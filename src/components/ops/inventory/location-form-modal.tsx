@@ -7,6 +7,13 @@ import {
   LOCATION_TYPES,
   type LocationType,
 } from "@/lib/inventory/location-types";
+import {
+  draftsToPayload,
+  LocationWorkersEditor,
+  toWorkerDrafts,
+  type WorkerDraft,
+} from "./location-workers-editor";
+import type { LocationWorkerRow } from "@/lib/inventory/location-workers";
 
 export type LocationFormValues = {
   id?: string;
@@ -17,6 +24,7 @@ export type LocationFormValues = {
   targetProductCount: number | null;
   color: string | null;
   isActive: boolean;
+  workers?: LocationWorkerRow[];
 };
 
 type Props = {
@@ -49,6 +57,7 @@ export function LocationFormModal({
   tType,
 }: Props) {
   const [form, setForm] = useState<LocationFormValues>(empty);
+  const [workers, setWorkers] = useState<WorkerDraft[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -67,6 +76,7 @@ export function LocationFormModal({
       isActive: initial?.isActive ?? true,
       id: initial?.id,
     });
+    setWorkers(toWorkerDrafts(initial?.workers ?? []));
   }, [open, initial]);
 
   if (!open) return null;
@@ -88,6 +98,7 @@ export function LocationFormModal({
         targetProductCount: form.targetProductCount,
         color: form.color,
         isActive: form.isActive,
+        workers: draftsToPayload(workers),
       };
       const url =
         mode === "edit" && form.id
@@ -117,6 +128,12 @@ export function LocationFormModal({
         targetProductCount: j.data.targetProductCount ?? null,
         color: j.data.color ?? null,
         isActive: j.data.isActive ?? true,
+        workers: (j.data as LocationFormValues).workers ?? draftsToPayload(workers).map((w, i) => ({
+          id: `w-${i}`,
+          name: w.name,
+          area: w.area ?? "",
+          sortOrder: i,
+        })),
       });
       onClose();
     } catch {
@@ -132,7 +149,7 @@ export function LocationFormModal({
   return (
     <div className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-900/40 p-4 backdrop-blur-sm">
       <div
-        className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-[20px] border border-[#e7ecf5] bg-white p-5 shadow-2xl"
+        className="max-h-[92vh] w-full max-w-xl overflow-y-auto rounded-[20px] border border-[#e7ecf5] bg-white p-5 shadow-2xl"
         role="dialog"
         aria-modal="true"
       >
@@ -254,11 +271,15 @@ export function LocationFormModal({
           ) : null}
         </div>
 
+        <div className="mt-5 border-t border-[#e7ecf5] pt-4">
+          <LocationWorkersEditor workers={workers} onChange={setWorkers} t={t} />
+        </div>
+
         <button
           type="button"
           disabled={busy}
           onClick={() => void submit()}
-          className="mt-5 w-full rounded-2xl py-3 text-sm font-black text-white disabled:opacity-60"
+          className="mt-5 min-h-12 w-full rounded-2xl py-3 text-sm font-black text-white disabled:opacity-60"
           style={{ background: "#6c4cff" }}
         >
           {busy ? "…" : t("save")}

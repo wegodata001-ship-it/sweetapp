@@ -1,11 +1,24 @@
 "use client";
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, CheckCircle2, Loader2, Save, ScanLine, X } from "lucide-react";
-import type { InventoryCountProductRow } from "@/components/ops/inventory-count/types";
+import {
+  AlertTriangle,
+  CheckCircle2,
+  Loader2,
+  Save,
+  ScanLine,
+  Settings2,
+  X,
+} from "lucide-react";
+import type {
+  InventoryCountProductRow,
+  LocationWorkerDto,
+} from "@/components/ops/inventory-count/types";
 import { ShelfCountLineRow } from "./shelf-count-line-row";
+import { LocationWorkersModal } from "./location-workers-modal";
+import { ProductEditModal, type ProductEditValues } from "./product-edit-modal";
 
-const ROW_HEIGHT = 108;
+const ROW_HEIGHT = 280;
 const REFRESH_SHELVES_MS = 1200;
 
 type Props = {
@@ -18,11 +31,6 @@ type Props = {
   t: (key: string, vars?: Record<string, string | number>) => string;
 };
 
-function shortBarcode(id: string) {
-  const clean = id.replace(/-/g, "");
-  return clean.length > 10 ? clean.slice(0, 10).toUpperCase() : clean.toUpperCase();
-}
-
 function ShelfCountModalInner({
   open,
   shelfName,
@@ -33,11 +41,14 @@ function ShelfCountModalInner({
   t,
 }: Props) {
   const [products, setProducts] = useState<InventoryCountProductRow[]>([]);
+  const [workers, setWorkers] = useState<LocationWorkerDto[]>([]);
   const [loading, setLoading] = useState(false);
   const [actualById, setActualById] = useState<Record<string, string>>({});
   const [savingIds, setSavingIds] = useState<Set<string>>(new Set());
   const [savingAll, setSavingAll] = useState(false);
   const [confirmCloseOpen, setConfirmCloseOpen] = useState(false);
+  const [workersOpen, setWorkersOpen] = useState(false);
+  const [editProduct, setEditProduct] = useState<ProductEditValues | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [scanQ, setScanQ] = useState("");
@@ -61,10 +72,15 @@ function ShelfCountModalInner({
       const res = await fetch(`/api/inventory/monthly-count?${params}`, {
         credentials: "same-origin",
       });
-      const j = (await res.json()) as { data?: InventoryCountProductRow[] };
+      const j = (await res.json()) as {
+        data?: InventoryCountProductRow[];
+        meta?: { workers?: LocationWorkerDto[] };
+      };
       setProducts(j.data ?? []);
+      setWorkers(j.meta?.workers ?? []);
     } catch {
       setProducts([]);
+      setWorkers([]);
     } finally {
       setLoading(false);
     }
@@ -75,6 +91,8 @@ function ShelfCountModalInner({
     setActualById({});
     setSavingIds(new Set());
     setConfirmCloseOpen(false);
+    setWorkersOpen(false);
+    setEditProduct(null);
     setNotice(null);
     setError(null);
     setScanQ("");
@@ -106,20 +124,16 @@ function ShelfCountModalInner({
     setActualById((prev) => ({ ...prev, [productId]: value }));
   }, []);
 
-  const bump = useCallback(
-    (productId: string, systemQty: number, delta: number) => {
-      setNotice(null);
-      setError(null);
-      setActualById((prev) => {
-        const raw = prev[productId] ?? "";
-        const base = raw === "" ? systemQty : Number(raw);
-        const next = Math.max(0, (Number.isNaN(base) ? systemQty : base) + delta);
-        const str = String(next);
-        return { ...prev, [productId]: str };
-      });
-    },
-    [],
-  );
+  const bump = useCallback((productId: string, systemQty: number, delta: number) => {
+    setNotice(null);
+    setError(null);
+    setActualById((prev) => {
+      const raw = prev[productId] ?? "";
+      const base = raw === "" ? systemQty : Number(raw);
+      const next = Math.max(0, (Number.isNaN(base) ? systemQty : base) + delta);
+      return { ...prev, [productId]: String(next) };
+    });
+  }, []);
 
   const sortedProducts = useMemo(() => {
     const q = scanQ.trim().toLowerCase();
@@ -127,8 +141,11 @@ function ShelfCountModalInner({
     const hit = products.filter(
       (p) =>
         p.id === q ||
-        shortBarcode(p.id).toLowerCase() === q ||
-        p.name.toLowerCase().includes(q),
+        (p.barcode ?? "").toLowerCase() === q ||
+        (p.sku ?? "").toLowerCase() === q ||
+        p.name.toLowerCase().includes(q) ||
+        (p.nameAr ?? "").toLowerCase().includes(q) ||
+        (p.nameEn ?? "").toLowerCase().includes(q),
     );
     if (hit.length === 0) return products;
     const hitSet = new Set(hit.map((p) => p.id));
@@ -139,20 +156,14 @@ function ShelfCountModalInner({
     const q = scanQ.trim().toLowerCase();
     if (!q || sortedProducts.length === 0) return;
     const first = sortedProducts[0];
-    const el = rowRefs.current.get(first.id);
-    el?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    rowRefs.current.get(first.id)?.scrollIntoView({ block: "nearest", behavior: "smooth" });
   }, [scanQ, sortedProducts]);
 
-  const useVirtual = sortedProducts.length > 60;
+  const useVirtual = sortedProducts.length > 40;
   const totalH = sortedProducts.length * ROW_HEIGHT;
-  const startIdx = useVirtual
-    ? Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - 4)
-    : 0;
+  const startIdx = useVirtual ? Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - 2) : 0;
   const endIdx = useVirtual
-    ? Math.min(
-        sortedProducts.length,
-        Math.ceil((scrollTop + viewportH) / ROW_HEIGHT) + 4,
-      )
+    ? Math.min(sortedProducts.length, Math.ceil((scrollTop + viewportH) / ROW_HEIGHT) + 2)
     : sortedProducts.length;
   const visible = sortedProducts.slice(startIdx, endIdx);
   const padTop = startIdx * ROW_HEIGHT;
@@ -165,17 +176,14 @@ function ShelfCountModalInner({
   });
   const minimumSummary = useMemo(() => {
     let below = 0;
-    let near = 0;
     for (const product of products) {
       if (product.minimumQuantity <= 0) continue;
       const systemTotal = product.systemTotalQuantity ?? product.previousQuantity;
       if (systemTotal < product.minimumQuantity) below += 1;
-      else if (systemTotal <= product.minimumQuantity * 1.2) near += 1;
     }
     return {
       total: products.length,
       below,
-      near,
       ok: Math.max(0, products.length - below),
     };
   }, [products]);
@@ -262,19 +270,19 @@ function ShelfCountModalInner({
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-[85] flex items-end justify-center bg-slate-950/55 p-0 backdrop-blur-md sm:items-center sm:p-4">
+    <div className="fixed inset-0 z-[85] flex items-end justify-center bg-slate-950/55 p-0 backdrop-blur-md sm:items-center sm:p-3">
       <div
-        className="flex max-h-[96vh] w-[min(100%,96vw)] max-w-[96vw] flex-col overflow-hidden rounded-t-[24px] border border-white/10 bg-white/95 shadow-[0_24px_80px_rgba(15,23,42,0.35)] backdrop-blur-xl sm:max-h-[94vh] sm:w-[min(96vw,1600px)] sm:rounded-[24px]"
+        className="flex max-h-[100dvh] w-full max-w-[100vw] flex-col overflow-hidden rounded-t-[24px] border border-white/10 bg-white/95 shadow-[0_24px_80px_rgba(15,23,42,0.35)] backdrop-blur-xl sm:max-h-[94vh] sm:w-[min(96vw,1600px)] sm:rounded-[24px]"
         role="dialog"
         aria-modal="true"
         dir="rtl"
       >
-        <header className="sticky top-0 z-10 shrink-0 border-b border-[#e7ecf5]/80 bg-white/90 px-4 py-4 backdrop-blur-md sm:px-5">
-          <div className="flex items-center justify-between gap-3">
+        <header className="sticky top-0 z-10 shrink-0 border-b border-[#e7ecf5]/80 bg-white/90 px-3 py-3 backdrop-blur-md sm:px-5 sm:py-4">
+          <div className="flex items-center justify-between gap-2">
             <button
               type="button"
               onClick={requestClose}
-              className="grid h-10 w-10 place-items-center rounded-xl text-slate-500 transition hover:bg-slate-100"
+              className="grid h-11 w-11 place-items-center rounded-xl text-slate-500 transition hover:bg-slate-100"
             >
               <X className="h-5 w-5" />
             </button>
@@ -282,12 +290,22 @@ function ShelfCountModalInner({
               <p className="text-[10px] font-bold uppercase tracking-wide text-[#6c4cff]">
                 {t("kicker")}
               </p>
-              <h2 className="truncate text-xl font-black text-slate-900">{shelfName}</h2>
-              <p className="text-xs font-semibold text-slate-500">
-                {t("autosaveHint")}
-              </p>
+              <h2 className="truncate text-lg font-black text-slate-900 sm:text-xl">{shelfName}</h2>
             </div>
           </div>
+
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              type="button"
+              disabled={!locationId}
+              onClick={() => setWorkersOpen(true)}
+              className="inline-flex min-h-11 flex-1 items-center justify-center gap-2 rounded-2xl border border-[#e7ecf5] bg-white px-3 text-xs font-black text-slate-700 disabled:opacity-40 sm:flex-none"
+            >
+              <Settings2 className="h-4 w-4" />
+              {t("editWorkers")}
+            </button>
+          </div>
+
           <div className="mt-3 grid grid-cols-3 gap-2 text-center text-[11px] font-black">
             <div className="rounded-2xl bg-slate-50 px-2 py-2 text-slate-700 ring-1 ring-slate-200">
               <p className="text-[10px] text-slate-500">{t("summaryTotal")}</p>
@@ -302,6 +320,7 @@ function ShelfCountModalInner({
               <p className="text-base tabular-nums">{minimumSummary.below}</p>
             </div>
           </div>
+
           {notice ? (
             <p className="mt-2 inline-flex items-center gap-1 rounded-full bg-emerald-50 px-3 py-1 text-xs font-black text-emerald-700 ring-1 ring-emerald-200">
               <CheckCircle2 className="h-4 w-4" aria-hidden />
@@ -314,6 +333,7 @@ function ShelfCountModalInner({
               {error}
             </p>
           ) : null}
+
           <div className="relative mt-3">
             <ScanLine className="pointer-events-none absolute top-1/2 h-4 w-4 -translate-y-1/2 text-[#6c4cff] ltr:left-3 rtl:right-3" />
             <input
@@ -324,7 +344,7 @@ function ShelfCountModalInner({
                 if (e.key === "Enter") e.preventDefault();
               }}
               placeholder={t("scanPlaceholder")}
-              className="h-11 w-full rounded-2xl border border-[#e7ecf5] bg-[#f6f8fc] pr-3 pl-10 text-sm font-bold outline-none focus:border-[#6c4cff] focus:ring-2 focus:ring-[#6c4cff]/15 ltr:pl-10 ltr:pr-3 rtl:pr-10 rtl:pl-3"
+              className="h-12 w-full rounded-2xl border border-[#e7ecf5] bg-[#f6f8fc] pr-3 pl-10 text-sm font-bold outline-none focus:border-[#6c4cff] focus:ring-2 focus:ring-[#6c4cff]/15 ltr:pl-10 ltr:pr-3 rtl:pr-10 rtl:pl-3"
               autoFocus
             />
           </div>
@@ -332,7 +352,7 @@ function ShelfCountModalInner({
 
         <div
           ref={listRef}
-          className="min-h-0 flex-1 overflow-x-auto overflow-y-auto overscroll-contain p-3 sm:p-4"
+          className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-3 sm:p-4"
           onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}
         >
           {loading ? (
@@ -342,9 +362,9 @@ function ShelfCountModalInner({
           ) : sortedProducts.length === 0 ? (
             <p className="py-12 text-center text-sm font-semibold text-slate-500">{t("empty")}</p>
           ) : (
-            <div className="min-w-max" style={{ minHeight: useVirtual ? totalH : undefined }}>
+            <div style={{ minHeight: useVirtual ? totalH : undefined }}>
               {useVirtual ? <div style={{ height: padTop }} aria-hidden /> : null}
-              <div className="space-y-2">
+              <div className="space-y-3">
                 {visible.map((row) => (
                   <div
                     key={row.id}
@@ -356,7 +376,8 @@ function ShelfCountModalInner({
                     <ShelfCountLineRow
                       id={row.id}
                       name={row.name}
-                      barcode={shortBarcode(row.id)}
+                      barcode={row.barcode ?? null}
+                      sku={row.sku ?? null}
                       unit={row.unit}
                       systemQty={row.previousQuantity}
                       systemTotalQuantity={row.systemTotalQuantity ?? row.previousQuantity}
@@ -369,16 +390,22 @@ function ShelfCountModalInner({
                         )
                       }
                       minimumQuantity={row.minimumQuantity}
-                      worker1Name={row.worker1Name ?? null}
-                      worker1Location={row.worker1Location ?? null}
-                      worker2Name={row.worker2Name ?? null}
-                      worker2Location={row.worker2Location ?? null}
-                      worker3Name={row.worker3Name ?? null}
-                      worker3Location={row.worker3Location ?? null}
+                      workers={workers}
                       actualRaw={actualById[row.id] ?? ""}
                       saving={savingIds.has(row.id)}
                       onActualChange={(v) => setActual(row.id, v)}
                       onBump={(d) => bump(row.id, row.previousQuantity, d)}
+                      onEditProduct={() =>
+                        setEditProduct({
+                          id: row.id,
+                          nameHe: row.nameHe ?? row.name,
+                          nameAr: row.nameAr ?? "",
+                          nameEn: row.nameEn ?? "",
+                          barcode: row.barcode ?? "",
+                          sku: row.sku ?? "",
+                          unit: row.unit ?? "",
+                        })
+                      }
                       t={t}
                     />
                   </div>
@@ -388,12 +415,13 @@ function ShelfCountModalInner({
             </div>
           )}
         </div>
-        <footer className="sticky bottom-0 z-10 flex shrink-0 items-center justify-between gap-2 border-t border-[#e7ecf5]/80 bg-white/95 px-4 py-3 backdrop-blur-md sm:px-5">
+
+        <footer className="sticky bottom-0 z-10 flex shrink-0 items-center justify-between gap-2 border-t border-[#e7ecf5]/80 bg-white/95 px-3 py-3 backdrop-blur-md sm:px-5">
           <button
             type="button"
             onClick={requestClose}
             disabled={savingAll}
-            className="rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-black text-slate-600 transition hover:bg-slate-50 disabled:opacity-50"
+            className="min-h-12 rounded-2xl border border-slate-200 bg-white px-4 text-sm font-black text-slate-600 transition hover:bg-slate-50 disabled:opacity-50"
           >
             {t("cancel")}
           </button>
@@ -401,7 +429,7 @@ function ShelfCountModalInner({
             type="button"
             onClick={() => void saveCount()}
             disabled={savingAll || !hasDirtyChanges || hasInvalidChanges}
-            className="inline-flex items-center gap-2 rounded-2xl bg-emerald-600 px-5 py-2.5 text-sm font-black text-white shadow-md shadow-emerald-600/20 transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+            className="inline-flex min-h-12 flex-1 items-center justify-center gap-2 rounded-2xl bg-emerald-600 px-5 text-sm font-black text-white shadow-md shadow-emerald-600/20 transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50 sm:flex-none"
           >
             {savingAll ? (
               <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
@@ -412,6 +440,7 @@ function ShelfCountModalInner({
           </button>
         </footer>
       </div>
+
       {confirmCloseOpen ? (
         <div className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/50 p-4">
           <div className="w-full max-w-md rounded-[24px] bg-white p-5 text-end shadow-2xl" dir="rtl">
@@ -429,7 +458,7 @@ function ShelfCountModalInner({
                 type="button"
                 onClick={() => void saveCount({ closeAfterSave: true })}
                 disabled={savingAll || hasInvalidChanges}
-                className="rounded-2xl bg-emerald-600 px-4 py-2.5 text-sm font-black text-white transition hover:bg-emerald-700 disabled:opacity-50"
+                className="min-h-12 rounded-2xl bg-emerald-600 px-4 text-sm font-black text-white transition hover:bg-emerald-700 disabled:opacity-50"
               >
                 {t("saveAndExit")}
               </button>
@@ -437,7 +466,7 @@ function ShelfCountModalInner({
                 type="button"
                 onClick={onClose}
                 disabled={savingAll}
-                className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-sm font-black text-rose-700 transition hover:bg-rose-100 disabled:opacity-50"
+                className="min-h-12 rounded-2xl border border-rose-200 bg-rose-50 px-4 text-sm font-black text-rose-700 transition hover:bg-rose-100 disabled:opacity-50"
               >
                 {t("exitWithoutSaving")}
               </button>
@@ -445,7 +474,7 @@ function ShelfCountModalInner({
                 type="button"
                 onClick={() => setConfirmCloseOpen(false)}
                 disabled={savingAll}
-                className="rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-black text-slate-700 transition hover:bg-slate-50 disabled:opacity-50"
+                className="min-h-12 rounded-2xl border border-slate-200 bg-white px-4 text-sm font-black text-slate-700 transition hover:bg-slate-50 disabled:opacity-50"
               >
                 {t("backToEdit")}
               </button>
@@ -453,6 +482,40 @@ function ShelfCountModalInner({
           </div>
         </div>
       ) : null}
+
+      <LocationWorkersModal
+        open={workersOpen}
+        locationId={locationId ?? null}
+        onClose={() => setWorkersOpen(false)}
+        onSaved={(next) => setWorkers(next)}
+        t={t}
+      />
+
+      <ProductEditModal
+        open={editProduct !== null}
+        initial={editProduct}
+        onClose={() => setEditProduct(null)}
+        onSaved={(p) => {
+          setProducts((prev) =>
+            prev.map((row) =>
+              row.id === p.id
+                ? {
+                    ...row,
+                    name: p.name,
+                    nameHe: p.nameHe,
+                    nameAr: p.nameAr || null,
+                    nameEn: p.nameEn || null,
+                    barcode: p.barcode || null,
+                    sku: p.sku || null,
+                    unit: p.unit || null,
+                  }
+                : row,
+            ),
+          );
+          setNotice(t("productUpdated"));
+        }}
+        t={t}
+      />
     </div>
   );
 }

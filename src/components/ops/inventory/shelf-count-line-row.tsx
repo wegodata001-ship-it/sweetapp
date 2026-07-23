@@ -1,53 +1,52 @@
 "use client";
 
 import { memo, type ReactNode } from "react";
-import { AlertTriangle, Loader2, Minus, Package, Plus } from "lucide-react";
+import {
+  AlertTriangle,
+  Loader2,
+  Minus,
+  Package,
+  Pencil,
+  Plus,
+} from "lucide-react";
 import {
   countStatusLabel,
   countStatusStyles,
   resolveCountLineStatus,
 } from "@/components/ops/inventory-count/count-product-status";
+import type { LocationWorkerRow } from "@/lib/inventory/location-workers";
 
 export type ShelfCountLineRowProps = {
   id: string;
   name: string;
-  barcode: string;
+  barcode: string | null;
+  sku: string | null;
   unit: string | null;
-  /** כמות במיקום הנוכחי (רשומה במערכת) */
   systemQty: number;
-  /** סה״כ בכל המערכת */
   systemTotalQuantity: number;
   systemShortage: number;
   minimumQuantity: number;
-  worker1Name: string | null;
-  worker1Location: string | null;
-  worker2Name: string | null;
-  worker2Location: string | null;
-  worker3Name: string | null;
-  worker3Location: string | null;
+  workers: LocationWorkerRow[];
   actualRaw: string;
   saving?: boolean;
   onActualChange: (value: string) => void;
   onBump: (delta: number) => void;
+  onEditProduct: () => void;
   t: (key: string) => string;
 };
 
-function Cell({
+function Stat({
   label,
   value,
-  className,
   valueClassName,
 }: {
   label: string;
   value: ReactNode;
-  className?: string;
   valueClassName?: string;
 }) {
   return (
-    <div
-      className={`min-w-[4.5rem] shrink-0 rounded-xl bg-white/90 px-1.5 py-1 text-center ring-1 ring-[#e7ecf5] ${className ?? ""}`}
-    >
-      <span className="block truncate text-[9px] font-bold text-slate-500">{label}</span>
+    <div className="rounded-xl bg-white/90 px-2 py-1.5 text-center ring-1 ring-[#e7ecf5]">
+      <span className="block truncate text-[10px] font-bold text-slate-500">{label}</span>
       <p className={`truncate text-sm font-black tabular-nums text-slate-800 ${valueClassName ?? ""}`}>
         {value}
       </p>
@@ -58,21 +57,18 @@ function Cell({
 function ShelfCountLineRowInner({
   name,
   barcode,
+  sku,
   unit,
   systemQty,
   systemTotalQuantity,
   systemShortage,
   minimumQuantity,
-  worker1Name,
-  worker1Location,
-  worker2Name,
-  worker2Location,
-  worker3Name,
-  worker3Location,
+  workers,
   actualRaw,
   saving,
   onActualChange,
   onBump,
+  onEditProduct,
   t,
 }: ShelfCountLineRowProps) {
   const actual = actualRaw === "" ? null : Number(actualRaw);
@@ -98,41 +94,55 @@ function ShelfCountLineRowInner({
   const diffLabel =
     diff === null ? "—" : diff === 0 ? "0" : diff > 0 ? `+${diff}` : String(diff);
 
-  const dash = (v: string | null | undefined) => (v?.trim() ? v.trim() : "—");
+  const meta = [barcode, sku, unit].filter(Boolean).join(" · ");
 
   return (
     <div
-      className={`flex min-w-max items-center gap-2 rounded-2xl border px-2.5 py-2 transition-shadow duration-200 sm:gap-2 sm:px-3 ${st.row}`}
+      className={`rounded-2xl border px-3 py-3 transition-shadow duration-200 sm:px-4 ${st.row}`}
     >
-      <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-white text-[#6c4cff] shadow-sm ring-1 ring-[#e7ecf5] sm:h-9 sm:w-9">
-        <Package className="h-4 w-4" strokeWidth={1.5} aria-hidden />
+      {/* Header */}
+      <div className="flex items-start gap-3">
+        <div className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-white text-[#6c4cff] shadow-sm ring-1 ring-[#e7ecf5]">
+          <Package className="h-5 w-5" strokeWidth={1.5} aria-hidden />
+        </div>
+        <div className="min-w-0 flex-1 text-end">
+          <p className="break-words text-base font-black leading-tight text-slate-900 sm:text-[15px]">
+            {name}
+          </p>
+          {meta ? (
+            <p className="mt-0.5 truncate text-[11px] font-semibold tabular-nums text-slate-500">
+              {meta}
+            </p>
+          ) : null}
+        </div>
+        <button
+          type="button"
+          onClick={onEditProduct}
+          className="grid h-11 w-11 shrink-0 place-items-center rounded-xl border border-[#e7ecf5] bg-white text-slate-600"
+          aria-label={t("editProduct")}
+        >
+          <Pencil className="h-4 w-4" />
+        </button>
       </div>
 
-      <div className="min-w-[9rem] max-w-[12rem] shrink-0 text-end">
-        <p className="line-clamp-2 break-words text-sm font-black leading-tight text-slate-900 sm:text-[13px]">
-          {name}
-        </p>
-        <p className="truncate text-[10px] font-semibold tabular-nums text-slate-500">
-          {barcode}
-          {unit ? ` · ${unit}` : ""}
-        </p>
-      </div>
-
-      <div className="flex shrink-0 items-stretch gap-1.5 text-[10px] font-bold">
-        <Cell label={t("systemTotal")} value={systemTotalQuantity} />
-        <Cell label={t("locationExpected")} value={systemQty} />
-        <Cell label={t("worker1")} value={dash(worker1Name)} />
-        <Cell label={t("worker1Loc")} value={dash(worker1Location)} />
-        <Cell label={t("worker2")} value={dash(worker2Name)} />
-        <Cell label={t("worker2Loc")} value={dash(worker2Location)} />
-        <Cell label={t("worker3")} value={dash(worker3Name)} />
-        <Cell label={t("worker3Loc")} value={dash(worker3Location)} />
-        <div className={`min-w-[4.5rem] shrink-0 rounded-xl border px-1.5 py-1 text-center ${minimumClasses}`}>
-          <span className="block truncate text-[9px] font-bold">{t("minimum")}</span>
+      {/* Stats — stacked on mobile, wrap on desktop (no horizontal scroll) */}
+      <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6">
+        <Stat label={t("systemTotal")} value={systemTotalQuantity} />
+        <Stat label={t("locationExpected")} value={systemQty} />
+        {workers.map((w) => (
+          <div key={w.id} className="col-span-2 grid grid-cols-2 gap-2 sm:col-span-2">
+            <Stat label={w.name} value={w.name} />
+            <Stat label={w.area || `${t("areaOf")} ${w.name}`} value={w.area || "—"} />
+          </div>
+        ))}
+        <div className={`rounded-xl border px-2 py-1.5 text-center ${minimumClasses}`}>
+          <span className="block truncate text-[10px] font-bold">{t("minimum")}</span>
           <p className="text-sm font-black tabular-nums">{minimumQuantity}</p>
         </div>
-        <div className="min-w-[6.5rem] shrink-0 rounded-xl bg-white/90 px-1.5 py-1 text-center ring-1 ring-[#e7ecf5]">
-          <span className="block truncate text-[9px] font-bold text-slate-500">{t("systemShortage")}</span>
+        <div className="rounded-xl bg-white/90 px-2 py-1.5 text-center ring-1 ring-[#e7ecf5]">
+          <span className="block truncate text-[10px] font-bold text-slate-500">
+            {t("systemShortage")}
+          </span>
           {systemShortage > 0 ? (
             <div className="space-y-0 text-[10px] font-black leading-tight text-rose-600">
               <p>
@@ -149,62 +159,62 @@ function ShelfCountLineRowInner({
             <p className="text-sm font-black tabular-nums text-emerald-600">0</p>
           )}
         </div>
-        <div className="min-w-[4.5rem] shrink-0 rounded-xl bg-white/90 px-1.5 py-1 text-center ring-1 ring-[#e7ecf5]">
-          <span className="block truncate text-[9px] font-bold text-slate-500">{t("actual")}</span>
+        <div className="rounded-xl bg-white/90 px-2 py-1.5 text-center ring-1 ring-[#e7ecf5]">
+          <span className="block truncate text-[10px] font-bold text-slate-500">{t("actual")}</span>
           <input
             type="number"
             inputMode="decimal"
             value={actualRaw}
             onChange={(e) => onActualChange(e.target.value)}
-            className="w-full border-0 bg-transparent text-center text-sm font-black tabular-nums text-slate-900 outline-none"
+            className="h-10 w-full border-0 bg-transparent text-center text-lg font-black tabular-nums text-slate-900 outline-none sm:h-auto sm:text-sm"
             placeholder="—"
           />
         </div>
-        <div className="min-w-[4rem] shrink-0 rounded-xl bg-white/90 px-1.5 py-1 text-center ring-1 ring-[#e7ecf5]">
-          <span className="block truncate text-[9px] font-bold text-slate-500">{t("diff")}</span>
-          <p
-            className={`text-sm font-black tabular-nums ${
-              diff === null
-                ? "text-slate-400"
-                : diff < 0
-                  ? "text-rose-600"
-                  : diff > 0
-                    ? "text-amber-600"
-                    : "text-emerald-600"
-            }`}
-          >
-            {diffLabel}
-          </p>
-        </div>
+        <Stat
+          label={t("diff")}
+          value={diffLabel}
+          valueClassName={
+            diff === null
+              ? "text-slate-400"
+              : diff < 0
+                ? "text-rose-600"
+                : diff > 0
+                  ? "text-amber-600"
+                  : "text-emerald-600"
+          }
+        />
       </div>
 
-      <div className="flex shrink-0 items-center gap-1">
-        <button
-          type="button"
-          onClick={() => onBump(-1)}
-          className="grid h-9 w-9 place-items-center rounded-xl border border-[#e7ecf5] bg-white text-slate-700 hover:bg-[#f6f8fc] active:scale-95"
-          aria-label="-1"
-        >
-          <Minus className="h-4 w-4" />
-        </button>
-        <button
-          type="button"
-          onClick={() => onBump(1)}
-          className="grid h-9 w-9 place-items-center rounded-xl border border-[#e7ecf5] bg-white text-slate-700 hover:bg-[#f6f8fc] active:scale-95"
-          aria-label="+1"
-        >
-          <Plus className="h-4 w-4" />
-        </button>
-        <div className="flex flex-wrap justify-end gap-1">
+      {/* Actions — bottom of card, large touch targets */}
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-t border-[#e7ecf5]/80 pt-3">
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => onBump(-1)}
+            className="grid h-12 w-12 place-items-center rounded-2xl border border-[#e7ecf5] bg-white text-slate-700 active:scale-95 sm:h-10 sm:w-10"
+            aria-label="-1"
+          >
+            <Minus className="h-5 w-5" />
+          </button>
+          <button
+            type="button"
+            onClick={() => onBump(1)}
+            className="grid h-12 w-12 place-items-center rounded-2xl border border-[#e7ecf5] bg-white text-slate-700 active:scale-95 sm:h-10 sm:w-10"
+            aria-label="+1"
+          >
+            <Plus className="h-5 w-5" />
+          </button>
+        </div>
+        <div className="flex flex-wrap justify-end gap-1.5">
           {minimumStatus === "below" ? (
-            <span className="inline-flex items-center gap-1 rounded-full bg-rose-50 px-2 py-0.5 text-[10px] font-black text-rose-700 ring-1 ring-rose-200">
-              <AlertTriangle className="h-3 w-3" aria-hidden />
+            <span className="inline-flex items-center gap-1 rounded-full bg-rose-50 px-2.5 py-1 text-[11px] font-black text-rose-700 ring-1 ring-rose-200">
+              <AlertTriangle className="h-3.5 w-3.5" aria-hidden />
               {t("minimumWarning")}
             </span>
           ) : null}
-          <span className="inline-flex items-center gap-1 rounded-full bg-white/80 px-2 py-0.5 text-[10px] font-black text-slate-700 ring-1 ring-[#e7ecf5]">
+          <span className="inline-flex items-center gap-1 rounded-full bg-white/80 px-2.5 py-1 text-[11px] font-black text-slate-700 ring-1 ring-[#e7ecf5]">
             {saving ? (
-              <Loader2 className="h-3 w-3 animate-spin" aria-hidden />
+              <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
             ) : (
               <span className={`h-1.5 w-1.5 rounded-full ${st.dot}`} />
             )}

@@ -5,6 +5,13 @@ import { Loader2, Plus, Search, X } from "lucide-react";
 import { useToast } from "@/components/toast-provider";
 import { useI18n } from "@/components/i18n-provider";
 import type { ShelfSummary } from "@/components/ops/inventory-count/types";
+import {
+  draftsToPayload,
+  LocationWorkersEditor,
+  toWorkerDrafts,
+  type WorkerDraft,
+} from "./location-workers-editor";
+import type { LocationWorkerRow } from "@/lib/inventory/location-workers";
 
 type ProductPick = {
   id: string;
@@ -41,9 +48,15 @@ export function ShelfAddProductsModal({
   const [results, setResults] = useState<ProductPick[]>([]);
   const [searching, setSearching] = useState(false);
   const [productId, setProductId] = useState("");
-  const [newName, setNewName] = useState("");
+  const [newNameHe, setNewNameHe] = useState("");
+  const [newNameAr, setNewNameAr] = useState("");
+  const [newNameEn, setNewNameEn] = useState("");
+  const [newBarcode, setNewBarcode] = useState("");
+  const [newSku, setNewSku] = useState("");
   const [newUnit, setNewUnit] = useState("");
   const [newMinimum, setNewMinimum] = useState("0");
+  const [newMaximum, setNewMaximum] = useState("");
+  const [workers, setWorkers] = useState<WorkerDraft[]>([]);
   const [quantity, setQuantity] = useState("");
   const [slotNote, setSlotNote] = useState("");
   const [busy, setBusy] = useState(false);
@@ -63,14 +76,34 @@ export function ShelfAddProductsModal({
     setQ("");
     setResults([]);
     setProductId("");
-    setNewName("");
+    setNewNameHe("");
+    setNewNameAr("");
+    setNewNameEn("");
+    setNewBarcode("");
+    setNewSku("");
     setNewUnit("");
     setNewMinimum("0");
+    setNewMaximum("");
+    setWorkers([]);
     setQuantity("");
     setSlotNote("");
     setError(null);
     setExistsPrompt(null);
-  }, [open, shelfName]);
+    if (locationId) {
+      void (async () => {
+        try {
+          const res = await fetch(
+            `/api/inventory/locations/${encodeURIComponent(locationId)}/workers`,
+            { credentials: "same-origin" },
+          );
+          const j = (await res.json()) as { data?: LocationWorkerRow[] };
+          setWorkers(toWorkerDrafts(j.data ?? []));
+        } catch {
+          setWorkers([]);
+        }
+      })();
+    }
+  }, [open, shelfName, locationId]);
 
   const searchProducts = useCallback(async (term: string) => {
     const trimmed = term.trim();
@@ -103,7 +136,7 @@ export function ShelfAddProductsModal({
   }, [q, open, searchProducts]);
 
   const createNewProduct = async (): Promise<string | null> => {
-    const trimmed = newName.trim();
+    const trimmed = newNameHe.trim();
     if (!trimmed) {
       setError(tM("newNameRequired"));
       return null;
@@ -113,17 +146,33 @@ export function ShelfAddProductsModal({
       setError(tM("invalidMinimum"));
       return null;
     }
+    const maxRaw = newMaximum.trim();
+    const max = maxRaw === "" ? null : Number(maxRaw);
+    if (max !== null && (!Number.isFinite(max) || max < 0)) {
+      setError(tM("invalidMaximum"));
+      return null;
+    }
+    const initialRaw = quantity.trim();
+    const initial = initialRaw === "" ? null : Number(initialRaw);
     const res = await fetch("/api/inventory/count-products", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       credentials: "same-origin",
       body: JSON.stringify({
-        name: trimmed,
+        nameHe: trimmed,
+        nameAr: newNameAr.trim() || null,
+        nameEn: newNameEn.trim() || null,
+        barcode: newBarcode.trim() || null,
+        sku: newSku.trim() || null,
         locationId: locationId ?? undefined,
         location: locationId ? undefined : shelfName,
         unit: newUnit.trim() || null,
         category: "כללי",
         minimumQuantity: min,
+        maximumQuantity: max,
+        workers: draftsToPayload(workers),
+        initialQuantity: initial,
+        countDate,
       }),
     });
     const j = (await res.json()) as {
@@ -164,49 +213,6 @@ export function ShelfAddProductsModal({
         return;
       }
 
-      if (isNewProduct && qty !== null) {
-        const countRes = await fetch("/api/inventory/count-line", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          credentials: "same-origin",
-          body: JSON.stringify({
-            inventoryProductId: pid,
-            currentQuantity: qty,
-            countDate,
-            locationId: locationId ?? undefined,
-            location: shelfName,
-            note: slotNote.trim() || null,
-          }),
-        });
-        const countJ = (await countRes.json()) as { ok?: boolean; error?: string };
-        if (!countRes.ok || !countJ.ok) {
-          setError(countJ.error ?? tM("saveFailed"));
-          setBusy(false);
-          return;
-        }
-        const sumRes = await fetch("/api/inventory/shelf-summaries", {
-          credentials: "same-origin",
-        });
-        const sumJ = (await sumRes.json()) as { data?: ShelfSummary[] };
-        const summary = sumJ.data?.find(
-          (s) => s.name.trim().toLowerCase() === shelfName.trim().toLowerCase(),
-        );
-        if (summary) onShelfUpdated(summary);
-        showToast({
-          tone: "success",
-          title: isNewProduct ? tM("created") : tM("saved"),
-          durationMs: 2000,
-        });
-        setNewName("");
-        setNewUnit("");
-        setNewMinimum("0");
-        setQuantity("");
-        setSlotNote("");
-        if (!opts.continueAfter) onClose();
-        setBusy(false);
-        return;
-      }
-
       if (isNewProduct) {
         const sumRes = await fetch("/api/inventory/shelf-summaries", {
           credentials: "same-origin",
@@ -217,9 +223,14 @@ export function ShelfAddProductsModal({
         );
         if (summary) onShelfUpdated(summary);
         showToast({ tone: "success", title: tM("created"), durationMs: 2000 });
-        setNewName("");
+        setNewNameHe("");
+        setNewNameAr("");
+        setNewNameEn("");
+        setNewBarcode("");
+        setNewSku("");
         setNewUnit("");
         setNewMinimum("0");
+        setNewMaximum("");
         setQuantity("");
         setSlotNote("");
         if (!opts.continueAfter) onClose();
@@ -251,7 +262,7 @@ export function ShelfAddProductsModal({
         const picked = results.find((r) => r.id === pid);
         setExistsPrompt({
           productId: pid,
-          name: picked?.name ?? newName.trim(),
+          name: picked?.name ?? newNameHe.trim(),
           qty: qty ?? 0,
         });
         setBusy(false);
@@ -267,9 +278,14 @@ export function ShelfAddProductsModal({
       showToast({ tone: "success", title: tM("saved"), durationMs: 2000 });
       setExistsPrompt(null);
       setProductId("");
-      setNewName("");
+      setNewNameHe("");
+      setNewNameAr("");
+      setNewNameEn("");
+      setNewBarcode("");
+      setNewSku("");
       setNewUnit("");
       setNewMinimum("0");
+      setNewMaximum("");
       setQuantity("");
       setSlotNote("");
       setQ("");
@@ -385,7 +401,7 @@ export function ShelfAddProductsModal({
                       type="button"
                       onClick={() => {
                         setMode("new");
-                        setNewName(q.trim());
+                        setNewNameHe(q.trim());
                         setProductId("");
                       }}
                       className="mt-2 inline-flex items-center gap-1 text-xs font-black text-[#6c4cff] hover:underline"
@@ -404,46 +420,107 @@ export function ShelfAddProductsModal({
               </>
             ) : (
               <>
+                <p className="text-xs font-black text-slate-700">{tM("sectionGeneral")}</p>
                 <label className="block">
-                  <span className="text-xs font-bold text-slate-600">{tM("newName")}</span>
+                  <span className="text-xs font-bold text-slate-600">{tM("nameHe")}</span>
                   <input
-                    value={newName}
-                    onChange={(e) => setNewName(e.target.value)}
-                    className="mt-1 h-11 w-full rounded-2xl border border-[#e7ecf5] px-3 text-sm font-semibold"
+                    value={newNameHe}
+                    onChange={(e) => setNewNameHe(e.target.value)}
+                    className="mt-1 h-12 w-full rounded-2xl border border-[#e7ecf5] px-3 text-sm font-semibold"
                     placeholder={tM("newNamePlaceholder")}
                     autoFocus
                   />
                 </label>
                 <label className="block">
+                  <span className="text-xs font-bold text-slate-600">{tM("nameAr")}</span>
+                  <input
+                    value={newNameAr}
+                    onChange={(e) => setNewNameAr(e.target.value)}
+                    className="mt-1 h-12 w-full rounded-2xl border border-[#e7ecf5] px-3 text-sm font-semibold"
+                    dir="rtl"
+                  />
+                </label>
+                <label className="block">
+                  <span className="text-xs font-bold text-slate-600">{tM("nameEn")}</span>
+                  <input
+                    value={newNameEn}
+                    onChange={(e) => setNewNameEn(e.target.value)}
+                    className="mt-1 h-12 w-full rounded-2xl border border-[#e7ecf5] px-3 text-sm font-semibold"
+                    dir="ltr"
+                  />
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  <label className="block">
+                    <span className="text-xs font-bold text-slate-600">{tM("barcode")}</span>
+                    <input
+                      value={newBarcode}
+                      onChange={(e) => setNewBarcode(e.target.value)}
+                      className="mt-1 h-12 w-full rounded-2xl border border-[#e7ecf5] px-3 text-sm font-semibold"
+                      dir="ltr"
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="text-xs font-bold text-slate-600">{tM("sku")}</span>
+                    <input
+                      value={newSku}
+                      onChange={(e) => setNewSku(e.target.value)}
+                      className="mt-1 h-12 w-full rounded-2xl border border-[#e7ecf5] px-3 text-sm font-semibold"
+                      dir="ltr"
+                    />
+                  </label>
+                </div>
+                <p className="pt-1 text-xs font-black text-slate-700">{tM("sectionStock")}</p>
+                <div className="grid grid-cols-2 gap-2">
+                  <label className="block">
+                    <span className="text-xs font-bold text-slate-600">{tM("newMinimum")}</span>
+                    <input
+                      type="number"
+                      value={newMinimum}
+                      onChange={(e) => setNewMinimum(e.target.value)}
+                      className="mt-1 h-12 w-full rounded-2xl border border-[#e7ecf5] px-3 text-sm font-semibold"
+                      min={0}
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="text-xs font-bold text-slate-600">{tM("newMaximum")}</span>
+                    <input
+                      type="number"
+                      value={newMaximum}
+                      onChange={(e) => setNewMaximum(e.target.value)}
+                      className="mt-1 h-12 w-full rounded-2xl border border-[#e7ecf5] px-3 text-sm font-semibold"
+                      min={0}
+                    />
+                  </label>
+                </div>
+                <label className="block">
                   <span className="text-xs font-bold text-slate-600">{tM("newUnit")}</span>
                   <input
                     value={newUnit}
                     onChange={(e) => setNewUnit(e.target.value)}
-                    className="mt-1 h-11 w-full rounded-2xl border border-[#e7ecf5] px-3 text-sm font-semibold"
+                    className="mt-1 h-12 w-full rounded-2xl border border-[#e7ecf5] px-3 text-sm font-semibold"
                     placeholder={tM("newUnitPlaceholder")}
                   />
                 </label>
-                <label className="block">
-                  <span className="text-xs font-bold text-slate-600">{tM("newMinimum")}</span>
-                  <input
-                    type="number"
-                    value={newMinimum}
-                    onChange={(e) => setNewMinimum(e.target.value)}
-                    className="mt-1 h-11 w-full rounded-2xl border border-[#e7ecf5] px-3 text-sm font-semibold"
-                    min={0}
+                <div className="pt-1">
+                  <LocationWorkersEditor
+                    workers={workers}
+                    onChange={setWorkers}
+                    t={(k) => t(`ops.inventory.warehouse.modal.${k}`)}
                   />
-                </label>
+                </div>
               </>
             )}
 
             <label className="block">
-              <span className="text-xs font-bold text-slate-600">{tM("quantity")}</span>
+              <span className="text-xs font-bold text-slate-600">
+                {mode === "new" ? tM("initialQty") : tM("quantity")}
+              </span>
               <input
                 type="number"
                 inputMode="decimal"
                 value={quantity}
                 onChange={(e) => setQuantity(e.target.value)}
-                className="mt-1 h-11 w-full rounded-2xl border border-[#e7ecf5] px-3 text-sm font-semibold"
+                className="mt-1 h-12 w-full rounded-2xl border border-[#e7ecf5] px-3 text-sm font-semibold"
                 placeholder="0"
               />
             </label>
