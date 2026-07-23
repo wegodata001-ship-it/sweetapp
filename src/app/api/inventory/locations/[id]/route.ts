@@ -2,6 +2,27 @@ import { NextRequest, NextResponse } from "next/server";
 import { prismaAny } from "@/lib/prisma";
 import { requireDb } from "@/lib/api-route";
 import { getSessionFromCookie } from "@/lib/auth/get-session";
+import { isLocationType } from "@/lib/inventory/location-types";
+
+const LOCATION_SELECT = {
+  id: true,
+  name: true,
+  code: true,
+  description: true,
+  locationType: true,
+  targetProductCount: true,
+  color: true,
+  icon: true,
+  isActive: true,
+  createdAt: true,
+} as const;
+
+function serializeLocation(r: { createdAt: Date; [k: string]: unknown }) {
+  return {
+    ...r,
+    createdAt: r.createdAt instanceof Date ? r.createdAt.toISOString() : r.createdAt,
+  };
+}
 
 export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const block = await requireDb();
@@ -14,7 +35,12 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
   const { id } = await ctx.params;
   const body = (await req.json()) as {
     name?: string;
+    code?: string | null;
     description?: string | null;
+    locationType?: string | null;
+    targetProductCount?: number | null;
+    color?: string | null;
+    icon?: string | null;
     isActive?: boolean;
   };
 
@@ -24,7 +50,25 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
     if (!name) return NextResponse.json({ ok: false, error: "שם ריק" }, { status: 400 });
     data.name = name;
   }
+  if (body.code !== undefined) data.code = body.code?.trim() || null;
   if (body.description !== undefined) data.description = body.description?.trim() || null;
+  if (body.locationType !== undefined) {
+    const t = (body.locationType ?? "").trim().toUpperCase();
+    if (!isLocationType(t)) {
+      return NextResponse.json({ ok: false, error: "סוג מיקום לא תקין" }, { status: 400 });
+    }
+    data.locationType = t;
+  }
+  if (body.targetProductCount !== undefined) {
+    if (body.targetProductCount == null) {
+      data.targetProductCount = null;
+    } else {
+      const n = Math.floor(Number(body.targetProductCount));
+      data.targetProductCount = Number.isFinite(n) && n >= 0 ? n : null;
+    }
+  }
+  if (body.color !== undefined) data.color = body.color?.trim() || null;
+  if (body.icon !== undefined) data.icon = body.icon?.trim() || null;
   if (typeof body.isActive === "boolean") data.isActive = body.isActive;
 
   if (Object.keys(data).length === 0) {
@@ -32,8 +76,29 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
   }
 
   try {
-    const row = await prismaAny.inventoryLocation.update({ where: { id }, data });
-    return NextResponse.json({ ok: true, data: row });
+    // עדכון שם — מסנכרן גם את טקסט location במוצרים (ללא מחיקת ספירות)
+    const existing = await prismaAny.inventoryLocation.findUnique({
+      where: { id },
+      select: { name: true },
+    });
+    if (!existing) {
+      return NextResponse.json({ ok: false, error: "לא נמצא" }, { status: 404 });
+    }
+
+    const row = await prismaAny.inventoryLocation.update({
+      where: { id },
+      data,
+      select: LOCATION_SELECT,
+    });
+
+    if (typeof data.name === "string" && data.name !== existing.name) {
+      await prismaAny.inventoryProduct.updateMany({
+        where: { locationId: id },
+        data: { location: data.name as string },
+      });
+    }
+
+    return NextResponse.json({ ok: true, data: serializeLocation(row) });
   } catch (e) {
     const msg = e instanceof Error ? e.message : "";
     if (msg.includes("Unique constraint") || msg.includes("unique constraint")) {
@@ -53,14 +118,34 @@ export async function DELETE(_req: NextRequest, ctx: { params: Promise<{ id: str
 
   const { id } = await ctx.params;
   try {
-    const cnt = await prismaAny.inventoryProduct.count({ where: { locationId: id } });
-    if (cnt > 0) {
+    const products = await prismaAny.inventoryProduct.findMany({
+      where: { locationId: id },
+      select: { id: true },
+    });
+    const productIds = products.map((p: { id: string }) => p.id);
+    const countRows =
+      productIds.length > 0
+        ? await prismaAny.inventoryCount.count({
+            where: { inventoryProductId: { in: productIds } },
+          })
+        : 0;
+
+    // מחיקה בטוחה: אם יש מוצרים / ספירות / היסטוריה — רק השבתה
+    if (productIds.length > 0 || countRows > 0) {
       await prismaAny.inventoryLocation.update({
         where: { id },
         data: { isActive: false },
       });
-      return NextResponse.json({ ok: true, data: { deactivated: true, linkedProducts: cnt } });
+      return NextResponse.json({
+        ok: true,
+        data: {
+          deactivated: true,
+          linkedProducts: productIds.length,
+          linkedCounts: countRows,
+        },
+      });
     }
+
     await prismaAny.inventoryLocation.delete({ where: { id } });
     return NextResponse.json({ ok: true, data: { deleted: true } });
   } catch (e) {

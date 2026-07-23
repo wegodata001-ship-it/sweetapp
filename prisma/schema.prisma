@@ -460,52 +460,96 @@ model Product {
 
 /// מיקומי מחסן/חנות — נוצרים ע״י מנהל (לא hardcoded)
 model InventoryLocation {
-  id          String             @id @default(cuid())
-  name        String             @unique
-  description String?
-  isActive    Boolean            @default(true)
-  createdAt   DateTime           @default(now())
-  products    InventoryProduct[] @relation("InventoryProductLocation")
+  id                 String                       @id @default(cuid())
+  name               String                       @unique
+  /// קוד פנימי אופציונלי (לדוגמה WH-01)
+  code               String?
+  description        String?
+  /// WAREHOUSE | SHOWROOM | STORE | COLD | FREEZER | OTHER
+  locationType       String                       @default("WAREHOUSE")
+  /// כמות מוצרים יעד לספירה (אופציונלי)
+  targetProductCount Int?
+  /// צבע/אייקון לתצוגה בכרטיס (אופציונלי)
+  color              String?
+  icon               String?
+  isActive           Boolean                      @default(true)
+  createdAt          DateTime                     @default(now())
+  /// שיוך ישן (1:N) — נשמר לתאימות לאחור
+  products           InventoryProduct[]           @relation("InventoryProductPrimaryLocation")
+  /// שיוך N:M — מוצר יכול להיות במספר מיקומים
+  productPlacements  InventoryProductOnLocation[]
+  counts             InventoryCount[]             @relation("InventoryCountLocation")
+
+  @@index([locationType])
+  @@index([isActive])
 }
 
 /// חומרי גלם ומלאי פנימי לספירה — לא מוצרי מכירה
 model InventoryProduct {
-  id                String             @id @default(cuid())
-  name              String             @unique
+  id                String                       @id @default(cuid())
+  name              String                       @unique
   /// טקסט חופשי לשורות ישנות לפני שיוך ל־InventoryLocation
-  location          String             @default("")
+  location          String                       @default("")
   unit              String?
-  createdAt         DateTime           @default(now())
+  createdAt         DateTime                     @default(now())
   /// חומרי גלם | אריזות | קירור | מדבקות | כללי
-  category          String             @default("כללי")
-  minimumQuantity   Float              @default(0)
+  category          String                       @default("כללי")
+  minimumQuantity   Float                        @default(0)
+  /// מיקום ראשי ישן (אופציונלי) — לתאימות; השיוך המלא ב־InventoryProductOnLocation
   locationId        String?
+  /// אחריות עובדים (עד 3) + מיקום אצלם — לתצוגה בספירה
+  worker1Name       String?
+  worker1Location   String?
+  worker2Name       String?
+  worker2Location   String?
+  worker3Name       String?
+  worker3Location   String?
   counts            InventoryCount[]
-  inventoryLocation InventoryLocation? @relation("InventoryProductLocation", fields: [locationId], references: [id])
+  inventoryLocation InventoryLocation?           @relation("InventoryProductPrimaryLocation", fields: [locationId], references: [id])
+  placements        InventoryProductOnLocation[]
 
   @@index([locationId])
   @@index([category])
 }
 
-/// כל ספירה נשמרת; משווה לספירה הקודמת של אותו פריט
+/// שיוך מוצר↔מיקום (N:M) — מוצר אחד במספר מיקומי אחסון
+model InventoryProductOnLocation {
+  id                 String            @id @default(cuid())
+  inventoryProductId String
+  locationId         String
+  createdAt          DateTime          @default(now())
+  product            InventoryProduct  @relation(fields: [inventoryProductId], references: [id], onDelete: Cascade)
+  location           InventoryLocation @relation(fields: [locationId], references: [id], onDelete: Cascade)
+
+  @@unique([inventoryProductId, locationId])
+  @@index([locationId])
+  @@index([inventoryProductId])
+}
+
+/// כל ספירה נשמרת; משווה לספירה הקודמת של אותו פריט (ובמיקום אם הוגדר)
 model InventoryCount {
-  id                 String           @id @default(cuid())
+  id                 String             @id @default(cuid())
   difference         Float
   note               String?
   inventoryProductId String
   previousQuantity   Float
   currentQuantity    Float
   countDate          DateTime
-  createdAt          DateTime         @default(now())
+  createdAt          DateTime           @default(now())
   countedByUserId    String?
-  countedBy          User?            @relation("InventoryCountCountedBy", fields: [countedByUserId], references: [id])
-  inventoryProduct   InventoryProduct @relation(fields: [inventoryProductId], references: [id], onDelete: Cascade)
+  /// מיקום הספירה — מאפשר ספירה נפרדת לכל מיקום אחסון
+  locationId         String?
+  countedBy          User?              @relation("InventoryCountCountedBy", fields: [countedByUserId], references: [id])
+  inventoryProduct   InventoryProduct   @relation(fields: [inventoryProductId], references: [id], onDelete: Cascade)
+  location           InventoryLocation? @relation("InventoryCountLocation", fields: [locationId], references: [id], onDelete: SetNull)
 
   @@index([inventoryProductId])
   @@index([countDate])
   @@index([createdAt])
   @@index([difference])
   @@index([countedByUserId])
+  @@index([locationId])
+  @@index([inventoryProductId, locationId])
 }
 
 /// תנועות מלאי יומיות — מעדכנות currentStock במוצר

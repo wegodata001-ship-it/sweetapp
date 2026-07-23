@@ -20,6 +20,12 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
       unit?: string | null;
       category?: string | null;
       minimumQuantity?: number;
+      worker1Name?: string | null;
+      worker1Location?: string | null;
+      worker2Name?: string | null;
+      worker2Location?: string | null;
+      worker3Name?: string | null;
+      worker3Location?: string | null;
     };
     const data: Record<string, unknown> = {};
     if (body.name !== undefined) {
@@ -64,12 +70,41 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
       }
       data.minimumQuantity = n;
     }
+    const workerKeys = [
+      "worker1Name",
+      "worker1Location",
+      "worker2Name",
+      "worker2Location",
+      "worker3Name",
+      "worker3Location",
+    ] as const;
+    for (const key of workerKeys) {
+      if (body[key] !== undefined) {
+        data[key] = body[key]?.trim() || null;
+      }
+    }
 
     if (Object.keys(data).length === 0) {
       return NextResponse.json({ ok: false, error: "אין שדות לעדכון" }, { status: 400 });
     }
 
-    const row = await prismaAny.inventoryProduct.update({ where: { id }, data });
+    const row = await prismaAny.$transaction(async (tx: typeof prismaAny) => {
+      const updated = await tx.inventoryProduct.update({ where: { id }, data });
+      const lid = typeof data.locationId === "string" ? data.locationId : null;
+      if (lid) {
+        await tx.inventoryProductOnLocation.upsert({
+          where: {
+            inventoryProductId_locationId: {
+              inventoryProductId: id,
+              locationId: lid,
+            },
+          },
+          create: { inventoryProductId: id, locationId: lid },
+          update: {},
+        });
+      }
+      return updated;
+    });
     return NextResponse.json({ ok: true, data: row });
   } catch (e) {
     return NextResponse.json(

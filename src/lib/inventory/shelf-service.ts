@@ -24,16 +24,44 @@ export async function resolveShelf(shelfId: string | null, shelfName?: string): 
   return { id: null, name };
 }
 
+/** מוצרים על מדף — כולל שיוך N:M + תאימות ל־locationId / טקסט ישן */
 export function productsOnShelfWhere(shelf: ResolvedShelf) {
   if (shelf.id) {
     return {
       OR: [
+        { placements: { some: { locationId: shelf.id } } },
         { locationId: shelf.id },
         { location: { equals: shelf.name, mode: "insensitive" as const } },
       ],
     };
   }
-  return { location: { equals: shelf.name, mode: "insensitive" as const } };
+  return {
+    OR: [
+      { location: { equals: shelf.name, mode: "insensitive" as const } },
+      {
+        placements: {
+          some: { location: { name: { equals: shelf.name, mode: "insensitive" as const } } },
+        },
+      },
+    ],
+  };
+}
+
+export async function ensureProductOnShelf(
+  tx: typeof prismaAny,
+  productId: string,
+  locationId: string,
+): Promise<void> {
+  await tx.inventoryProductOnLocation.upsert({
+    where: {
+      inventoryProductId_locationId: {
+        inventoryProductId: productId,
+        locationId,
+      },
+    },
+    create: { inventoryProductId: productId, locationId },
+    update: {},
+  });
 }
 
 export async function uniqueShelfCopyName(baseName: string): Promise<string> {
@@ -57,10 +85,12 @@ export async function summarizeShelf(shelf: ResolvedShelf) {
   const rows = await prismaAny.inventoryProduct.findMany({
     where,
     select: {
+      id: true,
       counts: {
+        where: shelf.id ? { OR: [{ locationId: shelf.id }, { locationId: null }] } : undefined,
         orderBy: { countDate: "desc" },
-        take: 1,
-        select: { difference: true },
+        take: 5,
+        select: { difference: true, locationId: true, countDate: true },
       },
     },
   });
@@ -68,7 +98,10 @@ export async function summarizeShelf(shelf: ResolvedShelf) {
   let surplusCount = 0;
   let okCount = 0;
   for (const p of rows) {
-    const latest = p.counts[0];
+    // העדפה לספירה עם locationId של המדף; אחרת ספירה ללא מיקום (legacy)
+    const latest =
+      (shelf.id ? p.counts.find((c: { locationId: string | null }) => c.locationId === shelf.id) : null) ??
+      p.counts[0];
     if (!latest) continue;
     const diff = latest.difference;
     if (diff < 0) shortageCount += 1;

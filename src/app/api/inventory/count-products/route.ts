@@ -138,6 +138,12 @@ export async function POST(req: NextRequest) {
       unit?: string | null;
       category?: string | null;
       minimumQuantity?: number;
+      worker1Name?: string | null;
+      worker1Location?: string | null;
+      worker2Name?: string | null;
+      worker2Location?: string | null;
+      worker3Name?: string | null;
+      worker3Location?: string | null;
     };
     const name = body.name?.trim();
     if (!name) return NextResponse.json({ ok: false, error: "חסר שם פריט" }, { status: 400 });
@@ -175,15 +181,36 @@ export async function POST(req: NextRequest) {
       minimumQuantity = n;
     }
 
-    const row = await prismaAny.inventoryProduct.create({
-      data: {
-        name,
-        location: locationText,
-        locationId,
-        category,
-        minimumQuantity,
-        unit: body.unit?.trim() || null,
-      },
+    const row = await prismaAny.$transaction(async (tx: typeof prismaAny) => {
+      const created = await tx.inventoryProduct.create({
+        data: {
+          name,
+          location: locationText,
+          locationId,
+          category,
+          minimumQuantity,
+          unit: body.unit?.trim() || null,
+          worker1Name: body.worker1Name?.trim() || null,
+          worker1Location: body.worker1Location?.trim() || null,
+          worker2Name: body.worker2Name?.trim() || null,
+          worker2Location: body.worker2Location?.trim() || null,
+          worker3Name: body.worker3Name?.trim() || null,
+          worker3Location: body.worker3Location?.trim() || null,
+        },
+      });
+      if (locationId) {
+        await tx.inventoryProductOnLocation.upsert({
+          where: {
+            inventoryProductId_locationId: {
+              inventoryProductId: created.id,
+              locationId,
+            },
+          },
+          create: { inventoryProductId: created.id, locationId },
+          update: {},
+        });
+      }
+      return created;
     });
     return NextResponse.json({ ok: true, data: row });
   } catch (e) {

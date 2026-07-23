@@ -2747,15 +2747,37 @@
         "kpiMovements": "حركات اليوم",
         "gridTitle": "مواقع التخزين في المستودع",
         "searchShelf": "بحث عن موقع تخزين…",
-        "addShelf": "موقع تخزين جديد",
+        "addShelf": {
+          "title": "موقع تخزين جديد",
+          "name": "اسم موقع التخزين",
+          "description": "الوصف",
+          "save": "حفظ",
+          "nameRequired": "الاسم مطلوب",
+          "saveFailed": "خطأ",
+          "editTitle": "تعديل موقع التخزين",
+          "sectionDetails": "تفاصيل الموقع",
+          "code": "رمز الموقع",
+          "codeOptional": "اختياري",
+          "locationType": "نوع الموقع",
+          "targetCount": "عدد المنتجات المستهدف",
+          "status": "الحالة",
+          "statusActive": "نشط",
+          "statusInactive": "غير نشط",
+          "color": "لون البطاقة",
+          "colorDefault": "افتراضي"
+        },
         "noShelves": "لا توجد مواقع تخزين — أضف موقع تخزين",
         "card": {
           "noPermission": "لا توجد صلاحية لهذا الإجراء",
           "menu": {
             "label": "إجراءات موقع التخزين",
             "addProducts": "إضافة منتجات",
-            "duplicate": "نسخ موقع التخزين",
-            "delete": "حذف موقع التخزين"
+            "duplicate": "تكرار الموقع",
+            "delete": "حذف الموقع",
+            "edit": "تعديل الموقع",
+            "transfer": "نقل المنتجات",
+            "export": "تصدير الجرد",
+            "history": "سجل الجرد"
           },
           "statusPerfect": "تطابق كامل",
           "statusShortage": "يوجد نواقص",
@@ -2777,7 +2799,15 @@
           "finishCount": "إنهاء الجرد",
           "timerLabel": "الوقت",
           "targetMinutes": "الهدف: {{minutes}} د",
-          "activeBadge": "نشط"
+          "activeBadge": "نشط",
+          "badgeActiveCount": "جرد نشط",
+          "badgeCompleted": "مكتمل",
+          "badgeNotStarted": "لم يبدأ",
+          "targetProducts": "هدف المنتجات: {{count}}",
+          "createdAt": "أُنشئ: {{date}}",
+          "lastCountAt": "آخر جرد: {{date}}",
+          "lastCountedBy": "جرده: {{name}}",
+          "unknownUser": "—"
         },
         "modal": {
           "kicker": "جرد موقع التخزين",
@@ -2786,6 +2816,18 @@
           "empty": "لا منتجات في موقع التخزين هذا",
           "loading": "جاري التحميل…",
           "inSystem": "في النظام",
+          "systemTotal": "الإجمالي في النظام",
+          "locationExpected": "في هذا الموقع",
+          "worker1": "عامل 1",
+          "worker1Loc": "موقع عامل 1",
+          "worker2": "عامل 2",
+          "worker2Loc": "موقع عامل 2",
+          "worker3": "عامل 3",
+          "worker3Loc": "موقع عامل 3",
+          "systemShortage": "نقص في النظام",
+          "shortageMin": "الحد الأدنى",
+          "shortageHave": "الموجود",
+          "shortageMissing": "الناقص",
           "minimum": "الحد الأدنى",
           "actual": "المجرود",
           "diff": "الفرق",
@@ -2818,6 +2860,12 @@
             "name": "اسم المنتج",
             "unit": "الوحدة",
             "minimum": "الحد الأدنى",
+            "worker1": "عامل 1",
+            "worker1Loc": "موقع عامل 1",
+            "worker2": "عامل 2",
+            "worker2Loc": "موقع عامل 2",
+            "worker3": "عامل 3",
+            "worker3Loc": "موقع عامل 3",
             "save": "حفظ",
             "nameRequired": "الاسم مطلوب",
             "saveFailed": "خطأ"
@@ -2827,13 +2875,18 @@
           "deleted": "تم حذف موقع التخزين",
           "duplicated": "تم نسخ موقع التخزين",
           "deleteFailed": "فشل الحذف",
-          "duplicateFailed": "فشل النسخ"
+          "duplicateFailed": "فشل النسخ",
+          "deactivated": "تم تعطيل الموقع (يحتوي منتجات/جرد — لم يُحذف)",
+          "created": "تم إنشاء الموقع",
+          "updated": "تم تحديث الموقع",
+          "exported": "تم تصدير الجرد إلى CSV",
+          "exportFailed": "فشل التصدير"
         },
         "deleteShelf": {
           "title": "حذف موقع التخزين",
           "body": "حذف موقع التخزين «{{name}}»؟",
-          "hint": "سيتم إزالة ربط المنتجات بموقع التخزين — المنتجات نفسها لن تُحذف.",
-          "confirm": "حذف"
+          "hint": "إذا وُجدت منتجات أو جرد أو سجل — يُعطَّل الموقع فقط.",
+          "confirm": "حذف / تعطيل"
         },
         "addProductsModal": {
           "title": "إضافة منتجات لموقع التخزين",
@@ -2868,13 +2921,50 @@
           "existsYes": "نعم",
           "existsNo": "لا"
         },
-        "addShelf": {
-          "title": "موقع تخزين جديد",
-          "name": "اسم موقع التخزين",
-          "description": "الوصف",
-          "save": "حفظ",
-          "nameRequired": "الاسم مطلوب",
-          "saveFailed": "خطأ"
+        "kpiSurplus": "منتجات فائضة",
+        "kpiTotalLocations": "إجمالي مواقع التخزين",
+        "kpiActiveLocations": "مواقع نشطة",
+        "kpiActiveCounts": "جرد نشط",
+        "kpiCompletedCounts": "جرد مكتمل",
+        "kpiCountedProducts": "منتجات تم جردها",
+        "filterTypeAll": "كل الأنواع",
+        "filterStatusAll": "كل الحالات",
+        "filterStatusActive": "نشط",
+        "filterStatusInactive": "غير نشط",
+        "filterCountAll": "كل حالات الجرد",
+        "filterMinProducts": "حد أدنى للمنتجات",
+        "filterLastCountFrom": "آخر جرد من",
+        "sortName": "فرز: الاسم",
+        "sortCreated": "فرز: تاريخ الإنشاء",
+        "sortProducts": "فرز: عدد المنتجات",
+        "sortProgress": "فرز: نسبة التقدم",
+        "sortLastCount": "فرز: آخر جرد",
+        "locationTypes": {
+          "WAREHOUSE": "مستودع",
+          "SHOWROOM": "صالة عرض",
+          "STORE": "متجر",
+          "COLD": "تبريد",
+          "FREEZER": "تجميد",
+          "OTHER": "أخرى"
+        },
+        "countStatus": {
+          "NOT_STARTED": "لم يبدأ",
+          "IN_PROGRESS": "قيد التنفيذ",
+          "COMPLETED": "مكتمل"
+        },
+        "transfer": {
+          "title": "نقل المنتجات",
+          "from": "من: {{name}}",
+          "target": "الموقع الهدف",
+          "targetPlaceholder": "اختر موقعاً…",
+          "targetRequired": "اختر موقعاً",
+          "hint": "تُنقل كل المنتجات. يُحفظ سجل الجرد.",
+          "confirm": "نقل المنتجات",
+          "failed": "فشل النقل"
+        },
+        "history": {
+          "title": "سجل الجرد",
+          "empty": "لا يوجد سجل جرد لهذا الموقع"
         }
       },
       "count": {
@@ -3666,8 +3756,13 @@
       "statTasks": "{{n}} مهام",
       "statDone": "{{n}} منجزة",
       "statMinutes": "{{n}} دقيقة",
-      "fields": { "materials": "مواد" },
-      "status": { "pending": "قيد الانتظار", "locked": "مقفل" },
+      "fields": {
+        "materials": "مواد"
+      },
+      "status": {
+        "pending": "قيد الانتظار",
+        "locked": "مقفل"
+      },
       "lockHint": "أكمل المهام السابقة أولاً",
       "groupMeta": "{{tasks}} مهام · {{minutes}} د · {{pct}}%",
       "groupProgress": "{{done}}/{{total}} منجزة",
@@ -3675,7 +3770,7 @@
       "looseSection": "مهام منفردة",
       "taskSearchPh": "ابحث أو اكتب مهمة…",
       "fromLibrary": "من المكتبة",
-      "confirmDeleteGroup": "حذف المجموعة وجميع مهامها؟",
+      "confirmDeleteGroup": "حذف هذه المجموعة ومهامها؟",
       "colors": {
         "none": "بدون لون",
         "urgent": "عاجل",
@@ -3689,7 +3784,6 @@
       "deleteGroupTitle": "حذف مجموعة المهام",
       "deleteGroupBody": "حذف «{{name}}» وجميع المهام داخلها؟",
       "deleteGroupHint": "قوالب المكتبة لا تُحذف.",
-      "confirmDeleteGroup": "حذف هذه المجموعة ومهامها؟",
       "admin": {
         "panelTitle": "إجراءات النظام",
         "btnDeleteGroups": "حذف كل المجموعات",

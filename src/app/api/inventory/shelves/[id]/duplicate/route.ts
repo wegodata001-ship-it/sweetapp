@@ -3,6 +3,7 @@ import { prismaAny } from "@/lib/prisma";
 import { requireDb } from "@/lib/api-route";
 import { getSessionFromCookie } from "@/lib/auth/get-session";
 import {
+  ensureProductOnShelf,
   productsOnShelfWhere,
   resolveShelf,
   summarizeShelf,
@@ -10,8 +11,7 @@ import {
 } from "@/lib/inventory/shelf-service";
 
 /**
- * POST — שכפול מדף: מדף חדש + העתקת שיוכי מוצרים (אותן כמויות נשארות על המוצר).
- * המוצרים מועברים למדף העותק (מודל שיוך יחיד למוצר).
+ * POST — שכפול מדף: מדף חדש + שיוך אותם מוצרים (N:M) בלי להסיר מהמקור.
  */
 export async function POST(
   req: NextRequest,
@@ -43,7 +43,14 @@ export async function POST(
         src.id != null
           ? await tx.inventoryLocation.findUnique({
               where: { id: src.id },
-              select: { description: true },
+              select: {
+                description: true,
+                code: true,
+                locationType: true,
+                color: true,
+                icon: true,
+                targetProductCount: true,
+              },
             })
           : null;
 
@@ -51,14 +58,22 @@ export async function POST(
         data: {
           name: newName,
           description: srcLoc?.description ?? null,
+          locationType: srcLoc?.locationType ?? undefined,
+          color: srcLoc?.color ?? undefined,
+          icon: srcLoc?.icon ?? undefined,
+          targetProductCount: srcLoc?.targetProductCount ?? undefined,
           isActive: true,
         },
       });
 
-      const moved = await tx.inventoryProduct.updateMany({
+      const products = await tx.inventoryProduct.findMany({
         where,
-        data: { locationId: newLoc.id, location: newName },
+        select: { id: true },
       });
+
+      for (const p of products) {
+        await ensureProductOnShelf(tx, p.id, newLoc.id);
+      }
 
       return {
         shelf: {
@@ -66,7 +81,7 @@ export async function POST(
           name: newLoc.name,
           description: newLoc.description,
         },
-        productCount: moved.count,
+        productCount: products.length,
       };
     });
 

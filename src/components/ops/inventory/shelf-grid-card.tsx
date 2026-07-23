@@ -7,6 +7,7 @@ import {
   ShelfCardActionsMenu,
   type ShelfCardMenuAction,
 } from "./shelf-card-actions-menu";
+import type { CountLifecycleStatus, LocationType } from "@/lib/inventory/location-types";
 
 export type ShelfVisualStatus = "perfect" | "shortage" | "errors";
 
@@ -18,6 +19,17 @@ export type ShelfGridModel = {
   matchPct: number;
   visualStatus: ShelfVisualStatus;
   locationId?: string | null;
+  code?: string | null;
+  description?: string | null;
+  locationType?: LocationType | string;
+  targetProductCount?: number | null;
+  color?: string | null;
+  isActive?: boolean;
+  createdAt?: string | null;
+  lastCountAt?: string | null;
+  lastCountedByName?: string | null;
+  countStatus?: CountLifecycleStatus;
+  countedProductCount?: number;
 };
 
 export function resolveShelfVisualStatus(s: {
@@ -67,6 +79,7 @@ type Props = {
   shelf: ShelfGridModel;
   t: (key: string, vars?: Record<string, string | number>) => string;
   onOpen: () => void;
+  onCardClick?: () => void;
   onMenuAction?: (action: ShelfCardMenuAction) => void;
   busy?: boolean;
   exiting?: boolean;
@@ -77,12 +90,15 @@ type Props = {
   elapsedLabel?: string;
   targetMinutes?: number;
   countProgressPct?: number;
+  locationTypeLabel?: string;
+  locale?: string;
 };
 
 function ShelfGridCardInner({
   shelf,
   t,
   onOpen,
+  onCardClick,
   onMenuAction,
   busy,
   exiting,
@@ -93,11 +109,26 @@ function ShelfGridCardInner({
   elapsedLabel = "00:00",
   targetMinutes = 20,
   countProgressPct,
+  locationTypeLabel,
+  locale = "he-IL",
 }: Props) {
   const ui = statusUi[shelf.visualStatus];
   const StatusIcon = ui.Icon;
   const ringPct = countProgressPct ?? shelf.matchPct;
   const accentClass = isCounting ? ui.accentActive : ui.accent;
+  const idleBg = shelf.color
+    ? `linear-gradient(135deg, ${shelf.color} 0%, #0f172a 100%)`
+    : CARD_IDLE_BG;
+
+  const countStatus = isCounting ? "IN_PROGRESS" : shelf.countStatus ?? "NOT_STARTED";
+  const fmtDate = (iso: string | null | undefined) => {
+    if (!iso) return "—";
+    return new Date(iso).toLocaleDateString(locale, {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+    });
+  };
 
   return (
     <article
@@ -107,9 +138,10 @@ function ShelfGridCardInner({
           : "border-white/[0.08] shadow-[0_4px_20px_rgba(15,23,42,0.25)] hover:shadow-[0_8px_28px_rgba(15,23,42,0.35)]"
       } ${exiting ? "pointer-events-none scale-95 opacity-0" : ""} ${
         entering ? "animate-[shelf-enter_0.35s_ease-out]" : ""
-      } ${busy ? "opacity-85" : ""}`}
-      style={{ background: isCounting ? CARD_ACTIVE_BG : CARD_IDLE_BG }}
+      } ${busy ? "opacity-85" : ""} ${onCardClick ? "cursor-pointer" : ""}`}
+      style={{ background: isCounting ? CARD_ACTIVE_BG : idleBg }}
       dir="rtl"
+      onClick={() => onCardClick?.()}
     >
       {isCounting ? (
         <div
@@ -129,6 +161,44 @@ function ShelfGridCardInner({
         </div>
       ) : null}
 
+      <div className="mb-3 flex flex-wrap items-center gap-1.5">
+        {countStatus === "IN_PROGRESS" ? (
+          <span className="rounded-full bg-blue-600 px-2.5 py-0.5 text-[10px] font-black text-white shadow-sm">
+            {t("badgeActiveCount")}
+          </span>
+        ) : countStatus === "COMPLETED" ? (
+          <span className="rounded-full bg-emerald-600 px-2.5 py-0.5 text-[10px] font-black text-white shadow-sm">
+            {t("badgeCompleted")}
+          </span>
+        ) : (
+          <span
+            className={`rounded-full px-2.5 py-0.5 text-[10px] font-black ${
+              isCounting ? "bg-slate-200 text-slate-700" : "bg-white/15 text-white/90"
+            }`}
+          >
+            {t("badgeNotStarted")}
+          </span>
+        )}
+        {locationTypeLabel ? (
+          <span
+            className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold ${
+              isCounting ? "bg-violet-100 text-violet-800" : "bg-white/10 text-white/80"
+            }`}
+          >
+            {locationTypeLabel}
+          </span>
+        ) : null}
+        {shelf.code ? (
+          <span
+            className={`rounded-full px-2 py-0.5 font-mono text-[10px] font-bold ${
+              isCounting ? "bg-slate-100 text-slate-600" : "bg-white/10 text-white/70"
+            }`}
+          >
+            {shelf.code}
+          </span>
+        ) : null}
+      </div>
+
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:gap-6">
         <div className="min-w-0 flex-1 text-end lg:order-3">
           <div className="flex items-start justify-between gap-2">
@@ -146,16 +216,21 @@ function ShelfGridCardInner({
                 }`}
               >
                 {t("targetMinutes", { minutes: targetMinutes })}
+                {shelf.targetProductCount != null
+                  ? ` · ${t("targetProducts", { count: shelf.targetProductCount })}`
+                  : ""}
               </p>
             </div>
             {onMenuAction ? (
-              <ShelfCardActionsMenu
-                onAction={onMenuAction}
-                busy={busy}
-                disabled={!canManage}
-                disabledTitle={noPermissionTitle}
-                variant={isCounting ? "light" : "dark"}
-              />
+              <div onClick={(e) => e.stopPropagation()}>
+                <ShelfCardActionsMenu
+                  onAction={onMenuAction}
+                  busy={busy}
+                  disabled={!canManage}
+                  disabledTitle={noPermissionTitle}
+                  variant={isCounting ? "light" : "dark"}
+                />
+              </div>
             ) : null}
           </div>
 
@@ -170,6 +245,13 @@ function ShelfGridCardInner({
             </li>
             <li className={isCounting ? "text-amber-600" : "text-amber-400"}>
               {t("metricSurplus", { count: shelf.surplusCount })}
+            </li>
+            <li>{t("createdAt", { date: fmtDate(shelf.createdAt) })}</li>
+            <li>{t("lastCountAt", { date: fmtDate(shelf.lastCountAt) })}</li>
+            <li>
+              {t("lastCountedBy", {
+                name: shelf.lastCountedByName?.trim() || t("unknownUser"),
+              })}
             </li>
           </ul>
 
@@ -189,7 +271,7 @@ function ShelfGridCardInner({
           />
         </div>
 
-        <div className="shrink-0 lg:order-1 lg:w-[10rem]">
+        <div className="shrink-0 lg:order-1 lg:w-[10rem]" onClick={(e) => e.stopPropagation()}>
           <button
             type="button"
             disabled={busy}

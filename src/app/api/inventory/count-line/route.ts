@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prismaAny } from "@/lib/prisma";
 import { requireDb } from "@/lib/api-route";
 import { getSessionFromCookie } from "@/lib/auth/get-session";
+import { resolveShelf } from "@/lib/inventory/shelf-service";
 
 /** POST — שמירת שורת ספירה בודדת (auto-save) */
 export async function POST(req: NextRequest) {
@@ -22,6 +23,8 @@ export async function POST(req: NextRequest) {
       actualQty?: number;
       countDate?: string | null;
       note?: string | null;
+      locationId?: string | null;
+      location?: string | null;
     };
 
     const pid = (body.inventoryProductId ?? body.productId)?.trim();
@@ -50,12 +53,34 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: "מוצר לא נמצא" }, { status: 404 });
     }
 
-    const previous = await prismaAny.inventoryCount.findFirst({
-      where: { inventoryProductId: pid },
-      orderBy: { countDate: "desc" },
-      select: { currentQuantity: true },
-    });
-    const previousQuantity = previous?.currentQuantity ?? 0;
+    const shelf = await resolveShelf(body.locationId?.trim() ?? null, body.location?.trim());
+    const locationId = shelf?.id ?? null;
+
+    const previousForLoc = locationId
+      ? (
+          await prismaAny.inventoryCount.findFirst({
+            where: { inventoryProductId: pid, locationId },
+            orderBy: { countDate: "desc" },
+            select: { currentQuantity: true },
+          })
+        )?.currentQuantity ??
+        (
+          await prismaAny.inventoryCount.findFirst({
+            where: { inventoryProductId: pid, locationId: null },
+            orderBy: { countDate: "desc" },
+            select: { currentQuantity: true },
+          })
+        )?.currentQuantity ??
+        0
+      : (
+          await prismaAny.inventoryCount.findFirst({
+            where: { inventoryProductId: pid },
+            orderBy: { countDate: "desc" },
+            select: { currentQuantity: true },
+          })
+        )?.currentQuantity ?? 0;
+
+    const previousQuantity = previousForLoc;
 
     if (previousQuantity === currentQuantity) {
       return NextResponse.json({
@@ -66,6 +91,7 @@ export async function POST(req: NextRequest) {
           previousQuantity,
           currentQuantity,
           difference: 0,
+          locationId,
         },
       });
     }
@@ -75,6 +101,7 @@ export async function POST(req: NextRequest) {
     const row = await prismaAny.inventoryCount.create({
       data: {
         inventoryProductId: pid,
+        locationId,
         countDate,
         previousQuantity,
         currentQuantity,
@@ -99,6 +126,7 @@ export async function POST(req: NextRequest) {
         previousQuantity,
         currentQuantity,
         difference,
+        locationId,
         countDate: row.countDate.toISOString(),
         createdAt: row.createdAt.toISOString(),
         countedBy: row.countedBy,

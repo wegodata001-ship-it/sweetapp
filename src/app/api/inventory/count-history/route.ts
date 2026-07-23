@@ -17,6 +17,7 @@ export async function GET(req: NextRequest) {
     const timeTo = searchParams.get("timeTo");
     const productId = searchParams.get("productId")?.trim() ?? "";
     const countedByUserId = searchParams.get("countedByUserId")?.trim() ?? "";
+    const location = searchParams.get("location")?.trim() ?? "";
     const onlyShortage = searchParams.get("onlyShortage") === "1";
     const onlySurplus = searchParams.get("onlySurplus") === "1";
 
@@ -37,6 +38,14 @@ export async function GET(req: NextRequest) {
     }
     if (countedByUserId) {
       where.countedByUserId = countedByUserId;
+    }
+    if (location) {
+      where.inventoryProduct = {
+        OR: [
+          { location: { equals: location, mode: "insensitive" } },
+          { inventoryLocation: { name: { equals: location, mode: "insensitive" } } },
+        ],
+      };
     }
     if (onlyShortage) {
       where.difference = { lt: 0 };

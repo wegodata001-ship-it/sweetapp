@@ -5,12 +5,13 @@ import { AlertTriangle, CheckCircle2, Loader2, Save, ScanLine, X } from "lucide-
 import type { InventoryCountProductRow } from "@/components/ops/inventory-count/types";
 import { ShelfCountLineRow } from "./shelf-count-line-row";
 
-const ROW_HEIGHT = 96;
+const ROW_HEIGHT = 108;
 const REFRESH_SHELVES_MS = 1200;
 
 type Props = {
   open: boolean;
   shelfName: string;
+  locationId?: string | null;
   countDate: string;
   onClose: () => void;
   onShelfStatsChange?: () => void;
@@ -25,6 +26,7 @@ function shortBarcode(id: string) {
 function ShelfCountModalInner({
   open,
   shelfName,
+  locationId,
   countDate,
   onClose,
   onShelfStatsChange,
@@ -47,14 +49,15 @@ function ShelfCountModalInner({
   const rowRefs = useRef<Map<string, HTMLDivElement>>(new Map());
 
   const loadProducts = useCallback(async () => {
-    if (!shelfName.trim()) return;
+    if (!shelfName.trim() && !locationId?.trim()) return;
     setLoading(true);
     try {
       const params = new URLSearchParams({
-        location: shelfName.trim(),
         page: "1",
         pageSize: "500",
       });
+      if (locationId?.trim()) params.set("locationId", locationId.trim());
+      if (shelfName.trim()) params.set("location", shelfName.trim());
       const res = await fetch(`/api/inventory/monthly-count?${params}`, {
         credentials: "same-origin",
       });
@@ -65,7 +68,7 @@ function ShelfCountModalInner({
     } finally {
       setLoading(false);
     }
-  }, [shelfName]);
+  }, [shelfName, locationId]);
 
   useEffect(() => {
     if (!open) return;
@@ -165,8 +168,9 @@ function ShelfCountModalInner({
     let near = 0;
     for (const product of products) {
       if (product.minimumQuantity <= 0) continue;
-      if (product.previousQuantity < product.minimumQuantity) below += 1;
-      else if (product.previousQuantity <= product.minimumQuantity * 1.2) near += 1;
+      const systemTotal = product.systemTotalQuantity ?? product.previousQuantity;
+      if (systemTotal < product.minimumQuantity) below += 1;
+      else if (systemTotal <= product.minimumQuantity * 1.2) near += 1;
     }
     return {
       total: products.length,
@@ -200,6 +204,8 @@ function ShelfCountModalInner({
           credentials: "same-origin",
           body: JSON.stringify({
             countDate,
+            location: shelfName.trim() || undefined,
+            locationId: locationId?.trim() || undefined,
             lines: lines.map((line) => ({
               inventoryProductId: line.id,
               currentQuantity: line.qty,
@@ -241,7 +247,7 @@ function ShelfCountModalInner({
         setSavingIds(new Set());
       }
     },
-    [actualById, countDate, onClose, scheduleShelfRefresh, t],
+    [actualById, countDate, locationId, onClose, scheduleShelfRefresh, shelfName, t],
   );
 
   const requestClose = useCallback(() => {
@@ -258,7 +264,7 @@ function ShelfCountModalInner({
   return (
     <div className="fixed inset-0 z-[85] flex items-end justify-center bg-slate-950/55 p-0 backdrop-blur-md sm:items-center sm:p-4">
       <div
-        className="flex max-h-[94vh] w-full max-w-3xl flex-col overflow-hidden rounded-t-[24px] border border-white/10 bg-white/95 shadow-[0_24px_80px_rgba(15,23,42,0.35)] backdrop-blur-xl sm:rounded-[24px]"
+        className="flex max-h-[96vh] w-[min(100%,96vw)] max-w-[96vw] flex-col overflow-hidden rounded-t-[24px] border border-white/10 bg-white/95 shadow-[0_24px_80px_rgba(15,23,42,0.35)] backdrop-blur-xl sm:max-h-[94vh] sm:w-[min(96vw,1600px)] sm:rounded-[24px]"
         role="dialog"
         aria-modal="true"
         dir="rtl"
@@ -326,7 +332,7 @@ function ShelfCountModalInner({
 
         <div
           ref={listRef}
-          className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-3 sm:p-4"
+          className="min-h-0 flex-1 overflow-x-auto overflow-y-auto overscroll-contain p-3 sm:p-4"
           onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}
         >
           {loading ? (
@@ -336,7 +342,7 @@ function ShelfCountModalInner({
           ) : sortedProducts.length === 0 ? (
             <p className="py-12 text-center text-sm font-semibold text-slate-500">{t("empty")}</p>
           ) : (
-            <div style={{ minHeight: useVirtual ? totalH : undefined }}>
+            <div className="min-w-max" style={{ minHeight: useVirtual ? totalH : undefined }}>
               {useVirtual ? <div style={{ height: padTop }} aria-hidden /> : null}
               <div className="space-y-2">
                 {visible.map((row) => (
@@ -353,7 +359,22 @@ function ShelfCountModalInner({
                       barcode={shortBarcode(row.id)}
                       unit={row.unit}
                       systemQty={row.previousQuantity}
+                      systemTotalQuantity={row.systemTotalQuantity ?? row.previousQuantity}
+                      systemShortage={
+                        row.systemShortage ??
+                        Math.max(
+                          0,
+                          (row.minimumQuantity || 0) -
+                            (row.systemTotalQuantity ?? row.previousQuantity),
+                        )
+                      }
                       minimumQuantity={row.minimumQuantity}
+                      worker1Name={row.worker1Name ?? null}
+                      worker1Location={row.worker1Location ?? null}
+                      worker2Name={row.worker2Name ?? null}
+                      worker2Location={row.worker2Location ?? null}
+                      worker3Name={row.worker3Name ?? null}
+                      worker3Location={row.worker3Location ?? null}
                       actualRaw={actualById[row.id] ?? ""}
                       saving={savingIds.has(row.id)}
                       onActualChange={(v) => setActual(row.id, v)}

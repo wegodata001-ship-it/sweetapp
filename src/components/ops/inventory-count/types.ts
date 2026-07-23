@@ -5,16 +5,39 @@ export type ShelfSummary = {
   surplusCount: number;
   okCount: number;
   matchPct: number;
+  locationId?: string | null;
+  code?: string | null;
+  description?: string | null;
+  locationType?: string;
+  targetProductCount?: number | null;
+  color?: string | null;
+  isActive?: boolean;
+  createdAt?: string | null;
+  countedProductCount?: number;
+  lastCountAt?: string | null;
+  lastCountedByName?: string | null;
+  countStatus?: "NOT_STARTED" | "IN_PROGRESS" | "COMPLETED";
 };
 
 export type InventoryCountProductRow = {
   id: string;
   name: string;
   location: string;
+  locationId?: string | null;
   unit: string | null;
   previousQuantity: number;
+  /** סה״כ קיים בכל המערכת (כל המיקומים) */
+  systemTotalQuantity?: number;
+  /** כמה חסר במערכת מול המינימום */
+  systemShortage?: number;
   minimumQuantity: number;
   lastCountedAt: string | null;
+  worker1Name?: string | null;
+  worker1Location?: string | null;
+  worker2Name?: string | null;
+  worker2Location?: string | null;
+  worker3Name?: string | null;
+  worker3Location?: string | null;
 };
 
 export type MonthlyCountRow = InventoryCountProductRow & {

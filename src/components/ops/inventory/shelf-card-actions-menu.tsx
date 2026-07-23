@@ -1,6 +1,15 @@
 "use client";
 
-import { Copy, MoreVertical, Plus, Trash2 } from "lucide-react";
+import {
+  Copy,
+  Download,
+  History,
+  MoreVertical,
+  Pencil,
+  Plus,
+  Trash2,
+  ArrowRightLeft,
+} from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useI18n } from "@/components/i18n-provider";
@@ -10,7 +19,14 @@ import {
   type DropdownMenuPosition,
 } from "@/lib/ui/floating-menu-position";
 
-export type ShelfCardMenuAction = "addProducts" | "duplicate" | "delete";
+export type ShelfCardMenuAction =
+  | "edit"
+  | "addProducts"
+  | "duplicate"
+  | "transfer"
+  | "export"
+  | "history"
+  | "delete";
 
 type Props = {
   onAction: (action: ShelfCardMenuAction) => void;
@@ -20,7 +36,7 @@ type Props = {
   variant?: "dark" | "light";
 };
 
-const MENU_WIDTH = 192;
+const MENU_WIDTH = 220;
 const MENU_ITEM_HEIGHT = 40;
 const MENU_PADDING = 8;
 
@@ -58,7 +74,52 @@ export function ShelfCardActionsMenu({
     };
   }, [open]);
 
-  const estimatedMenuHeight = MENU_ITEM_HEIGHT * 3 + MENU_PADDING;
+  const items: {
+    id: ShelfCardMenuAction;
+    icon: typeof Plus;
+    label: string;
+    className: string;
+  }[] = [
+    { id: "edit", icon: Pencil, label: tMenu("edit"), className: "text-slate-800 hover:bg-slate-50" },
+    {
+      id: "addProducts",
+      icon: Plus,
+      label: tMenu("addProducts"),
+      className: "text-[#2563eb] hover:bg-blue-50",
+    },
+    {
+      id: "duplicate",
+      icon: Copy,
+      label: tMenu("duplicate"),
+      className: "text-[#6c4cff] hover:bg-violet-50",
+    },
+    {
+      id: "transfer",
+      icon: ArrowRightLeft,
+      label: tMenu("transfer"),
+      className: "text-cyan-700 hover:bg-cyan-50",
+    },
+    {
+      id: "export",
+      icon: Download,
+      label: tMenu("export"),
+      className: "text-emerald-700 hover:bg-emerald-50",
+    },
+    {
+      id: "history",
+      icon: History,
+      label: tMenu("history"),
+      className: "text-amber-800 hover:bg-amber-50",
+    },
+    {
+      id: "delete",
+      icon: Trash2,
+      label: tMenu("delete"),
+      className: "text-rose-700 hover:bg-rose-50",
+    },
+  ];
+
+  const estimatedMenuHeight = MENU_ITEM_HEIGHT * items.length + MENU_PADDING;
 
   const updatePosition = useCallback(() => {
     const el = btnRef.current;
@@ -105,32 +166,6 @@ export function ShelfCardActionsMenu({
     if (disabled) return;
     onAction(action);
   };
-
-  const items: {
-    id: ShelfCardMenuAction;
-    icon: typeof Plus;
-    label: string;
-    className: string;
-  }[] = [
-    {
-      id: "addProducts",
-      icon: Plus,
-      label: tMenu("addProducts"),
-      className: "text-[#2563eb] hover:bg-blue-50",
-    },
-    {
-      id: "duplicate",
-      icon: Copy,
-      label: tMenu("duplicate"),
-      className: "text-[#6c4cff] hover:bg-violet-50",
-    },
-    {
-      id: "delete",
-      icon: Trash2,
-      label: tMenu("delete"),
-      className: "text-rose-700 hover:bg-rose-50",
-    },
-  ];
 
   const transformOrigin =
     dir === "rtl"

@@ -2747,15 +2747,37 @@
         "kpiMovements": "Today's movements",
         "gridTitle": "Warehouse storage locations",
         "searchShelf": "Search storage location…",
-        "addShelf": "New storage location",
+        "addShelf": {
+          "title": "New storage location",
+          "name": "Storage location name",
+          "description": "Description",
+          "save": "Save",
+          "nameRequired": "Name required",
+          "saveFailed": "Error",
+          "editTitle": "Edit storage location",
+          "sectionDetails": "Location details",
+          "code": "Location code",
+          "codeOptional": "Optional",
+          "locationType": "Location type",
+          "targetCount": "Target product count",
+          "status": "Status",
+          "statusActive": "Active",
+          "statusInactive": "Inactive",
+          "color": "Card color",
+          "colorDefault": "Default"
+        },
         "noShelves": "No storage locations — add your first storage location",
         "card": {
           "noPermission": "No permission for this action",
           "menu": {
             "label": "Storage location actions",
             "addProducts": "Add products",
-            "duplicate": "Duplicate storage location",
-            "delete": "Delete storage location"
+            "duplicate": "Duplicate location",
+            "delete": "Delete location",
+            "edit": "Edit location",
+            "transfer": "Transfer products",
+            "export": "Export count",
+            "history": "Count history"
           },
           "statusPerfect": "Full match",
           "statusShortage": "Has shortages",
@@ -2777,7 +2799,15 @@
           "finishCount": "Finish count",
           "timerLabel": "Time",
           "targetMinutes": "Target: {{minutes}} min",
-          "activeBadge": "Active"
+          "activeBadge": "Active",
+          "badgeActiveCount": "Active count",
+          "badgeCompleted": "Completed",
+          "badgeNotStarted": "Not started",
+          "targetProducts": "Target products: {{count}}",
+          "createdAt": "Created: {{date}}",
+          "lastCountAt": "Last count: {{date}}",
+          "lastCountedBy": "Counted by: {{name}}",
+          "unknownUser": "—"
         },
         "modal": {
           "kicker": "Storage location count",
@@ -2786,6 +2816,18 @@
           "empty": "No products in this storage location",
           "loading": "Loading…",
           "inSystem": "System",
+          "systemTotal": "System total",
+          "locationExpected": "At this location",
+          "worker1": "Worker 1",
+          "worker1Loc": "Worker 1 location",
+          "worker2": "Worker 2",
+          "worker2Loc": "Worker 2 location",
+          "worker3": "Worker 3",
+          "worker3Loc": "Worker 3 location",
+          "systemShortage": "System shortage",
+          "shortageMin": "Min",
+          "shortageHave": "Have",
+          "shortageMissing": "Short",
           "minimum": "Minimum",
           "actual": "Counted",
           "diff": "Diff",
@@ -2818,6 +2860,12 @@
             "name": "Product name",
             "unit": "Unit",
             "minimum": "Minimum",
+            "worker1": "Worker 1",
+            "worker1Loc": "Worker 1 location",
+            "worker2": "Worker 2",
+            "worker2Loc": "Worker 2 location",
+            "worker3": "Worker 3",
+            "worker3Loc": "Worker 3 location",
             "save": "Save",
             "nameRequired": "Name required",
             "saveFailed": "Error"
@@ -2827,13 +2875,18 @@
           "deleted": "Storage location deleted",
           "duplicated": "Storage location duplicated",
           "deleteFailed": "Delete failed",
-          "duplicateFailed": "Duplicate failed"
+          "duplicateFailed": "Duplicate failed",
+          "deactivated": "Location deactivated (has products/counts — not deleted)",
+          "created": "Location created",
+          "updated": "Location updated",
+          "exported": "Count exported to CSV",
+          "exportFailed": "Export failed"
         },
         "deleteShelf": {
           "title": "Delete storage location",
           "body": "Delete storage location «{{name}}»?",
-          "hint": "Product links to this storage location will be removed — products are not deleted.",
-          "confirm": "Delete"
+          "hint": "If products, counts or history exist — the location is deactivated only.",
+          "confirm": "Delete / deactivate"
         },
         "addProductsModal": {
           "title": "Add products to storage location",
@@ -2868,13 +2921,50 @@
           "existsYes": "Yes, increase",
           "existsNo": "No"
         },
-        "addShelf": {
-          "title": "New storage location",
-          "name": "Storage location name",
-          "description": "Description",
-          "save": "Save",
-          "nameRequired": "Name required",
-          "saveFailed": "Error"
+        "kpiSurplus": "Surplus items",
+        "kpiTotalLocations": "Total storage locations",
+        "kpiActiveLocations": "Active locations",
+        "kpiActiveCounts": "Active counts",
+        "kpiCompletedCounts": "Completed counts",
+        "kpiCountedProducts": "Products counted",
+        "filterTypeAll": "All types",
+        "filterStatusAll": "All statuses",
+        "filterStatusActive": "Active",
+        "filterStatusInactive": "Inactive",
+        "filterCountAll": "All count statuses",
+        "filterMinProducts": "Min products",
+        "filterLastCountFrom": "Last count from",
+        "sortName": "Sort: name",
+        "sortCreated": "Sort: created",
+        "sortProducts": "Sort: products",
+        "sortProgress": "Sort: progress %",
+        "sortLastCount": "Sort: last count",
+        "locationTypes": {
+          "WAREHOUSE": "Warehouse",
+          "SHOWROOM": "Showroom",
+          "STORE": "Store",
+          "COLD": "Cold storage",
+          "FREEZER": "Freezer",
+          "OTHER": "Other"
+        },
+        "countStatus": {
+          "NOT_STARTED": "Not started",
+          "IN_PROGRESS": "In progress",
+          "COMPLETED": "Completed"
+        },
+        "transfer": {
+          "title": "Transfer products",
+          "from": "From: {{name}}",
+          "target": "Target location",
+          "targetPlaceholder": "Choose location…",
+          "targetRequired": "Choose a target",
+          "hint": "All products move to the target. Count history is kept.",
+          "confirm": "Transfer products",
+          "failed": "Transfer failed"
+        },
+        "history": {
+          "title": "Count history",
+          "empty": "No count history for this location"
         }
       },
       "count": {
@@ -3666,8 +3756,13 @@
       "statTasks": "{{n}} tasks",
       "statDone": "{{n}} done",
       "statMinutes": "{{n}} min total",
-      "fields": { "materials": "Materials" },
-      "status": { "pending": "Pending", "locked": "Locked" },
+      "fields": {
+        "materials": "Materials"
+      },
+      "status": {
+        "pending": "Pending",
+        "locked": "Locked"
+      },
       "lockHint": "Complete previous tasks first",
       "groupMeta": "{{tasks}} tasks · {{minutes}} min · {{pct}}%",
       "groupProgress": "{{done}}/{{total}} done",
@@ -3675,7 +3770,7 @@
       "looseSection": "Standalone tasks",
       "taskSearchPh": "Search or type a task…",
       "fromLibrary": "from library",
-      "confirmDeleteGroup": "Delete this group and all its tasks?",
+      "confirmDeleteGroup": "Delete this group and its tasks?",
       "colors": {
         "none": "No color",
         "urgent": "Urgent",
@@ -3689,7 +3784,6 @@
       "deleteGroupTitle": "Delete task group",
       "deleteGroupBody": "Delete «{{name}}» and all tasks inside?",
       "deleteGroupHint": "Task library templates are not removed.",
-      "confirmDeleteGroup": "Delete this group and its tasks?",
       "admin": {
         "panelTitle": "System actions",
         "btnDeleteGroups": "Delete all groups",

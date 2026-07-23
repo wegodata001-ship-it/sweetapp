@@ -3,12 +3,12 @@ import { prismaAny } from "@/lib/prisma";
 import { requireDb } from "@/lib/api-route";
 import { getSessionFromCookie } from "@/lib/auth/get-session";
 import {
-  productsOnShelfWhere,
+  ensureProductOnShelf,
   resolveShelf,
   summarizeShelf,
 } from "@/lib/inventory/shelf-service";
 
-/** POST — הוספת מוצר למדף (שיוך + כמות אופציונלית) */
+/** POST — הוספת מוצר למדף (שיוך N:M + כמות אופציונלית) — לא מסיר ממיקומים אחרים */
 export async function POST(
   req: NextRequest,
   ctx: { params: Promise<{ id: string }> },
@@ -57,35 +57,16 @@ export async function POST(
         name: true,
         locationId: true,
         location: true,
+        placements: { select: { locationId: true } },
         counts: {
           orderBy: { countDate: "desc" },
-          take: 1,
-          select: { currentQuantity: true },
+          take: 20,
+          select: { currentQuantity: true, locationId: true },
         },
       },
     });
     if (!product) {
       return NextResponse.json({ ok: false, error: "מוצר לא נמצא" }, { status: 404 });
-    }
-
-    const onShelf =
-      (shelf.id && product.locationId === shelf.id) ||
-      product.location.trim().toLowerCase() === shelf.name.trim().toLowerCase();
-
-    if (onShelf && !body.increaseIfExists) {
-      return NextResponse.json({
-        ok: false,
-        code: "ALREADY_ON_SHELF",
-        error: "המוצר כבר קיים במדף",
-        data: { productId, currentQuantity: product.counts[0]?.currentQuantity ?? 0 },
-      });
-    }
-
-    const countDate = body.countDate?.trim()
-      ? new Date(body.countDate)
-      : new Date();
-    if (Number.isNaN(countDate.getTime())) {
-      return NextResponse.json({ ok: false, error: "תאריך לא תקין" }, { status: 400 });
     }
 
     let resolvedShelf = shelf;
@@ -98,7 +79,22 @@ export async function POST(
         locationId = created.id;
         resolvedShelf = { id: created.id, name: resolvedShelf.name };
       }
+      if (!locationId) {
+        throw new Error("לא ניתן ליצור מיקום אחסון");
+      }
 
+      const alreadyOn =
+        product.placements.some((p: { locationId: string }) => p.locationId === locationId) ||
+        product.locationId === locationId ||
+        product.location.trim().toLowerCase() === resolvedShelf.name.trim().toLowerCase();
+
+      if (alreadyOn && !body.increaseIfExists && qty === null) {
+        return { alreadyOn: true as const, locationId, countRow: null };
+      }
+
+      await ensureProductOnShelf(tx, productId, locationId);
+
+      // שומרים גם locationId ראשי לתאימות לאחור — בלי להסיר ממיקומים אחרים
       await tx.inventoryProduct.update({
         where: { id: productId },
         data: {
@@ -107,18 +103,32 @@ export async function POST(
         },
       });
 
+      const countDate = body.countDate?.trim() ? new Date(body.countDate) : new Date();
+      if (Number.isNaN(countDate.getTime())) {
+        throw new Error("תאריך לא תקין");
+      }
+
       let countRow = null;
       if (qty !== null) {
-        const previous = product.counts[0]?.currentQuantity ?? 0;
-        const targetQty = onShelf && body.increaseIfExists ? previous + qty : qty;
-        if (targetQty !== previous) {
+        const prevForLoc =
+          product.counts.find((c: { locationId: string | null }) => c.locationId === locationId)
+            ?.currentQuantity ??
+          (alreadyOn
+            ? product.counts.find((c: { locationId: string | null }) => !c.locationId)
+                ?.currentQuantity
+            : undefined) ??
+          0;
+        const targetQty =
+          alreadyOn && body.increaseIfExists ? prevForLoc + qty : qty;
+        if (targetQty !== prevForLoc) {
           countRow = await tx.inventoryCount.create({
             data: {
               inventoryProductId: productId,
+              locationId,
               countDate,
-              previousQuantity: previous,
+              previousQuantity: prevForLoc,
               currentQuantity: targetQty,
-              difference: targetQty - previous,
+              difference: targetQty - prevForLoc,
               note: body.slotNote?.trim() || null,
               countedByUserId: session.sub,
             },
@@ -127,8 +137,23 @@ export async function POST(
         }
       }
 
-      return { locationId, countRow };
+      return { alreadyOn: false as const, locationId, countRow };
     });
+
+    if (result.alreadyOn) {
+      const prevQty =
+        product.counts.find(
+          (c: { locationId: string | null }) => c.locationId === result.locationId,
+        )?.currentQuantity ??
+        product.counts[0]?.currentQuantity ??
+        0;
+      return NextResponse.json({
+        ok: false,
+        code: "ALREADY_ON_SHELF",
+        error: "המוצר כבר קיים במדף",
+        data: { productId, currentQuantity: prevQty },
+      });
+    }
 
     const summary = await summarizeShelf(resolvedShelf);
 
@@ -137,7 +162,8 @@ export async function POST(
       data: {
         productId,
         shelf: summary,
-        ...result,
+        locationId: result.locationId,
+        countRow: result.countRow,
       },
     });
   } catch (e) {

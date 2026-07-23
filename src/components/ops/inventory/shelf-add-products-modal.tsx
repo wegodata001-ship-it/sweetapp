@@ -173,6 +173,8 @@ export function ShelfAddProductsModal({
             inventoryProductId: pid,
             currentQuantity: qty,
             countDate,
+            locationId: locationId ?? undefined,
+            location: shelfName,
             note: slotNote.trim() || null,
           }),
         });
