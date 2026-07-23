@@ -24,6 +24,8 @@ export type LocationWorkerDto = {
   name: string;
   area: string;
   sortOrder: number;
+  employeeId?: string | null;
+  isActive?: boolean;
 };
 
 export type InventoryCountProductRow = {

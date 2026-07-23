@@ -14,11 +14,11 @@ import type {
   InventoryCountProductRow,
   LocationWorkerDto,
 } from "@/components/ops/inventory-count/types";
-import { ShelfCountLineRow } from "./shelf-count-line-row";
+import { ShelfCountLineRow, ShelfCountTableHeader } from "./shelf-count-line-row";
 import { LocationWorkersModal } from "./location-workers-modal";
 import { ProductEditModal, type ProductEditValues } from "./product-edit-modal";
 
-const ROW_HEIGHT = 280;
+const ROW_HEIGHT = 104;
 const REFRESH_SHELVES_MS = 1200;
 
 type Props = {
@@ -352,7 +352,7 @@ function ShelfCountModalInner({
 
         <div
           ref={listRef}
-          className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-3 sm:p-4"
+          className="min-h-0 flex-1 overflow-x-auto overflow-y-auto overscroll-contain p-3 sm:p-4"
           onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}
         >
           {loading ? (
@@ -362,9 +362,12 @@ function ShelfCountModalInner({
           ) : sortedProducts.length === 0 ? (
             <p className="py-12 text-center text-sm font-semibold text-slate-500">{t("empty")}</p>
           ) : (
-            <div style={{ minHeight: useVirtual ? totalH : undefined }}>
+            <div className="min-w-max" style={{ minHeight: useVirtual ? totalH : undefined }}>
+              <div className="sticky top-0 z-[1] mb-2 bg-white/95 pb-1 backdrop-blur-sm">
+                <ShelfCountTableHeader workers={workers} t={t} />
+              </div>
               {useVirtual ? <div style={{ height: padTop }} aria-hidden /> : null}
-              <div className="space-y-3">
+              <div className="space-y-2">
                 {visible.map((row) => (
                   <div
                     key={row.id}
@@ -393,6 +396,7 @@ function ShelfCountModalInner({
                       workers={workers}
                       actualRaw={actualById[row.id] ?? ""}
                       saving={savingIds.has(row.id)}
+                      showColumnLabels={false}
                       onActualChange={(v) => setActual(row.id, v)}
                       onBump={(d) => bump(row.id, row.previousQuantity, d)}
                       onEditProduct={() =>

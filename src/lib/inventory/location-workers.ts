@@ -12,6 +12,8 @@ export type LocationWorkerRow = {
   name: string;
   area: string;
   sortOrder: number;
+  employeeId?: string | null;
+  isActive?: boolean;
 };
 
 export function normalizeWorkerInputs(
@@ -34,6 +36,8 @@ export const WORKER_SELECT = {
   name: true,
   area: true,
   sortOrder: true,
+  employeeId: true,
+  isActive: true,
 } as const;
 
 /** Replace all workers for a location (delete + create). */
@@ -51,10 +55,11 @@ export async function replaceLocationWorkers(
       name: w.name,
       area: w.area,
       sortOrder: w.sortOrder,
+      isActive: true,
     })),
   });
   const rows = await tx.inventoryLocationWorker.findMany({
-    where: { locationId },
+    where: { locationId, isActive: true },
     orderBy: { sortOrder: "asc" },
     select: WORKER_SELECT,
   });
@@ -63,7 +68,7 @@ export async function replaceLocationWorkers(
 
 export async function listLocationWorkers(locationId: string): Promise<LocationWorkerRow[]> {
   const rows = await prismaAny.inventoryLocationWorker.findMany({
-    where: { locationId },
+    where: { locationId, isActive: true },
     orderBy: { sortOrder: "asc" },
     select: WORKER_SELECT,
   });

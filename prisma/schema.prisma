@@ -489,16 +489,22 @@ model InventoryLocation {
 model InventoryLocationWorker {
   id         String            @id @default(cuid())
   locationId String
-  /// שם העובד — מוצג ככותרת בספירה
+  /// קישור אופציונלי לעובד במערכת (Nullable)
+  employeeId String?
+  /// שם לתצוגה בכותרת הספירה (displayName)
   name       String
-  /// אזור אחריות — מוצג ככותרת משנה בספירה
+  /// אזור אחריות (workArea)
   area       String            @default("")
+  /// סדר הצגה (displayOrder)
   sortOrder  Int               @default(0)
+  isActive   Boolean           @default(true)
   createdAt  DateTime          @default(now())
   location   InventoryLocation @relation(fields: [locationId], references: [id], onDelete: Cascade)
 
   @@index([locationId, sortOrder])
   @@index([locationId])
+  @@index([isActive])
+  @@index([employeeId])
 }
 
 /// חומרי גלם ומלאי פנימי לספירה — לא מוצרי מכירה
