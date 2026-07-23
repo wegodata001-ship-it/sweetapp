@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle,
+  BarChart3,
   CheckCircle2,
   ClipboardList,
   Layers,
@@ -480,6 +481,13 @@ export function InventoryWarehouseDashboard() {
           <p className="mt-1 text-sm font-semibold text-slate-500">{tW("pageHint")}</p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <Link
+            href="/ops/inventory/analytics"
+            className="inline-flex h-10 items-center gap-2 rounded-2xl border border-[#e7ecf5] bg-white px-4 text-sm font-black text-slate-800 shadow-sm transition hover:bg-slate-50"
+          >
+            <BarChart3 className="h-4 w-4 text-[#6c4cff]" />
+            {t("ops.inventory.analyticsDashboard")}
+          </Link>
           <button
             type="button"
             onClick={() => {
