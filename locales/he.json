@@ -2851,6 +2851,8 @@
           "addWorker": "הוסף עובד",
           "workerName": "שם העובד",
           "workerArea": "אזור אחריות",
+          "workerQty": "כמות שנספרה",
+          "countedTotal": "סה״כ נספר",
           "workerOrder": "סדר",
           "areaOf": "מחסן",
           "editProduct": "עריכת שם מוצר",

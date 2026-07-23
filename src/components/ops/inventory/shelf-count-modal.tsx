@@ -14,12 +14,17 @@ import type {
   InventoryCountProductRow,
   LocationWorkerDto,
 } from "@/components/ops/inventory-count/types";
-import { ShelfCountLineRow, ShelfCountTableHeader } from "./shelf-count-line-row";
+import {
+  ShelfCountLineRow,
+  ShelfCountTableHeader,
+  sumWorkerQuantities,
+  type WorkerQtyMap,
+} from "./shelf-count-line-row";
 import { LocationWorkersModal } from "./location-workers-modal";
 import { ProductEditModal, type ProductEditValues } from "./product-edit-modal";
 
 const TABLE_ROW_HEIGHT = 104;
-const CARD_ROW_HEIGHT = 320;
+const CARD_ROW_HEIGHT = 380;
 const REFRESH_SHELVES_MS = 1200;
 const MOBILE_MQ = "(max-width: 767px)";
 
@@ -58,7 +63,12 @@ function ShelfCountModalInner({
   const [products, setProducts] = useState<InventoryCountProductRow[]>([]);
   const [workers, setWorkers] = useState<LocationWorkerDto[]>([]);
   const [loading, setLoading] = useState(false);
+  /** תאימות לאחור — כשאין עובדים במיקום */
   const [actualById, setActualById] = useState<Record<string, string>>({});
+  /** productId → workerId → qty */
+  const [workerQtyByProduct, setWorkerQtyByProduct] = useState<
+    Record<string, WorkerQtyMap>
+  >({});
   const [savingIds, setSavingIds] = useState<Set<string>>(new Set());
   const [savingAll, setSavingAll] = useState(false);
   const [confirmCloseOpen, setConfirmCloseOpen] = useState(false);
@@ -107,6 +117,7 @@ function ShelfCountModalInner({
   useEffect(() => {
     if (!open) return;
     setActualById({});
+    setWorkerQtyByProduct({});
     setSavingIds(new Set());
     setConfirmCloseOpen(false);
     setWorkersOpen(false);
@@ -142,16 +153,40 @@ function ShelfCountModalInner({
     setActualById((prev) => ({ ...prev, [productId]: value }));
   }, []);
 
-  const bump = useCallback((productId: string, systemQty: number, delta: number) => {
+  const setWorkerQty = useCallback((productId: string, workerId: string, value: string) => {
     setNotice(null);
     setError(null);
-    setActualById((prev) => {
-      const raw = prev[productId] ?? "";
-      const base = raw === "" ? systemQty : Number(raw);
-      const next = Math.max(0, (Number.isNaN(base) ? systemQty : base) + delta);
-      return { ...prev, [productId]: String(next) };
-    });
+    setWorkerQtyByProduct((prev) => ({
+      ...prev,
+      [productId]: { ...(prev[productId] ?? {}), [workerId]: value },
+    }));
   }, []);
+
+  const bump = useCallback(
+    (productId: string, systemQty: number, delta: number) => {
+      setNotice(null);
+      setError(null);
+      if (workers.length > 0) {
+        const firstWorkerId = workers[0]?.id;
+        if (!firstWorkerId) return;
+        setWorkerQtyByProduct((prev) => {
+          const map = prev[productId] ?? {};
+          const raw = map[firstWorkerId] ?? "";
+          const base = raw === "" ? 0 : Number(raw);
+          const next = Math.max(0, (Number.isNaN(base) ? 0 : base) + delta);
+          return { ...prev, [productId]: { ...map, [firstWorkerId]: String(next) } };
+        });
+        return;
+      }
+      setActualById((prev) => {
+        const raw = prev[productId] ?? "";
+        const base = raw === "" ? systemQty : Number(raw);
+        const next = Math.max(0, (Number.isNaN(base) ? systemQty : base) + delta);
+        return { ...prev, [productId]: String(next) };
+      });
+    },
+    [workers],
+  );
 
   const sortedProducts = useMemo(() => {
     const q = scanQ.trim().toLowerCase();
@@ -186,12 +221,36 @@ function ShelfCountModalInner({
   const visible = sortedProducts.slice(startIdx, endIdx);
   const padTop = startIdx * rowHeight;
   const padBottom = Math.max(0, (sortedProducts.length - endIdx) * rowHeight);
-  const dirtyEntries = Object.entries(actualById).filter(([, raw]) => raw !== "");
-  const hasDirtyChanges = dirtyEntries.length > 0;
-  const hasInvalidChanges = dirtyEntries.some(([, raw]) => {
-    const n = Number(raw);
-    return !Number.isFinite(n) || n < 0;
-  });
+  const hasWorkers = workers.length > 0;
+  const dirtyProductIds = useMemo(() => {
+    const ids = new Set<string>();
+    if (hasWorkers) {
+      for (const [productId, map] of Object.entries(workerQtyByProduct)) {
+        if (Object.values(map).some((raw) => raw !== "")) ids.add(productId);
+      }
+    } else {
+      for (const [productId, raw] of Object.entries(actualById)) {
+        if (raw !== "") ids.add(productId);
+      }
+    }
+    return ids;
+  }, [actualById, hasWorkers, workerQtyByProduct]);
+  const hasDirtyChanges = dirtyProductIds.size > 0;
+  const hasInvalidChanges = useMemo(() => {
+    if (hasWorkers) {
+      for (const productId of dirtyProductIds) {
+        const sum = sumWorkerQuantities(workers, workerQtyByProduct[productId] ?? {});
+        if (sum !== null && Number.isNaN(sum)) return true;
+      }
+      return false;
+    }
+    return Object.entries(actualById)
+      .filter(([, raw]) => raw !== "")
+      .some(([, raw]) => {
+        const n = Number(raw);
+        return !Number.isFinite(n) || n < 0;
+      });
+  }, [actualById, dirtyProductIds, hasWorkers, workerQtyByProduct, workers]);
   const minimumSummary = useMemo(() => {
     let below = 0;
     for (const product of products) {
@@ -208,11 +267,39 @@ function ShelfCountModalInner({
 
   const saveCount = useCallback(
     async (opts?: { closeAfterSave?: boolean }) => {
-      const lines = Object.entries(actualById)
-        .map(([id, raw]) => ({ id, qty: raw === "" ? null : Number(raw) }))
-        .filter((line): line is { id: string; qty: number } => {
-          return line.qty !== null && Number.isFinite(line.qty) && line.qty >= 0;
-        });
+      type SaveLine = {
+        inventoryProductId: string;
+        currentQuantity: number;
+        workers?: { inventoryLocationWorkerId: string; countedQuantity: number }[];
+      };
+      const lines: SaveLine[] = [];
+
+      if (hasWorkers) {
+        for (const productId of dirtyProductIds) {
+          const map = workerQtyByProduct[productId] ?? {};
+          const sum = sumWorkerQuantities(workers, map);
+          if (sum === null || Number.isNaN(sum) || sum < 0) continue;
+          lines.push({
+            inventoryProductId: productId,
+            currentQuantity: sum,
+            workers: workers.map((w) => {
+              const raw = map[w.id] ?? "";
+              const qty = raw === "" ? 0 : Number(raw);
+              return {
+                inventoryLocationWorkerId: w.id,
+                countedQuantity: Number.isFinite(qty) && qty >= 0 ? qty : 0,
+              };
+            }),
+          });
+        }
+      } else {
+        for (const [id, raw] of Object.entries(actualById)) {
+          if (raw === "") continue;
+          const qty = Number(raw);
+          if (!Number.isFinite(qty) || qty < 0) continue;
+          lines.push({ inventoryProductId: id, currentQuantity: qty });
+        }
+      }
 
       if (lines.length === 0) {
         setError(t("nothingToSave"));
@@ -222,7 +309,7 @@ function ShelfCountModalInner({
       setSavingAll(true);
       setError(null);
       setNotice(null);
-      setSavingIds(new Set(lines.map((line) => line.id)));
+      setSavingIds(new Set(lines.map((line) => line.inventoryProductId)));
       try {
         const res = await fetch("/api/inventory/monthly-count", {
           method: "POST",
@@ -232,10 +319,7 @@ function ShelfCountModalInner({
             countDate,
             location: shelfName.trim() || undefined,
             locationId: locationId?.trim() || undefined,
-            lines: lines.map((line) => ({
-              inventoryProductId: line.id,
-              currentQuantity: line.qty,
-            })),
+            lines,
           }),
         });
         const j = (await res.json()) as {
@@ -260,6 +344,7 @@ function ShelfCountModalInner({
           }),
         );
         setActualById({});
+        setWorkerQtyByProduct({});
         setConfirmCloseOpen(false);
         setNotice(t("savedSuccess"));
         scheduleShelfRefresh();
@@ -273,7 +358,19 @@ function ShelfCountModalInner({
         setSavingIds(new Set());
       }
     },
-    [actualById, countDate, locationId, onClose, scheduleShelfRefresh, shelfName, t],
+    [
+      actualById,
+      countDate,
+      dirtyProductIds,
+      hasWorkers,
+      locationId,
+      onClose,
+      scheduleShelfRefresh,
+      shelfName,
+      t,
+      workerQtyByProduct,
+      workers,
+    ],
   );
 
   const requestClose = useCallback(() => {
@@ -419,10 +516,12 @@ function ShelfCountModalInner({
                       }
                       minimumQuantity={row.minimumQuantity}
                       workers={workers}
+                      workerQtys={workerQtyByProduct[row.id] ?? {}}
                       actualRaw={actualById[row.id] ?? ""}
                       saving={savingIds.has(row.id)}
                       variant={rowVariant}
                       showColumnLabels={false}
+                      onWorkerQtyChange={(workerId, v) => setWorkerQty(row.id, workerId, v)}
                       onActualChange={(v) => setActual(row.id, v)}
                       onBump={(d) => bump(row.id, row.previousQuantity, d)}
                       onEditProduct={() =>

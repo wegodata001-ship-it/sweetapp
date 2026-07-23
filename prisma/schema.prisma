@@ -502,6 +502,7 @@ model InventoryLocationWorker {
   updatedAt           DateTime          @updatedAt
   location            InventoryLocation @relation(fields: [inventoryLocationId], references: [id], onDelete: Cascade)
   employee            Employee?         @relation(fields: [employeeId], references: [id], onDelete: SetNull)
+  countLines          InventoryCountWorker[]
 
   @@index([inventoryLocationId, displayOrder], map: "InventoryLocationWorker_locationId_sortOrder_idx")
   @@index([inventoryLocationId], map: "InventoryLocationWorker_locationId_idx")
@@ -567,6 +568,7 @@ model InventoryCount {
   note               String?
   inventoryProductId String
   previousQuantity   Float
+  /// סה״כ נספר (= סכום כמויות העובדים כשיש פירוט)
   currentQuantity    Float
   countDate          DateTime
   createdAt          DateTime           @default(now())
@@ -576,6 +578,7 @@ model InventoryCount {
   countedBy          User?              @relation("InventoryCountCountedBy", fields: [countedByUserId], references: [id])
   inventoryProduct   InventoryProduct   @relation(fields: [inventoryProductId], references: [id], onDelete: Cascade)
   location           InventoryLocation? @relation("InventoryCountLocation", fields: [locationId], references: [id], onDelete: SetNull)
+  workerLines        InventoryCountWorker[]
 
   @@index([inventoryProductId])
   @@index([countDate])
@@ -584,6 +587,22 @@ model InventoryCount {
   @@index([countedByUserId])
   @@index([locationId])
   @@index([inventoryProductId, locationId])
+}
+
+/// פירוט ספירה לפי עובד מיקום — עובד אחד → כמות אחת (לביקורת)
+model InventoryCountWorker {
+  id                        String                  @id @default(cuid())
+  inventoryCountId          String
+  inventoryLocationWorkerId String
+  countedQuantity           Float
+  createdAt                 DateTime                @default(now())
+  updatedAt                 DateTime                @updatedAt
+  inventoryCount            InventoryCount          @relation(fields: [inventoryCountId], references: [id], onDelete: Cascade)
+  locationWorker            InventoryLocationWorker @relation(fields: [inventoryLocationWorkerId], references: [id], onDelete: Restrict)
+
+  @@unique([inventoryCountId, inventoryLocationWorkerId])
+  @@index([inventoryCountId])
+  @@index([inventoryLocationWorkerId])
 }
 
 /// תנועות מלאי יומיות — מעדכנות currentStock במוצר

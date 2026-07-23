@@ -252,6 +252,11 @@ export async function POST(req: NextRequest) {
         actualQty?: number;
         note?: string | null;
         notes?: string | null;
+        /** פירוט לפי עובד מיקום — סה״כ = סכום הכמויות */
+        workers?: {
+          inventoryLocationWorkerId?: string;
+          countedQuantity?: number;
+        }[];
       }[];
     };
     if (!Array.isArray(body.lines) || body.lines.length === 0) {
@@ -275,14 +280,32 @@ export async function POST(req: NextRequest) {
         currentQuantity: number;
         difference: number;
         locationId: string | null;
+        workers: { inventoryLocationWorkerId: string; countedQuantity: number }[];
       }[] = [];
       for (const line of body.lines) {
         const pid = (line.inventoryProductId ?? line.productId)?.trim();
         if (!pid) continue;
-        const currentQuantity = Number(
-          line.currentQuantity ?? line.countedQuantity ?? line.actualQty,
-        );
-        if (!Number.isFinite(currentQuantity)) continue;
+
+        const workerLines = Array.isArray(line.workers)
+          ? line.workers
+              .map((w) => {
+                const wid = w.inventoryLocationWorkerId?.trim();
+                const qty = Number(w.countedQuantity);
+                if (!wid || !Number.isFinite(qty) || qty < 0) return null;
+                return { inventoryLocationWorkerId: wid, countedQuantity: qty };
+              })
+              .filter((w): w is { inventoryLocationWorkerId: string; countedQuantity: number } => !!w)
+          : [];
+
+        let currentQuantity: number;
+        if (workerLines.length > 0) {
+          currentQuantity = workerLines.reduce((sum, w) => sum + w.countedQuantity, 0);
+        } else {
+          currentQuantity = Number(
+            line.currentQuantity ?? line.countedQuantity ?? line.actualQty,
+          );
+        }
+        if (!Number.isFinite(currentQuantity) || currentQuantity < 0) continue;
 
         const product = await tx.inventoryProduct.findFirst({
           where: { id: pid },
@@ -290,17 +313,20 @@ export async function POST(req: NextRequest) {
         });
         if (!product) continue;
 
-        // ספירה לפי מיקום — previous רק מאותו מיקום (או legacy null אם אין)
-        const previous = await tx.inventoryCount.findFirst({
-          where: locationId
-            ? {
-                inventoryProductId: pid,
-                OR: [{ locationId }, { locationId: null }],
-              }
-            : { inventoryProductId: pid },
-          orderBy: [{ locationId: "desc" }, { countDate: "desc" }],
-          select: { currentQuantity: true, locationId: true },
-        });
+        if (workerLines.length > 0 && locationId) {
+          const workerIds = workerLines.map((w) => w.inventoryLocationWorkerId);
+          const valid = await tx.inventoryLocationWorker.findMany({
+            where: {
+              id: { in: workerIds },
+              inventoryLocationId: locationId,
+            },
+            select: { id: true },
+          });
+          if (valid.length !== workerIds.length) {
+            throw new Error("עובד מיקום לא שייך למיקום הספירה");
+          }
+        }
+
         const previousForLoc = locationId
           ? (
               await tx.inventoryCount.findFirst({
@@ -317,7 +343,13 @@ export async function POST(req: NextRequest) {
               })
             )?.currentQuantity ??
             0
-          : previous?.currentQuantity ?? 0;
+          : (
+              await tx.inventoryCount.findFirst({
+                where: { inventoryProductId: pid },
+                orderBy: { countDate: "desc" },
+                select: { currentQuantity: true },
+              })
+            )?.currentQuantity ?? 0;
 
         const previousQuantity = previousForLoc;
         const difference = currentQuantity - previousQuantity;
@@ -332,6 +364,16 @@ export async function POST(req: NextRequest) {
             difference,
             note: noteText || null,
             countedByUserId: session.sub,
+            ...(workerLines.length > 0
+              ? {
+                  workerLines: {
+                    create: workerLines.map((w) => ({
+                      inventoryLocationWorkerId: w.inventoryLocationWorkerId,
+                      countedQuantity: w.countedQuantity,
+                    })),
+                  },
+                }
+              : {}),
           },
         });
         out.push({
@@ -341,6 +383,7 @@ export async function POST(req: NextRequest) {
           currentQuantity,
           difference,
           locationId,
+          workers: workerLines,
         });
       }
       return out;

@@ -2834,6 +2834,8 @@
           "addWorker": "Add worker",
           "workerName": "Worker name",
           "workerArea": "Responsibility area",
+          "workerQty": "Counted qty",
+          "countedTotal": "Total counted",
           "workerOrder": "Order",
           "areaOf": "Store of",
           "editProduct": "Edit product name",

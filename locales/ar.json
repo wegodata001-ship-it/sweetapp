@@ -2834,6 +2834,8 @@
           "addWorker": "إضافة عامل",
           "workerName": "اسم العامل",
           "workerArea": "منطقة المسؤولية",
+          "workerQty": "الكمية المجردة",
+          "countedTotal": "إجمالي المجرد",
           "workerOrder": "الترتيب",
           "areaOf": "مخزن",
           "editProduct": "تعديل اسم المنتج",

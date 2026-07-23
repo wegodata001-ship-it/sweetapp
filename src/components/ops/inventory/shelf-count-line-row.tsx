@@ -18,6 +18,9 @@ import type { LocationWorkerDto } from "@/components/ops/inventory-count/types";
 
 export type CountRowVariant = "table" | "card";
 
+/** productId → workerId → qty string */
+export type WorkerQtyMap = Record<string, string>;
+
 export type ShelfCountLineRowProps = {
   id: string;
   name: string;
@@ -29,16 +32,39 @@ export type ShelfCountLineRowProps = {
   systemShortage: number;
   minimumQuantity: number;
   workers: LocationWorkerDto[];
+  /** כמויות לפי עובד (כשיש עובדים במיקום) */
+  workerQtys: WorkerQtyMap;
+  /** סה״כ ידני — רק כשאין עובדים (תאימות לאחור) */
   actualRaw: string;
   saving?: boolean;
-  /** table = שורת טבלה רחבה; card = כרטיס מובייל ללא גלילה אופקית */
   variant?: CountRowVariant;
   showColumnLabels?: boolean;
+  onWorkerQtyChange: (workerId: string, value: string) => void;
   onActualChange: (value: string) => void;
   onBump: (delta: number) => void;
   onEditProduct: () => void;
   t: (key: string) => string;
 };
+
+/** סה״כ נספר = סכום כמויות העובדים; ריק = 0 אם יש לפחות הזנה אחת */
+export function sumWorkerQuantities(
+  workers: LocationWorkerDto[],
+  workerQtys: WorkerQtyMap,
+): number | null {
+  if (workers.length === 0) return null;
+  let any = false;
+  let sum = 0;
+  for (const w of workers) {
+    const raw = workerQtys[w.id] ?? "";
+    if (raw === "") continue;
+    any = true;
+    const n = Number(raw);
+    if (!Number.isFinite(n) || n < 0) return Number.NaN;
+    sum += n;
+  }
+  if (!any) return null;
+  return sum;
+}
 
 function Cell({
   label,
@@ -90,7 +116,7 @@ function StatBlock({
   );
 }
 
-/** כותרת עמודות דינמית — נבנית מנתוני העובדים ב-DB */
+/** כותרת עמודות דינמית — שם / אזור / כמות לכל עובד */
 export function ShelfCountTableHeader({
   workers,
   t,
@@ -116,12 +142,15 @@ export function ShelfCountTableHeader({
               <div className="min-w-[5.5rem] shrink-0 truncate px-1.5 text-center">
                 {workArea || `${t("areaOf")} ${displayName}`}
               </div>
+              <div className="min-w-[5.5rem] shrink-0 truncate px-1.5 text-center text-emerald-700">
+                {t("workerQty")}
+              </div>
             </div>
           );
         })}
+        <div className="min-w-[5.5rem] shrink-0 px-1.5 text-center">{t("countedTotal")}</div>
         <div className="min-w-[5rem] shrink-0 px-1.5 text-center">{t("minimum")}</div>
         <div className="min-w-[6.5rem] shrink-0 px-1.5 text-center">{t("systemShortage")}</div>
-        <div className="min-w-[5rem] shrink-0 px-1.5 text-center">{t("actual")}</div>
         <div className="min-w-[4.5rem] shrink-0 px-1.5 text-center">{t("diff")}</div>
       </div>
       <div className="min-w-[7rem] shrink-0 text-center">{t("actionsCol")}</div>
@@ -130,15 +159,18 @@ export function ShelfCountTableHeader({
 }
 
 function useCountDerived(
-  actualRaw: string,
+  countedTotal: number | null,
   systemQty: number,
   systemTotalQuantity: number,
   minimumQuantity: number,
 ) {
-  const actual = actualRaw === "" ? null : Number(actualRaw);
+  const actual = countedTotal;
   const diff =
     actual === null || Number.isNaN(actual) ? null : actual - systemQty;
-  const status = resolveCountLineStatus(actual, systemQty);
+  const status = resolveCountLineStatus(
+    actual === null || Number.isNaN(actual) ? null : actual,
+    systemQty,
+  );
   const st = countStatusStyles(status);
   const minimumStatus =
     minimumQuantity <= 0
@@ -156,7 +188,9 @@ function useCountDerived(
         : "border-emerald-200 bg-emerald-50 text-emerald-700";
   const diffLabel =
     diff === null ? "—" : diff === 0 ? "0" : diff > 0 ? `+${diff}` : String(diff);
-  return { actual, diff, status, st, minimumStatus, minimumClasses, diffLabel };
+  const totalLabel =
+    actual === null || Number.isNaN(actual) ? "—" : String(actual);
+  return { actual, diff, status, st, minimumStatus, minimumClasses, diffLabel, totalLabel };
 }
 
 function ShortageValue({
@@ -188,6 +222,28 @@ function ShortageValue({
   );
 }
 
+function WorkerQtyInput({
+  value,
+  onChange,
+  className,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  className?: string;
+}) {
+  return (
+    <input
+      type="number"
+      inputMode="decimal"
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      className={className}
+      placeholder="—"
+      min={0}
+    />
+  );
+}
+
 function ShelfCountLineRowInner({
   name,
   barcode,
@@ -198,21 +254,27 @@ function ShelfCountLineRowInner({
   systemShortage,
   minimumQuantity,
   workers,
+  workerQtys,
   actualRaw,
   saving,
   variant = "table",
   showColumnLabels = true,
+  onWorkerQtyChange,
   onActualChange,
   onBump,
   onEditProduct,
   t,
 }: ShelfCountLineRowProps) {
-  const { diff, status, st, minimumStatus, minimumClasses, diffLabel } = useCountDerived(
-    actualRaw,
-    systemQty,
-    systemTotalQuantity,
-    minimumQuantity,
-  );
+  const hasWorkers = workers.length > 0;
+  const workerSum = hasWorkers ? sumWorkerQuantities(workers, workerQtys) : null;
+  const countedTotal = hasWorkers
+    ? workerSum
+    : actualRaw === ""
+      ? null
+      : Number(actualRaw);
+
+  const { diff, status, st, minimumStatus, minimumClasses, diffLabel, totalLabel } =
+    useCountDerived(countedTotal, systemQty, systemTotalQuantity, minimumQuantity);
   const meta = [barcode, sku, unit].filter(Boolean).join(" · ");
 
   if (variant === "card") {
@@ -243,19 +305,47 @@ function ShelfCountLineRowInner({
         <div className="mt-3 grid grid-cols-2 gap-2">
           <StatBlock label={t("systemTotal")} value={systemTotalQuantity} />
           <StatBlock label={t("locationExpected")} value={systemQty} />
-          {workers.map((w) => {
-            const displayName = w.displayName || "—";
-            const workArea = (w.workArea || "").trim();
-            return (
-              <div key={w.id} className="col-span-2 grid grid-cols-2 gap-2">
-                <StatBlock label={displayName} value={displayName} />
-                <StatBlock
-                  label={workArea || `${t("areaOf")} ${displayName}`}
-                  value={workArea || "—"}
-                />
-              </div>
-            );
-          })}
+
+          {hasWorkers
+            ? workers.map((w) => {
+                const displayName = w.displayName || "—";
+                const workArea = (w.workArea || "").trim();
+                return (
+                  <div key={w.id} className="col-span-2 space-y-2 rounded-2xl bg-slate-50/80 p-2 ring-1 ring-[#e7ecf5]">
+                    <div className="grid grid-cols-2 gap-2">
+                      <StatBlock label={t("workerName")} value={displayName} />
+                      <StatBlock
+                        label={t("workerArea")}
+                        value={workArea || `${t("areaOf")} ${displayName}`}
+                      />
+                    </div>
+                    <div className="rounded-xl bg-white px-2 py-2 text-center ring-1 ring-emerald-200">
+                      <span className="block text-[10px] font-bold text-emerald-700">
+                        {t("workerQty")}
+                      </span>
+                      <WorkerQtyInput
+                        value={workerQtys[w.id] ?? ""}
+                        onChange={(v) => onWorkerQtyChange(w.id, v)}
+                        className="mt-0.5 h-12 w-full border-0 bg-transparent text-center text-xl font-black tabular-nums text-slate-900 outline-none"
+                      />
+                    </div>
+                  </div>
+                );
+              })
+            : null}
+
+          <div className="rounded-xl bg-emerald-50/80 px-2 py-2 text-center ring-1 ring-emerald-200">
+            <span className="block text-[10px] font-bold text-emerald-800">{t("countedTotal")}</span>
+            {hasWorkers ? (
+              <p className="mt-0.5 text-xl font-black tabular-nums text-emerald-800">{totalLabel}</p>
+            ) : (
+              <WorkerQtyInput
+                value={actualRaw}
+                onChange={onActualChange}
+                className="mt-0.5 h-12 w-full border-0 bg-transparent text-center text-xl font-black tabular-nums text-slate-900 outline-none"
+              />
+            )}
+          </div>
           <div className={`rounded-xl border px-2 py-2 text-center ${minimumClasses}`}>
             <span className="block text-[10px] font-bold">{t("minimum")}</span>
             <p className="mt-0.5 text-sm font-black tabular-nums">{minimumQuantity}</p>
@@ -271,17 +361,6 @@ function ShelfCountLineRowInner({
               />
             }
           />
-          <div className="rounded-xl bg-white/90 px-2 py-2 text-center ring-1 ring-[#e7ecf5]">
-            <span className="block text-[10px] font-bold text-slate-500">{t("actual")}</span>
-            <input
-              type="number"
-              inputMode="decimal"
-              value={actualRaw}
-              onChange={(e) => onActualChange(e.target.value)}
-              className="mt-0.5 h-12 w-full border-0 bg-transparent text-center text-xl font-black tabular-nums text-slate-900 outline-none"
-              placeholder="—"
-            />
-          </div>
           <StatBlock
             label={t("diff")}
             value={diffLabel}
@@ -385,9 +464,38 @@ function ShelfCountLineRowInner({
                 showLabel={showColumnLabels}
                 className="min-w-[5.5rem]"
               />
+              <div className="min-w-[5.5rem] shrink-0 rounded-xl bg-white/90 px-1.5 py-1 text-center ring-1 ring-emerald-200">
+                {showColumnLabels ? (
+                  <span className="block truncate text-[9px] font-bold text-emerald-700">
+                    {t("workerQty")}
+                  </span>
+                ) : null}
+                <WorkerQtyInput
+                  value={workerQtys[w.id] ?? ""}
+                  onChange={(v) => onWorkerQtyChange(w.id, v)}
+                  className="w-full border-0 bg-transparent text-center text-sm font-black tabular-nums text-slate-900 outline-none"
+                />
+              </div>
             </div>
           );
         })}
+
+        <div className="min-w-[5.5rem] shrink-0 rounded-xl bg-emerald-50/90 px-1.5 py-1 text-center ring-1 ring-emerald-200">
+          {showColumnLabels ? (
+            <span className="block truncate text-[9px] font-bold text-emerald-800">
+              {t("countedTotal")}
+            </span>
+          ) : null}
+          {hasWorkers ? (
+            <p className="text-sm font-black tabular-nums text-emerald-800">{totalLabel}</p>
+          ) : (
+            <WorkerQtyInput
+              value={actualRaw}
+              onChange={onActualChange}
+              className="w-full border-0 bg-transparent text-center text-sm font-black tabular-nums text-slate-900 outline-none"
+            />
+          )}
+        </div>
 
         <div
           className={`min-w-[5rem] shrink-0 rounded-xl border px-1.5 py-1 text-center ${minimumClasses}`}
@@ -409,20 +517,6 @@ function ShelfCountLineRowInner({
             minimumQuantity={minimumQuantity}
             systemTotalQuantity={systemTotalQuantity}
             t={t}
-          />
-        </div>
-
-        <div className="min-w-[5rem] shrink-0 rounded-xl bg-white/90 px-1.5 py-1 text-center ring-1 ring-[#e7ecf5]">
-          {showColumnLabels ? (
-            <span className="block truncate text-[9px] font-bold text-slate-500">{t("actual")}</span>
-          ) : null}
-          <input
-            type="number"
-            inputMode="decimal"
-            value={actualRaw}
-            onChange={(e) => onActualChange(e.target.value)}
-            className="w-full border-0 bg-transparent text-center text-sm font-black tabular-nums text-slate-900 outline-none"
-            placeholder="—"
           />
         </div>
 
