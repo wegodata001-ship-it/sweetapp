@@ -18,8 +18,23 @@ import { ShelfCountLineRow, ShelfCountTableHeader } from "./shelf-count-line-row
 import { LocationWorkersModal } from "./location-workers-modal";
 import { ProductEditModal, type ProductEditValues } from "./product-edit-modal";
 
-const ROW_HEIGHT = 104;
+const TABLE_ROW_HEIGHT = 104;
+const CARD_ROW_HEIGHT = 320;
 const REFRESH_SHELVES_MS = 1200;
+const MOBILE_MQ = "(max-width: 767px)";
+
+function useIsMobileLayout() {
+  const [isMobile, setIsMobile] = useState(false);
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.matchMedia) return;
+    const mq = window.matchMedia(MOBILE_MQ);
+    const apply = () => setIsMobile(mq.matches);
+    apply();
+    mq.addEventListener("change", apply);
+    return () => mq.removeEventListener("change", apply);
+  }, []);
+  return isMobile;
+}
 
 type Props = {
   open: boolean;
@@ -54,6 +69,9 @@ function ShelfCountModalInner({
   const [scanQ, setScanQ] = useState("");
   const [scrollTop, setScrollTop] = useState(0);
   const [viewportH, setViewportH] = useState(480);
+  const isMobile = useIsMobileLayout();
+  const rowHeight = isMobile ? CARD_ROW_HEIGHT : TABLE_ROW_HEIGHT;
+  const rowVariant = isMobile ? ("card" as const) : ("table" as const);
 
   const listRef = useRef<HTMLDivElement>(null);
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -160,14 +178,14 @@ function ShelfCountModalInner({
   }, [scanQ, sortedProducts]);
 
   const useVirtual = sortedProducts.length > 40;
-  const totalH = sortedProducts.length * ROW_HEIGHT;
-  const startIdx = useVirtual ? Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - 2) : 0;
+  const totalH = sortedProducts.length * rowHeight;
+  const startIdx = useVirtual ? Math.max(0, Math.floor(scrollTop / rowHeight) - 2) : 0;
   const endIdx = useVirtual
-    ? Math.min(sortedProducts.length, Math.ceil((scrollTop + viewportH) / ROW_HEIGHT) + 2)
+    ? Math.min(sortedProducts.length, Math.ceil((scrollTop + viewportH) / rowHeight) + 2)
     : sortedProducts.length;
   const visible = sortedProducts.slice(startIdx, endIdx);
-  const padTop = startIdx * ROW_HEIGHT;
-  const padBottom = Math.max(0, (sortedProducts.length - endIdx) * ROW_HEIGHT);
+  const padTop = startIdx * rowHeight;
+  const padBottom = Math.max(0, (sortedProducts.length - endIdx) * rowHeight);
   const dirtyEntries = Object.entries(actualById).filter(([, raw]) => raw !== "");
   const hasDirtyChanges = dirtyEntries.length > 0;
   const hasInvalidChanges = dirtyEntries.some(([, raw]) => {
@@ -270,9 +288,9 @@ function ShelfCountModalInner({
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-[85] flex items-end justify-center bg-slate-950/55 p-0 backdrop-blur-md sm:items-center sm:p-3">
+    <div className="fixed inset-0 z-[85] flex items-stretch justify-center bg-slate-950/55 p-0 backdrop-blur-md md:items-center md:p-3 lg:p-4">
       <div
-        className="flex max-h-[100dvh] w-full max-w-[100vw] flex-col overflow-hidden rounded-t-[24px] border border-white/10 bg-white/95 shadow-[0_24px_80px_rgba(15,23,42,0.35)] backdrop-blur-xl sm:max-h-[94vh] sm:w-[min(96vw,1600px)] sm:rounded-[24px]"
+        className="flex h-[100dvh] w-full max-w-[100vw] flex-col overflow-hidden rounded-none border border-white/10 bg-white/95 shadow-[0_24px_80px_rgba(15,23,42,0.35)] backdrop-blur-xl md:h-[96dvh] md:w-full md:max-w-none md:rounded-[24px] lg:h-[95dvh] lg:w-[95vw] lg:max-w-[95vw]"
         role="dialog"
         aria-modal="true"
         dir="rtl"
@@ -352,7 +370,9 @@ function ShelfCountModalInner({
 
         <div
           ref={listRef}
-          className="min-h-0 flex-1 overflow-x-auto overflow-y-auto overscroll-contain p-3 sm:p-4"
+          className={`min-h-0 flex-1 overflow-y-auto overscroll-contain p-3 sm:p-4 ${
+            isMobile ? "overflow-x-hidden" : "overflow-x-auto"
+          }`}
           onScroll={(e) => setScrollTop(e.currentTarget.scrollTop)}
         >
           {loading ? (
@@ -362,12 +382,17 @@ function ShelfCountModalInner({
           ) : sortedProducts.length === 0 ? (
             <p className="py-12 text-center text-sm font-semibold text-slate-500">{t("empty")}</p>
           ) : (
-            <div className="min-w-max" style={{ minHeight: useVirtual ? totalH : undefined }}>
-              <div className="sticky top-0 z-[1] mb-2 bg-white/95 pb-1 backdrop-blur-sm">
-                <ShelfCountTableHeader workers={workers} t={t} />
-              </div>
+            <div
+              className={isMobile ? "w-full" : "min-w-max"}
+              style={{ minHeight: useVirtual ? totalH : undefined }}
+            >
+              {!isMobile ? (
+                <div className="sticky top-0 z-[1] mb-2 bg-white/95 pb-1 backdrop-blur-sm">
+                  <ShelfCountTableHeader workers={workers} t={t} />
+                </div>
+              ) : null}
               {useVirtual ? <div style={{ height: padTop }} aria-hidden /> : null}
-              <div className="space-y-2">
+              <div className={isMobile ? "space-y-3" : "space-y-2"}>
                 {visible.map((row) => (
                   <div
                     key={row.id}
@@ -396,6 +421,7 @@ function ShelfCountModalInner({
                       workers={workers}
                       actualRaw={actualById[row.id] ?? ""}
                       saving={savingIds.has(row.id)}
+                      variant={rowVariant}
                       showColumnLabels={false}
                       onActualChange={(v) => setActual(row.id, v)}
                       onBump={(d) => bump(row.id, row.previousQuantity, d)}
@@ -408,6 +434,8 @@ function ShelfCountModalInner({
                           barcode: row.barcode ?? "",
                           sku: row.sku ?? "",
                           unit: row.unit ?? "",
+                          minimumQuantity: row.minimumQuantity,
+                          maximumQuantity: row.maximumQuantity ?? null,
                         })
                       }
                       t={t}
@@ -501,20 +529,26 @@ function ShelfCountModalInner({
         onClose={() => setEditProduct(null)}
         onSaved={(p) => {
           setProducts((prev) =>
-            prev.map((row) =>
-              row.id === p.id
-                ? {
-                    ...row,
-                    name: p.name,
-                    nameHe: p.nameHe,
-                    nameAr: p.nameAr || null,
-                    nameEn: p.nameEn || null,
-                    barcode: p.barcode || null,
-                    sku: p.sku || null,
-                    unit: p.unit || null,
-                  }
-                : row,
-            ),
+            prev.map((row) => {
+              if (row.id !== p.id) return row;
+              const minimumQuantity = p.minimumQuantity;
+              const systemTotal = row.systemTotalQuantity ?? row.previousQuantity;
+              const systemShortage =
+                minimumQuantity > 0 ? Math.max(0, minimumQuantity - systemTotal) : 0;
+              return {
+                ...row,
+                name: p.name,
+                nameHe: p.nameHe,
+                nameAr: p.nameAr || null,
+                nameEn: p.nameEn || null,
+                barcode: p.barcode || null,
+                sku: p.sku || null,
+                unit: p.unit || null,
+                minimumQuantity,
+                maximumQuantity: p.maximumQuantity,
+                systemShortage,
+              };
+            }),
           );
           setNotice(t("productUpdated"));
         }}

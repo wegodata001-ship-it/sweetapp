@@ -4,7 +4,8 @@ import { requireDb } from "@/lib/api-route";
 import { getSessionFromCookie } from "@/lib/auth/get-session";
 import { isLocationType } from "@/lib/inventory/location-types";
 import {
-  replaceLocationWorkers,
+  syncLocationWorkers,
+  serializeWorker,
   WORKER_SELECT,
   type LocationWorkerInput,
 } from "@/lib/inventory/location-workers";
@@ -20,13 +21,23 @@ const LOCATION_SELECT = {
   icon: true,
   isActive: true,
   createdAt: true,
-  workers: { orderBy: { sortOrder: "asc" as const }, select: WORKER_SELECT },
+  workers: {
+    where: { isActive: true },
+    orderBy: { displayOrder: "asc" as const },
+    select: WORKER_SELECT,
+  },
 } as const;
 
-function serializeLocation(r: { createdAt: Date; [k: string]: unknown }) {
+function serializeLocation(r: {
+  createdAt: Date;
+  workers?: Parameters<typeof serializeWorker>[0][];
+  [k: string]: unknown;
+}) {
+  const { workers, ...rest } = r;
   return {
-    ...r,
+    ...rest,
     createdAt: r.createdAt instanceof Date ? r.createdAt.toISOString() : r.createdAt,
+    workers: Array.isArray(workers) ? workers.map(serializeWorker) : [],
   };
 }
 
@@ -97,7 +108,7 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
         await tx.inventoryLocation.update({ where: { id }, data });
       }
       if (body.workers !== undefined) {
-        await replaceLocationWorkers(id, body.workers, tx);
+        await syncLocationWorkers(id, body.workers, tx);
       }
       return tx.inventoryLocation.findUniqueOrThrow({
         where: { id },

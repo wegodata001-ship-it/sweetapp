@@ -4,7 +4,7 @@ import { requireDb } from "@/lib/api-route";
 import { getSessionFromCookie } from "@/lib/auth/get-session";
 import {
   listLocationWorkers,
-  replaceLocationWorkers,
+  syncLocationWorkers,
   type LocationWorkerInput,
 } from "@/lib/inventory/location-workers";
 
@@ -30,7 +30,7 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string
   }
 }
 
-/** PUT — החלפת רשימת העובדים של המיקום (דינמי, ללא הגבלה) */
+/** PUT — סנכרון רשימת העובדים (soft sync ל־InventoryLocationWorker, ללא מחיקה קשה) */
 export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   const block = await requireDb();
   if (block) return block;
@@ -50,7 +50,7 @@ export async function PUT(req: NextRequest, ctx: { params: Promise<{ id: string 
     }
 
     const body = (await req.json()) as { workers?: LocationWorkerInput[] };
-    const workers = await replaceLocationWorkers(id, body.workers ?? []);
+    const workers = await syncLocationWorkers(id, body.workers ?? []);
     return NextResponse.json({ ok: true, data: workers });
   } catch (e) {
     return NextResponse.json(

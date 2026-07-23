@@ -14,7 +14,9 @@ import {
   countStatusStyles,
   resolveCountLineStatus,
 } from "@/components/ops/inventory-count/count-product-status";
-import type { LocationWorkerRow } from "@/lib/inventory/location-workers";
+import type { LocationWorkerDto } from "@/components/ops/inventory-count/types";
+
+export type CountRowVariant = "table" | "card";
 
 export type ShelfCountLineRowProps = {
   id: string;
@@ -26,9 +28,11 @@ export type ShelfCountLineRowProps = {
   systemTotalQuantity: number;
   systemShortage: number;
   minimumQuantity: number;
-  workers: LocationWorkerRow[];
+  workers: LocationWorkerDto[];
   actualRaw: string;
   saving?: boolean;
+  /** table = שורת טבלה רחבה; card = כרטיס מובייל ללא גלילה אופקית */
+  variant?: CountRowVariant;
   showColumnLabels?: boolean;
   onActualChange: (value: string) => void;
   onBump: (delta: number) => void;
@@ -63,12 +67,35 @@ function Cell({
   );
 }
 
+function StatBlock({
+  label,
+  value,
+  valueClassName,
+  className,
+}: {
+  label: string;
+  value: ReactNode;
+  valueClassName?: string;
+  className?: string;
+}) {
+  return (
+    <div
+      className={`rounded-xl bg-white/90 px-2 py-2 text-center ring-1 ring-[#e7ecf5] ${className ?? ""}`}
+    >
+      <span className="block text-[10px] font-bold text-slate-500">{label}</span>
+      <div className={`mt-0.5 text-sm font-black tabular-nums text-slate-800 ${valueClassName ?? ""}`}>
+        {value}
+      </div>
+    </div>
+  );
+}
+
 /** כותרת עמודות דינמית — נבנית מנתוני העובדים ב-DB */
 export function ShelfCountTableHeader({
   workers,
   t,
 }: {
-  workers: LocationWorkerRow[];
+  workers: LocationWorkerDto[];
   t: (key: string) => string;
 }) {
   return (
@@ -78,16 +105,20 @@ export function ShelfCountTableHeader({
       <div className="flex shrink-0 items-stretch gap-1.5">
         <div className="min-w-[5rem] shrink-0 px-1.5 text-center">{t("systemTotal")}</div>
         <div className="min-w-[5rem] shrink-0 px-1.5 text-center">{t("locationExpected")}</div>
-        {workers.map((w) => (
-          <div key={w.id} className="contents">
-            <div className="min-w-[5rem] shrink-0 truncate px-1.5 text-center text-[#6c4cff]">
-              {w.name}
+        {workers.map((w) => {
+          const displayName = w.displayName || "—";
+          const workArea = (w.workArea || "").trim();
+          return (
+            <div key={w.id} className="contents">
+              <div className="min-w-[5rem] shrink-0 truncate px-1.5 text-center text-[#6c4cff]">
+                {displayName}
+              </div>
+              <div className="min-w-[5.5rem] shrink-0 truncate px-1.5 text-center">
+                {workArea || `${t("areaOf")} ${displayName}`}
+              </div>
             </div>
-            <div className="min-w-[5.5rem] shrink-0 truncate px-1.5 text-center">
-              {w.area?.trim() || `${t("areaOf")} ${w.name}`}
-            </div>
-          </div>
-        ))}
+          );
+        })}
         <div className="min-w-[5rem] shrink-0 px-1.5 text-center">{t("minimum")}</div>
         <div className="min-w-[6.5rem] shrink-0 px-1.5 text-center">{t("systemShortage")}</div>
         <div className="min-w-[5rem] shrink-0 px-1.5 text-center">{t("actual")}</div>
@@ -98,24 +129,12 @@ export function ShelfCountTableHeader({
   );
 }
 
-function ShelfCountLineRowInner({
-  name,
-  barcode,
-  sku,
-  unit,
-  systemQty,
-  systemTotalQuantity,
-  systemShortage,
-  minimumQuantity,
-  workers,
-  actualRaw,
-  saving,
-  showColumnLabels = true,
-  onActualChange,
-  onBump,
-  onEditProduct,
-  t,
-}: ShelfCountLineRowProps) {
+function useCountDerived(
+  actualRaw: string,
+  systemQty: number,
+  systemTotalQuantity: number,
+  minimumQuantity: number,
+) {
   const actual = actualRaw === "" ? null : Number(actualRaw);
   const diff =
     actual === null || Number.isNaN(actual) ? null : actual - systemQty;
@@ -135,11 +154,188 @@ function ShelfCountLineRowInner({
       : minimumStatus === "near"
         ? "border-amber-200 bg-amber-50 text-amber-700"
         : "border-emerald-200 bg-emerald-50 text-emerald-700";
-
   const diffLabel =
     diff === null ? "—" : diff === 0 ? "0" : diff > 0 ? `+${diff}` : String(diff);
+  return { actual, diff, status, st, minimumStatus, minimumClasses, diffLabel };
+}
 
+function ShortageValue({
+  systemShortage,
+  minimumQuantity,
+  systemTotalQuantity,
+  t,
+}: {
+  systemShortage: number;
+  minimumQuantity: number;
+  systemTotalQuantity: number;
+  t: (key: string) => string;
+}) {
+  if (systemShortage <= 0) {
+    return <p className="text-sm font-black tabular-nums text-emerald-600">0</p>;
+  }
+  return (
+    <div className="space-y-0 text-[10px] font-black leading-tight text-rose-600">
+      <p>
+        {t("shortageMin")}: {minimumQuantity}
+      </p>
+      <p>
+        {t("shortageHave")}: {systemTotalQuantity}
+      </p>
+      <p>
+        {t("shortageMissing")}: {systemShortage}
+      </p>
+    </div>
+  );
+}
+
+function ShelfCountLineRowInner({
+  name,
+  barcode,
+  sku,
+  unit,
+  systemQty,
+  systemTotalQuantity,
+  systemShortage,
+  minimumQuantity,
+  workers,
+  actualRaw,
+  saving,
+  variant = "table",
+  showColumnLabels = true,
+  onActualChange,
+  onBump,
+  onEditProduct,
+  t,
+}: ShelfCountLineRowProps) {
+  const { diff, status, st, minimumStatus, minimumClasses, diffLabel } = useCountDerived(
+    actualRaw,
+    systemQty,
+    systemTotalQuantity,
+    minimumQuantity,
+  );
   const meta = [barcode, sku, unit].filter(Boolean).join(" · ");
+
+  if (variant === "card") {
+    return (
+      <div className={`rounded-2xl border px-3 py-3 ${st.row}`}>
+        <div className="flex items-start gap-3">
+          <div className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-white text-[#6c4cff] shadow-sm ring-1 ring-[#e7ecf5]">
+            <Package className="h-5 w-5" strokeWidth={1.5} aria-hidden />
+          </div>
+          <div className="min-w-0 flex-1 text-end">
+            <p className="break-words text-base font-black leading-tight text-slate-900">{name}</p>
+            {meta ? (
+              <p className="mt-0.5 truncate text-[11px] font-semibold tabular-nums text-slate-500">
+                {meta}
+              </p>
+            ) : null}
+          </div>
+          <button
+            type="button"
+            onClick={onEditProduct}
+            className="grid h-11 w-11 shrink-0 place-items-center rounded-xl border border-[#e7ecf5] bg-white text-slate-600"
+            aria-label={t("editProduct")}
+          >
+            <Pencil className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="mt-3 grid grid-cols-2 gap-2">
+          <StatBlock label={t("systemTotal")} value={systemTotalQuantity} />
+          <StatBlock label={t("locationExpected")} value={systemQty} />
+          {workers.map((w) => {
+            const displayName = w.displayName || "—";
+            const workArea = (w.workArea || "").trim();
+            return (
+              <div key={w.id} className="col-span-2 grid grid-cols-2 gap-2">
+                <StatBlock label={displayName} value={displayName} />
+                <StatBlock
+                  label={workArea || `${t("areaOf")} ${displayName}`}
+                  value={workArea || "—"}
+                />
+              </div>
+            );
+          })}
+          <div className={`rounded-xl border px-2 py-2 text-center ${minimumClasses}`}>
+            <span className="block text-[10px] font-bold">{t("minimum")}</span>
+            <p className="mt-0.5 text-sm font-black tabular-nums">{minimumQuantity}</p>
+          </div>
+          <StatBlock
+            label={t("systemShortage")}
+            value={
+              <ShortageValue
+                systemShortage={systemShortage}
+                minimumQuantity={minimumQuantity}
+                systemTotalQuantity={systemTotalQuantity}
+                t={t}
+              />
+            }
+          />
+          <div className="rounded-xl bg-white/90 px-2 py-2 text-center ring-1 ring-[#e7ecf5]">
+            <span className="block text-[10px] font-bold text-slate-500">{t("actual")}</span>
+            <input
+              type="number"
+              inputMode="decimal"
+              value={actualRaw}
+              onChange={(e) => onActualChange(e.target.value)}
+              className="mt-0.5 h-12 w-full border-0 bg-transparent text-center text-xl font-black tabular-nums text-slate-900 outline-none"
+              placeholder="—"
+            />
+          </div>
+          <StatBlock
+            label={t("diff")}
+            value={diffLabel}
+            valueClassName={
+              diff === null
+                ? "text-slate-400"
+                : diff < 0
+                  ? "text-rose-600"
+                  : diff > 0
+                    ? "text-amber-600"
+                    : "text-emerald-600"
+            }
+          />
+        </div>
+
+        <div className="mt-3 flex items-center justify-between gap-2 border-t border-[#e7ecf5]/80 pt-3">
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => onBump(-1)}
+              className="grid h-12 w-12 place-items-center rounded-2xl border border-[#e7ecf5] bg-white text-slate-700 active:scale-95"
+              aria-label="-1"
+            >
+              <Minus className="h-5 w-5" />
+            </button>
+            <button
+              type="button"
+              onClick={() => onBump(1)}
+              className="grid h-12 w-12 place-items-center rounded-2xl border border-[#e7ecf5] bg-white text-slate-700 active:scale-95"
+              aria-label="+1"
+            >
+              <Plus className="h-5 w-5" />
+            </button>
+          </div>
+          <div className="flex flex-wrap justify-end gap-1.5">
+            {minimumStatus === "below" ? (
+              <span className="inline-flex items-center gap-1 rounded-full bg-rose-50 px-2.5 py-1 text-[11px] font-black text-rose-700 ring-1 ring-rose-200">
+                <AlertTriangle className="h-3.5 w-3.5" aria-hidden />
+                {t("minimumWarning")}
+              </span>
+            ) : null}
+            <span className="inline-flex items-center gap-1 rounded-full bg-white/80 px-2.5 py-1 text-[11px] font-black text-slate-700 ring-1 ring-[#e7ecf5]">
+              {saving ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+              ) : (
+                <span className={`h-1.5 w-1.5 rounded-full ${st.dot}`} />
+              )}
+              {countStatusLabel(status, t)}
+            </span>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div
@@ -173,25 +369,19 @@ function ShelfCountLineRowInner({
       </div>
 
       <div className="flex shrink-0 items-stretch gap-1.5 text-[10px] font-bold">
-        <Cell
-          label={t("systemTotal")}
-          value={systemTotalQuantity}
-          showLabel={showColumnLabels}
-        />
-        <Cell
-          label={t("locationExpected")}
-          value={systemQty}
-          showLabel={showColumnLabels}
-        />
+        <Cell label={t("systemTotal")} value={systemTotalQuantity} showLabel={showColumnLabels} />
+        <Cell label={t("locationExpected")} value={systemQty} showLabel={showColumnLabels} />
 
         {workers.map((w) => {
-          const areaLabel = w.area?.trim() || `${t("areaOf")} ${w.name}`;
+          const displayName = w.displayName || "—";
+          const workArea = (w.workArea || "").trim();
+          const areaLabel = workArea || `${t("areaOf")} ${displayName}`;
           return (
             <div key={w.id} className="contents">
-              <Cell label={w.name} value={w.name} showLabel={showColumnLabels} />
+              <Cell label={displayName} value={displayName} showLabel={showColumnLabels} />
               <Cell
                 label={areaLabel}
-                value={w.area?.trim() || "—"}
+                value={workArea || "—"}
                 showLabel={showColumnLabels}
                 className="min-w-[5.5rem]"
               />
@@ -214,21 +404,12 @@ function ShelfCountLineRowInner({
               {t("systemShortage")}
             </span>
           ) : null}
-          {systemShortage > 0 ? (
-            <div className="space-y-0 text-[10px] font-black leading-tight text-rose-600">
-              <p>
-                {t("shortageMin")}: {minimumQuantity}
-              </p>
-              <p>
-                {t("shortageHave")}: {systemTotalQuantity}
-              </p>
-              <p>
-                {t("shortageMissing")}: {systemShortage}
-              </p>
-            </div>
-          ) : (
-            <p className="text-sm font-black tabular-nums text-emerald-600">0</p>
-          )}
+          <ShortageValue
+            systemShortage={systemShortage}
+            minimumQuantity={minimumQuantity}
+            systemTotalQuantity={systemTotalQuantity}
+            t={t}
+          />
         </div>
 
         <div className="min-w-[5rem] shrink-0 rounded-xl bg-white/90 px-1.5 py-1 text-center ring-1 ring-[#e7ecf5]">

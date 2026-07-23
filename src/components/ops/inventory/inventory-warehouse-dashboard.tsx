@@ -275,10 +275,31 @@ export function InventoryWarehouseDashboard() {
               { credentials: "same-origin" },
             );
             const j = (await res.json()) as {
-              data?: { id: string; name: string; area: string; sortOrder: number }[];
+              data?: {
+                id: string;
+                inventoryLocationId?: string;
+                employeeId?: string | null;
+                displayName: string;
+                workArea: string;
+                displayOrder: number;
+                isActive?: boolean;
+              }[];
             };
             setFormInitial((prev) =>
-              prev ? { ...prev, workers: j.data ?? [] } : prev,
+              prev
+                ? {
+                    ...prev,
+                    workers: (j.data ?? []).map((w) => ({
+                      id: w.id,
+                      inventoryLocationId: w.inventoryLocationId ?? shelf.locationId!,
+                      employeeId: w.employeeId ?? null,
+                      displayName: w.displayName,
+                      workArea: w.workArea,
+                      displayOrder: w.displayOrder,
+                      isActive: w.isActive ?? true,
+                    })),
+                  }
+                : prev,
             );
           } catch {
             /* keep empty workers */

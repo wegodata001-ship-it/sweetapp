@@ -21,10 +21,11 @@ export type ShelfSummary = {
 
 export type LocationWorkerDto = {
   id: string;
-  name: string;
-  area: string;
-  sortOrder: number;
+  inventoryLocationId?: string;
   employeeId?: string | null;
+  displayName: string;
+  workArea: string;
+  displayOrder: number;
   isActive?: boolean;
 };
 

@@ -154,6 +154,23 @@ export function ShelfAddProductsModal({
     }
     const initialRaw = quantity.trim();
     const initial = initialRaw === "" ? null : Number(initialRaw);
+    // עובדי מיקום — רק דרך InventoryLocationWorker API (לא דרך יצירת מוצר)
+    if (locationId) {
+      const wRes = await fetch(
+        `/api/inventory/locations/${encodeURIComponent(locationId)}/workers`,
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          credentials: "same-origin",
+          body: JSON.stringify({ workers: draftsToPayload(workers) }),
+        },
+      );
+      const wJ = (await wRes.json()) as { ok?: boolean; error?: string };
+      if (!wRes.ok || !wJ.ok) {
+        setError(wJ.error ?? tM("createFailed"));
+        return null;
+      }
+    }
     const res = await fetch("/api/inventory/count-products", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -170,7 +187,6 @@ export function ShelfAddProductsModal({
         category: "כללי",
         minimumQuantity: min,
         maximumQuantity: max,
-        workers: draftsToPayload(workers),
         initialQuantity: initial,
         countDate,
       }),

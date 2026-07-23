@@ -5,8 +5,9 @@ import type { LocationWorkerInput } from "@/lib/inventory/location-workers";
 
 export type WorkerDraft = {
   key: string;
-  name: string;
-  area: string;
+  id?: string;
+  displayName: string;
+  workArea: string;
 };
 
 type Props = {
@@ -16,23 +17,29 @@ type Props = {
 };
 
 export function toWorkerDrafts(
-  rows: { id?: string; name: string; area?: string | null }[],
+  rows: {
+    id?: string;
+    displayName?: string;
+    workArea?: string | null;
+  }[],
 ): WorkerDraft[] {
   return rows.map((w, i) => ({
-    key: w.id ?? `new-${i}-${w.name}`,
-    name: w.name,
-    area: w.area ?? "",
+    key: w.id ?? `new-${i}-${w.displayName ?? ""}`,
+    id: w.id,
+    displayName: w.displayName ?? "",
+    workArea: w.workArea ?? "",
   }));
 }
 
 export function draftsToPayload(workers: WorkerDraft[]): LocationWorkerInput[] {
   return workers
     .map((w, i) => ({
-      name: w.name.trim(),
-      area: w.area.trim(),
-      sortOrder: i,
+      id: w.id,
+      displayName: w.displayName.trim(),
+      workArea: w.workArea.trim(),
+      displayOrder: i,
     }))
-    .filter((w) => w.name.length > 0);
+    .filter((w) => w.displayName.length > 0);
 }
 
 export function LocationWorkersEditor({ workers, onChange, t }: Props) {
@@ -59,7 +66,7 @@ export function LocationWorkersEditor({ workers, onChange, t }: Props) {
           onClick={() =>
             onChange([
               ...workers,
-              { key: `new-${Date.now()}`, name: "", area: "" },
+              { key: `new-${Date.now()}`, displayName: "", workArea: "" },
             ])
           }
           className="inline-flex min-h-10 items-center gap-1 rounded-xl border border-[#e7ecf5] bg-white px-3 text-xs font-black text-[#6c4cff]"
@@ -90,8 +97,8 @@ export function LocationWorkersEditor({ workers, onChange, t }: Props) {
                   {t("workerName")}
                 </span>
                 <input
-                  value={w.name}
-                  onChange={(e) => update(w.key, { name: e.target.value })}
+                  value={w.displayName}
+                  onChange={(e) => update(w.key, { displayName: e.target.value })}
                   placeholder={t("workerName")}
                   className="h-11 w-full rounded-xl border border-[#e7ecf5] bg-white px-3 text-sm font-semibold"
                 />
@@ -101,8 +108,8 @@ export function LocationWorkersEditor({ workers, onChange, t }: Props) {
                   {t("workerArea")}
                 </span>
                 <input
-                  value={w.area}
-                  onChange={(e) => update(w.key, { area: e.target.value })}
+                  value={w.workArea}
+                  onChange={(e) => update(w.key, { workArea: e.target.value })}
                   placeholder={t("workerArea")}
                   className="h-11 w-full rounded-xl border border-[#e7ecf5] bg-white px-3 text-sm font-semibold"
                 />

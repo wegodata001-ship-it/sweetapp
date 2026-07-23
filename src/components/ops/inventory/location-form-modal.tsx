@@ -128,12 +128,7 @@ export function LocationFormModal({
         targetProductCount: j.data.targetProductCount ?? null,
         color: j.data.color ?? null,
         isActive: j.data.isActive ?? true,
-        workers: (j.data as LocationFormValues).workers ?? draftsToPayload(workers).map((w, i) => ({
-          id: `w-${i}`,
-          name: w.name,
-          area: w.area ?? "",
-          sortOrder: i,
-        })),
+        workers: (j.data as LocationFormValues).workers ?? [],
       });
       onClose();
     } catch {

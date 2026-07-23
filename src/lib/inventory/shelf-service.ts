@@ -1,8 +1,17 @@
 import { prismaAny } from "@/lib/prisma";
+import {
+  serializeWorker,
+  WORKER_SELECT,
+  type LocationWorkerRow,
+} from "@/lib/inventory/location-workers";
 
 export type ResolvedShelf = {
   id: string | null;
   name: string;
+};
+
+export type ResolvedShelfWithWorkers = ResolvedShelf & {
+  workers: LocationWorkerRow[];
 };
 
 export async function resolveShelf(shelfId: string | null, shelfName?: string): Promise<ResolvedShelf | null> {
@@ -22,6 +31,52 @@ export async function resolveShelf(shelfId: string | null, shelfName?: string): 
   });
   if (loc) return { id: loc.id, name: loc.name };
   return { id: null, name };
+}
+
+/** Location + active workers in one DB round-trip (count screen). */
+export async function resolveShelfWithWorkers(
+  shelfId: string | null,
+  shelfName?: string,
+): Promise<ResolvedShelfWithWorkers | null> {
+  const id = shelfId?.trim();
+  const name = shelfName?.trim();
+  const loc = id
+    ? await prismaAny.inventoryLocation.findFirst({
+        where: { id, isActive: true },
+        select: {
+          id: true,
+          name: true,
+          workers: {
+            where: { isActive: true },
+            orderBy: { displayOrder: "asc" },
+            select: WORKER_SELECT,
+          },
+        },
+      })
+    : name
+      ? await prismaAny.inventoryLocation.findFirst({
+          where: { name: { equals: name, mode: "insensitive" }, isActive: true },
+          select: {
+            id: true,
+            name: true,
+            workers: {
+              where: { isActive: true },
+              orderBy: { displayOrder: "asc" },
+              select: WORKER_SELECT,
+            },
+          },
+        })
+      : null;
+
+  if (loc) {
+    return {
+      id: loc.id,
+      name: loc.name,
+      workers: (loc.workers ?? []).map(serializeWorker),
+    };
+  }
+  if (name) return { id: null, name, workers: [] };
+  return null;
 }
 
 /** מוצרים על מדף — כולל שיוך N:M + תאימות ל־locationId / טקסט ישן */

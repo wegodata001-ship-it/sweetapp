@@ -100,6 +100,8 @@ model Employee {
   expenseDocuments FinancialDocument[]   @relation("EmployeeExpenseDocuments")
   ledgerEntries    LedgerEntry[]
   linkedUsers      User[]
+  /// שיוך אופציונלי כעובד אחראי במיקום אחסון
+  locationWorkers  InventoryLocationWorker[]
 }
 
 /// Manual ledger lines for ספק / עובד (לא כרטסת לקוח — היא מחושבת ממסמכים ותשלומים)
@@ -485,24 +487,24 @@ model InventoryLocation {
   @@index([isActive])
 }
 
-/// עובדים דינמיים לפי מיקום אחסון (ללא הגבלה, ללא שמות קבועים בקוד)
+/// Source of Truth — עובדים דינמיים לפי מיקום אחסון (ללא הגבלה)
+/// עמודות DB פיזיות: locationId/name/area/sortOrder — ממופות לשמות קנוניים
 model InventoryLocationWorker {
-  id         String            @id @default(cuid())
-  locationId String
-  /// קישור אופציונלי לעובד במערכת (Nullable)
-  employeeId String?
-  /// שם לתצוגה בכותרת הספירה (displayName)
-  name       String
-  /// אזור אחריות (workArea)
-  area       String            @default("")
-  /// סדר הצגה (displayOrder)
-  sortOrder  Int               @default(0)
-  isActive   Boolean           @default(true)
-  createdAt  DateTime          @default(now())
-  location   InventoryLocation @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  id                  String            @id @default(cuid())
+  inventoryLocationId String            @map("locationId")
+  /// קישור אופציונלי ל־Employee במערכת
+  employeeId          String?
+  displayName         String            @map("name")
+  workArea            String            @default("") @map("area")
+  displayOrder        Int               @default(0) @map("sortOrder")
+  isActive            Boolean           @default(true)
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
+  location            InventoryLocation @relation(fields: [inventoryLocationId], references: [id], onDelete: Cascade)
+  employee            Employee?         @relation(fields: [employeeId], references: [id], onDelete: SetNull)
 
-  @@index([locationId, sortOrder])
-  @@index([locationId])
+  @@index([inventoryLocationId, displayOrder], map: "InventoryLocationWorker_locationId_sortOrder_idx")
+  @@index([inventoryLocationId], map: "InventoryLocationWorker_locationId_idx")
   @@index([isActive])
   @@index([employeeId])
 }

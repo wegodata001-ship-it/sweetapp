@@ -144,7 +144,6 @@ export async function POST(req: NextRequest) {
       category?: string | null;
       minimumQuantity?: number;
       maximumQuantity?: number | null;
-      workers?: { name?: string; area?: string | null }[];
       initialQuantity?: number | null;
       countDate?: string | null;
     };
@@ -193,8 +192,6 @@ export async function POST(req: NextRequest) {
       maximumQuantity = n;
     }
 
-    const { replaceLocationWorkers } = await import("@/lib/inventory/location-workers");
-
     const row = await prismaAny.$transaction(async (tx: typeof prismaAny) => {
       const created = await tx.inventoryProduct.create({
         data: {
@@ -223,16 +220,6 @@ export async function POST(req: NextRequest) {
           create: { inventoryProductId: created.id, locationId },
           update: {},
         });
-        if (Array.isArray(body.workers)) {
-          await replaceLocationWorkers(
-            locationId,
-            body.workers.map((w) => ({
-              name: w.name ?? "",
-              area: w.area ?? "",
-            })),
-            tx,
-          );
-        }
       }
       const initial =
         body.initialQuantity !== undefined && body.initialQuantity !== null

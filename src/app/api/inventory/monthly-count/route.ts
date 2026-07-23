@@ -9,38 +9,25 @@ import {
   matchesStockFilter,
   type StockFilterTier,
 } from "@/lib/inventory/product-filters";
-import { productsOnShelfWhere, resolveShelf } from "@/lib/inventory/shelf-service";
-import { listLocationWorkers } from "@/lib/inventory/location-workers";
+import {
+  productsOnShelfWhere,
+  resolveShelf,
+  resolveShelfWithWorkers,
+} from "@/lib/inventory/shelf-service";
 
-/** סה״כ מערכת = סכום הכמויות האחרונות לכל מיקום של המוצר */
-async function systemTotalsForProducts(
-  productIds: string[],
-): Promise<Map<string, number>> {
-  const map = new Map<string, number>();
-  if (!productIds.length) return map;
-
-  const counts = await prismaAny.inventoryCount.findMany({
-    where: { inventoryProductId: { in: productIds } },
-    orderBy: { countDate: "desc" },
-    select: {
-      inventoryProductId: true,
-      locationId: true,
-      currentQuantity: true,
-    },
-  });
-
-  // לכל (product, location) — הכמות האחרונה בלבד; locationId null = bucket legacy אחד
+/** סה״כ מערכת ממערך ספירות שכבר נטען (ללא N+1) */
+function systemTotalFromCounts(
+  counts: { locationId: string | null; currentQuantity: number }[],
+): number {
   const seen = new Set<string>();
+  let total = 0;
   for (const c of counts) {
-    const key = `${c.inventoryProductId}::${c.locationId ?? "__legacy__"}`;
+    const key = c.locationId ?? "__legacy__";
     if (seen.has(key)) continue;
     seen.add(key);
-    map.set(
-      c.inventoryProductId,
-      (map.get(c.inventoryProductId) ?? 0) + Number(c.currentQuantity || 0),
-    );
+    total += Number(c.currentQuantity || 0);
   }
-  return map;
+  return total;
 }
 
 export async function GET(req: NextRequest) {
@@ -67,7 +54,8 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const shelf = await resolveShelf(locationIdParam ?? null, locationEq);
+    // 1) Location + workers — round-trip יחיד
+    const shelf = await resolveShelfWithWorkers(locationIdParam ?? null, locationEq);
     if (!shelf) {
       return NextResponse.json({
         ok: true,
@@ -84,6 +72,7 @@ export async function GET(req: NextRequest) {
       ],
     };
 
+    // 2) Products — ללא N+1
     const products = await prismaAny.inventoryProduct.findMany({
       where,
       orderBy: [{ name: "asc" }],
@@ -101,23 +90,40 @@ export async function GET(req: NextRequest) {
         minimumQuantity: true,
         maximumQuantity: true,
         inventoryLocation: { select: { name: true } },
-        counts: {
-          where: shelf.id
-            ? { OR: [{ locationId: shelf.id }, { locationId: null }] }
-            : undefined,
-          orderBy: { countDate: "desc" },
-          take: 10,
-          select: {
-            currentQuantity: true,
-            countDate: true,
-            locationId: true,
-          },
-        },
       },
     });
 
-    const totals = await systemTotalsForProducts(products.map((p: { id: string }) => p.id));
-    const locationWorkers = shelf.id ? await listLocationWorkers(shelf.id) : [];
+    // 3) Latest count לכל (product, location) — query אחד, ללא N+1
+    const productIds = products.map((p: { id: string }) => p.id);
+    const latestCounts =
+      productIds.length === 0
+        ? []
+        : ((await prismaAny.inventoryCount.findMany({
+            where: { inventoryProductId: { in: productIds } },
+            orderBy: { countDate: "desc" },
+            distinct: ["inventoryProductId", "locationId"],
+            select: {
+              inventoryProductId: true,
+              locationId: true,
+              currentQuantity: true,
+              countDate: true,
+            },
+          })) as {
+            inventoryProductId: string;
+            locationId: string | null;
+            currentQuantity: number;
+            countDate: Date;
+          }[]);
+
+    const countsByProduct = new Map<
+      string,
+      { locationId: string | null; currentQuantity: number; countDate: Date }[]
+    >();
+    for (const c of latestCounts) {
+      const list = countsByProduct.get(c.inventoryProductId) ?? [];
+      list.push(c);
+      countsByProduct.set(c.inventoryProductId, list);
+    }
 
     type MonthlyMapped = {
       id: string;
@@ -154,17 +160,17 @@ export async function GET(req: NextRequest) {
         minimumQuantity: number;
         maximumQuantity: number | null;
         inventoryLocation?: { name: string } | null;
-        counts: { currentQuantity: number; countDate: Date; locationId: string | null }[];
       }) => {
+        const counts = countsByProduct.get(p.id) ?? [];
         const locationName = shelf.name || p.inventoryLocation?.name || p.location || "";
         const latestForShelf =
           (shelf.id
-            ? p.counts.find((c) => c.locationId === shelf.id)
+            ? counts.find((c) => c.locationId === shelf.id)
             : null) ??
-          p.counts.find((c) => !c.locationId) ??
+          counts.find((c) => !c.locationId) ??
           null;
         const locationQty = latestForShelf?.currentQuantity ?? 0;
-        const systemTotal = totals.get(p.id) ?? locationQty;
+        const systemTotal = systemTotalFromCounts(counts);
         const systemShortage =
           p.minimumQuantity > 0 ? Math.max(0, p.minimumQuantity - systemTotal) : 0;
         const tier = classifyStockTier(locationQty, p.minimumQuantity);
@@ -213,7 +219,7 @@ export async function GET(req: NextRequest) {
         stock,
         locationId: shelf.id,
         locationName: shelf.name,
-        workers: locationWorkers,
+        workers: shelf.workers,
       },
     });
   } catch (e) {

@@ -11,6 +11,8 @@ export type ProductEditValues = {
   barcode: string;
   sku: string;
   unit: string;
+  minimumQuantity: number;
+  maximumQuantity: number | null;
 };
 
 type Props = {
@@ -40,6 +42,19 @@ export function ProductEditModal({ open, initial, onClose, onSaved, t }: Props) 
       setError(t("nameRequired"));
       return;
     }
+    const min = Number(form.minimumQuantity);
+    if (!Number.isFinite(min) || min < 0) {
+      setError(t("invalidMinimum"));
+      return;
+    }
+    const maxRaw = form.maximumQuantity;
+    const max =
+      maxRaw === null || maxRaw === ("" as unknown) ? null : Number(maxRaw);
+    if (max !== null && (!Number.isFinite(max) || max < 0)) {
+      setError(t("invalidMaximum"));
+      return;
+    }
+
     setBusy(true);
     setError(null);
     try {
@@ -54,6 +69,8 @@ export function ProductEditModal({ open, initial, onClose, onSaved, t }: Props) 
           barcode: form.barcode.trim() || null,
           sku: form.sku.trim() || null,
           unit: form.unit.trim() || null,
+          minimumQuantity: min,
+          maximumQuantity: max,
         }),
       });
       const j = (await res.json()) as { ok?: boolean; error?: string };
@@ -70,6 +87,8 @@ export function ProductEditModal({ open, initial, onClose, onSaved, t }: Props) 
         barcode: form.barcode.trim(),
         sku: form.sku.trim(),
         unit: form.unit.trim(),
+        minimumQuantity: min,
+        maximumQuantity: max,
       });
       onClose();
     } catch {
@@ -154,6 +173,42 @@ export function ProductEditModal({ open, initial, onClose, onSaved, t }: Props) 
               className={inputClass}
             />
           </label>
+          <div className="grid grid-cols-2 gap-2">
+            <label className="block">
+              <span className="text-xs font-bold text-slate-600">{t("minimum")}</span>
+              <input
+                type="number"
+                min={0}
+                value={form.minimumQuantity}
+                onChange={(e) =>
+                  setForm((f) =>
+                    f ? { ...f, minimumQuantity: Number(e.target.value) || 0 } : f,
+                  )
+                }
+                className={inputClass}
+              />
+            </label>
+            <label className="block">
+              <span className="text-xs font-bold text-slate-600">{t("maximum")}</span>
+              <input
+                type="number"
+                min={0}
+                value={form.maximumQuantity ?? ""}
+                onChange={(e) =>
+                  setForm((f) =>
+                    f
+                      ? {
+                          ...f,
+                          maximumQuantity:
+                            e.target.value === "" ? null : Number(e.target.value),
+                        }
+                      : f,
+                  )
+                }
+                className={inputClass}
+              />
+            </label>
+          </div>
           {error ? <p className="text-sm font-bold text-rose-600">{error}</p> : null}
         </div>
 
