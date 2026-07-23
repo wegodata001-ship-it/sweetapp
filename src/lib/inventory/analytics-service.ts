@@ -1,7 +1,7 @@
 import { prismaAny } from "@/lib/prisma";
 import type {
   AnalyticsDashboardDto,
-  AnalyticsDrillRow,
+  AnalyticsDrillTable,
   AnalyticsDrillType,
   AnalyticsFilters,
   AnalyticsRange,
@@ -10,6 +10,8 @@ import type {
   HeatCell,
   LocationStat,
   NamedQty,
+  ProductFocusDto,
+  ProductSearchHit,
   TrendPoint,
   WorkerStat,
 } from "@/lib/inventory/analytics-types";
@@ -454,6 +456,161 @@ function buildCritical(
   };
 }
 
+export async function searchAnalyticsProducts(q: string, limit = 20): Promise<ProductSearchHit[]> {
+  const term = q.trim();
+  if (term.length < 1) return [];
+  const rows = (await prismaAny.inventoryProduct.findMany({
+    where: {
+      OR: [
+        { name: { contains: term, mode: "insensitive" } },
+        { nameHe: { contains: term, mode: "insensitive" } },
+        { nameAr: { contains: term, mode: "insensitive" } },
+        { nameEn: { contains: term, mode: "insensitive" } },
+        { barcode: { contains: term, mode: "insensitive" } },
+        { sku: { contains: term, mode: "insensitive" } },
+      ],
+    },
+    take: Math.min(40, Math.max(5, limit)),
+    orderBy: { name: "asc" },
+    select: {
+      id: true,
+      name: true,
+      nameHe: true,
+      nameAr: true,
+      nameEn: true,
+      barcode: true,
+      sku: true,
+    },
+  })) as ProductSearchHit[];
+  return rows.map((r) => ({
+    ...r,
+    name: r.nameHe?.trim() || r.name,
+  }));
+}
+
+async function loadProductFocus(
+  productId: string,
+  from: Date,
+  to: Date,
+  windowDays: number,
+): Promise<ProductFocusDto | null> {
+  const product = (await prismaAny.inventoryProduct.findUnique({
+    where: { id: productId },
+    select: {
+      id: true,
+      name: true,
+      nameHe: true,
+      nameAr: true,
+      nameEn: true,
+      barcode: true,
+      sku: true,
+      locationId: true,
+      location: true,
+      inventoryLocation: { select: { id: true, name: true } },
+      placements: { select: { locationId: true, location: { select: { id: true, name: true } } } },
+    },
+  })) as {
+    id: string;
+    name: string;
+    nameHe: string | null;
+    nameAr: string | null;
+    nameEn: string | null;
+    barcode: string | null;
+    sku: string | null;
+    locationId: string | null;
+    location: string;
+    inventoryLocation: { id: string; name: string } | null;
+    placements: { locationId: string; location: { id: string; name: string } }[];
+  } | null;
+  if (!product) return null;
+
+  const [usageRow, lastUsageRow, countsPerformed, latestLocs] = await Promise.all([
+    prismaAny.$queryRawUnsafe(
+      `
+      SELECT COALESCE(SUM(-c."difference"), 0)::float AS usage
+      FROM "InventoryCount" c
+      WHERE c."inventoryProductId" = $1
+        AND c."countDate" >= $2 AND c."countDate" <= $3
+        AND c."difference" < 0
+    `,
+      productId,
+      from,
+      to,
+    ) as Promise<{ usage: number }[]>,
+    prismaAny.$queryRawUnsafe(
+      `
+      SELECT MAX(c."countDate") AS last
+      FROM "InventoryCount" c
+      WHERE c."inventoryProductId" = $1 AND c."difference" < 0
+    `,
+      productId,
+    ) as Promise<{ last: Date | null }[]>,
+    prismaAny.inventoryCount.count({ where: { inventoryProductId: productId } }),
+    prismaAny.$queryRawUnsafe(
+      `
+      SELECT DISTINCT ON (c."locationId")
+        c."locationId",
+        COALESCE(l.name, '') AS "locationName",
+        c."currentQuantity"::float AS qty
+      FROM "InventoryCount" c
+      LEFT JOIN "InventoryLocation" l ON l.id = c."locationId"
+      WHERE c."inventoryProductId" = $1
+      ORDER BY c."locationId", c."countDate" DESC
+    `,
+      productId,
+    ) as Promise<{ locationId: string | null; locationName: string; qty: number }[]>,
+  ]);
+
+  const usage = Number(usageRow[0]?.usage) || 0;
+  const days = Math.max(1, windowDays);
+  const avgDaily = usage / days;
+  const qtyByLoc = new Map<string, { id: string | null; name: string; qty: number }>();
+  for (const r of latestLocs) {
+    const key = r.locationId ?? "__none__";
+    qtyByLoc.set(key, {
+      id: r.locationId,
+      name: r.locationName || product.inventoryLocation?.name || product.location || "—",
+      qty: Number(r.qty) || 0,
+    });
+  }
+  // הוספת placements בלי ספירה עדיין
+  for (const pl of product.placements) {
+    if (!qtyByLoc.has(pl.locationId)) {
+      qtyByLoc.set(pl.locationId, { id: pl.location.id, name: pl.location.name, qty: 0 });
+    }
+  }
+  if (product.locationId && !qtyByLoc.has(product.locationId)) {
+    qtyByLoc.set(product.locationId, {
+      id: product.locationId,
+      name: product.inventoryLocation?.name || product.location || "—",
+      qty: 0,
+    });
+  }
+
+  const currentQty = [...qtyByLoc.values()].reduce((s, x) => s + x.qty, 0);
+  const daysLeft = avgDaily > 0.0001 ? currentQty / avgDaily : null;
+  const last = lastUsageRow[0]?.last;
+
+  return {
+    id: product.id,
+    name: product.nameHe?.trim() || product.name,
+    nameHe: product.nameHe,
+    nameAr: product.nameAr,
+    nameEn: product.nameEn,
+    barcode: product.barcode,
+    sku: product.sku,
+    currentQty: Math.round(currentQty * 100) / 100,
+    avgDaily: Math.round(avgDaily * 100) / 100,
+    avgWeekly: Math.round(avgDaily * 7 * 100) / 100,
+    avgMonthly: Math.round(avgDaily * 30 * 100) / 100,
+    avgYearly: Math.round(avgDaily * 365 * 100) / 100,
+    daysLeft: daysLeft == null ? null : Math.round(daysLeft * 10) / 10,
+    lastUsageAt: last ? new Date(last).toISOString() : null,
+    countsPerformed,
+    locations: [...qtyByLoc.values()],
+  };
+}
+
 export async function getInventoryAnalyticsDashboard(input: {
   range?: string | null;
   from?: string | null;
@@ -664,9 +821,11 @@ export async function getInventoryAnalyticsDashboard(input: {
 
   const avgMins = Number(avgSessionDuration[0]?.mins);
   const activeCounts = (activeLocRows as { locationId: string | null }[]).length;
-
-  // attach surplus list for drill via critical extension — store top in anomalous-like
   void surplusList;
+
+  const productFocus = filters.productId
+    ? await loadProductFocus(filters.productId, window.from, window.to, windowDays)
+    : null;
 
   return {
     generatedAt: new Date().toISOString(),
@@ -703,6 +862,7 @@ export async function getInventoryAnalyticsDashboard(input: {
     forecast,
     critical,
     heatmap,
+    productFocus,
     meta: {
       categories: (categories as { category: string }[]).map((c) => c.category).filter(Boolean),
       locations: locationsMeta as { id: string; name: string }[],
@@ -715,7 +875,7 @@ export async function getInventoryAnalyticsDashboard(input: {
   };
 }
 
-export async function getAnalyticsDrill(
+export async function getAnalyticsDrillTable(
   type: AnalyticsDrillType,
   input: {
     range?: string | null;
@@ -723,93 +883,382 @@ export async function getAnalyticsDrill(
     to?: string | null;
     locationId?: string | null;
     category?: string | null;
+    productId?: string | null;
+    day?: string | null;
   },
-): Promise<AnalyticsDrillRow[]> {
-  const dash = await getInventoryAnalyticsDashboard(input);
-  switch (type) {
-    case "shortages":
-    case "belowMinimum":
-      return dash.critical.belowMinimum.map((x) => ({
-        id: x.id,
-        title: x.name,
-        value: x.quantity,
-        meta: x.meta,
-      }));
-    case "surpluses":
-      return dash.locations
-        .filter((l) => l.surplusCount > 0)
-        .map((l) => ({
-          id: l.id,
-          title: l.name,
-          value: l.surplusCount,
-          meta: "surplus lines",
-        }));
-    case "uncounted":
-      return dash.critical.neverCounted.map((x) => ({
-        id: x.id,
-        title: x.name,
-        value: 0,
-      }));
-    case "noMovement":
-      return dash.critical.noMovement.map((x) => ({
-        id: x.id,
-        title: x.name,
-        value: x.quantity,
-      }));
-    case "activeLocations":
-      return dash.locations
-        .filter((l) => l.lastCountedAt)
-        .map((l) => ({
-          id: l.id,
-          title: l.name,
-          subtitle: l.lastCountedBy ?? undefined,
-          value: l.productCount,
-          meta: l.lastCountedAt ?? undefined,
-        }));
-    case "counts":
-      return (
-        (await prismaAny.inventoryCountSession.findMany({
-          where: {
-            countDate: { gte: new Date(dash.filters.from), lte: new Date(dash.filters.to) },
-            ...(input.locationId ? { locationId: input.locationId } : {}),
-          },
-          orderBy: { createdAt: "desc" },
-          take: 100,
-          select: {
-            id: true,
-            sessionNumber: true,
-            locationName: true,
-            productCount: true,
-            createdAt: true,
-          },
-        })) as Array<{
-          id: string;
-          sessionNumber: number;
-          locationName: string;
-          productCount: number;
-          createdAt: Date;
-        }>
-      ).map((s) => ({
-        id: s.id,
-        title: `#${s.sessionNumber} · ${s.locationName || "—"}`,
-        value: s.productCount,
-        meta: s.createdAt.toISOString(),
-      }));
-    case "workers":
-      return dash.workers.map((w) => ({
-        id: w.id,
-        title: w.name,
-        value: w.unitsCounted,
-        meta: `${w.accuracyPct}%`,
-      }));
-    case "locations":
-      return dash.locations.map((l) => ({
-        id: l.id,
-        title: l.name,
-        value: l.productCount,
-        meta: `${l.accuracyPct}%`,
-      }));
-    default:
-      return [];
+): Promise<AnalyticsDrillTable> {
+  const window = resolveAnalyticsWindow(input);
+  const thirtyDaysAgo = new Date();
+  thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+  const windowDays = Math.max(
+    1,
+    Math.ceil((window.to.getTime() - window.from.getTime()) / (24 * 60 * 60 * 1000)),
+  );
+
+  if (type === "dayUsage") {
+    const dayStr = input.day?.trim();
+    if (!dayStr) {
+      return { type, columns: [{ key: "info", label: "info" }], rows: [] };
+    }
+    const dayStart = new Date(`${dayStr}T00:00:00`);
+    const dayEnd = new Date(`${dayStr}T23:59:59.999`);
+    const params: unknown[] = [dayStart, dayEnd];
+    let productClause = "";
+    if (input.productId?.trim()) {
+      params.push(input.productId.trim());
+      productClause = `AND c."inventoryProductId" = $${params.length}`;
+    }
+    const rows = (await prismaAny.$queryRawUnsafe(
+      `
+      SELECT
+        c.id,
+        COALESCE(NULLIF(p."nameHe", ''), p."name") AS product,
+        COALESCE(l.name, '') AS location,
+        c."previousQuantity"::float AS previous,
+        c."currentQuantity"::float AS current,
+        c."difference"::float AS difference,
+        c."countDate"
+      FROM "InventoryCount" c
+      INNER JOIN "InventoryProduct" p ON p.id = c."inventoryProductId"
+      LEFT JOIN "InventoryLocation" l ON l.id = c."locationId"
+      WHERE c."countDate" >= $1 AND c."countDate" <= $2
+        ${productClause}
+      ORDER BY c."countDate" DESC
+      LIMIT 200
+    `,
+      ...params,
+    )) as Array<{
+      id: string;
+      product: string;
+      location: string;
+      previous: number;
+      current: number;
+      difference: number;
+      countDate: Date;
+    }>;
+    return {
+      type,
+      columns: [
+        { key: "product", label: "product" },
+        { key: "location", label: "location" },
+        { key: "previous", label: "previous" },
+        { key: "current", label: "current" },
+        { key: "difference", label: "difference" },
+        { key: "time", label: "time" },
+      ],
+      rows: rows.map((r) => ({
+        id: r.id,
+        product: r.product,
+        location: r.location || "—",
+        previous: Number(r.previous),
+        current: Number(r.current),
+        difference: Number(r.difference),
+        time: new Date(r.countDate).toLocaleString(),
+      })),
+    };
   }
+
+  if (type === "shortages" || type === "belowMinimum") {
+    const rows = (await prismaAny.$queryRawUnsafe(
+      `
+      WITH latest AS (
+        SELECT DISTINCT ON (c."inventoryProductId", c."locationId")
+          c."inventoryProductId",
+          c."locationId",
+          c."currentQuantity"::float AS qty
+        FROM "InventoryCount" c
+        ORDER BY c."inventoryProductId", c."locationId", c."countDate" DESC
+      ),
+      by_product AS (
+        SELECT
+          latest."inventoryProductId" AS id,
+          COALESCE(SUM(latest.qty), 0)::float AS on_hand,
+          (ARRAY_AGG(COALESCE(l.name, '—') ORDER BY latest.qty DESC))[1] AS location
+        FROM latest
+        LEFT JOIN "InventoryLocation" l ON l.id = latest."locationId"
+        GROUP BY latest."inventoryProductId"
+      )
+      SELECT
+        p.id,
+        COALESCE(NULLIF(p."nameHe", ''), p."name") AS product,
+        COALESCE(bp.location, p."location", '—') AS location,
+        COALESCE(bp.on_hand, 0)::float AS on_hand,
+        p."minimumQuantity"::float AS minimum
+      FROM "InventoryProduct" p
+      LEFT JOIN by_product bp ON bp.id = p.id
+      WHERE p."minimumQuantity" > 0
+        AND COALESCE(bp.on_hand, 0) < p."minimumQuantity"
+      ORDER BY (p."minimumQuantity" - COALESCE(bp.on_hand, 0)) DESC
+      LIMIT 100
+    `,
+    )) as Array<{
+      id: string;
+      product: string;
+      location: string;
+      on_hand: number;
+      minimum: number;
+    }>;
+    return {
+      type,
+      columns: [
+        { key: "product", label: "product" },
+        { key: "location", label: "location" },
+        { key: "onHand", label: "onHand" },
+        { key: "minimum", label: "minimum" },
+        { key: "missing", label: "missing" },
+      ],
+      rows: rows.map((r) => ({
+        id: r.id,
+        product: r.product,
+        location: r.location,
+        onHand: Number(r.on_hand),
+        minimum: Number(r.minimum),
+        missing: Math.max(0, Number(r.minimum) - Number(r.on_hand)),
+      })),
+    };
+  }
+
+  if (type === "surpluses") {
+    const rows = (await prismaAny.$queryRawUnsafe(
+      `
+      SELECT DISTINCT ON (c."inventoryProductId", c."locationId")
+        c.id,
+        COALESCE(NULLIF(p."nameHe", ''), p."name") AS product,
+        COALESCE(l.name, '—') AS location,
+        c."difference"::float AS surplus
+      FROM "InventoryCount" c
+      INNER JOIN "InventoryProduct" p ON p.id = c."inventoryProductId"
+      LEFT JOIN "InventoryLocation" l ON l.id = c."locationId"
+      WHERE c."difference" > 0.0001
+      ORDER BY c."inventoryProductId", c."locationId", c."countDate" DESC
+      LIMIT 100
+    `,
+    )) as Array<{ id: string; product: string; location: string; surplus: number }>;
+    return {
+      type,
+      columns: [
+        { key: "product", label: "product" },
+        { key: "location", label: "location" },
+        { key: "surplus", label: "surplus" },
+      ],
+      rows: rows.map((r) => ({
+        id: r.id,
+        product: r.product,
+        location: r.location,
+        surplus: Number(r.surplus),
+      })),
+    };
+  }
+
+  if (type === "uncounted") {
+    const rows = (await prismaAny.$queryRawUnsafe(
+      `
+      SELECT
+        p.id,
+        COALESCE(NULLIF(p."nameHe", ''), p."name") AS product,
+        MAX(c."countDate") AS last_count
+      FROM "InventoryProduct" p
+      LEFT JOIN "InventoryCount" c ON c."inventoryProductId" = p.id
+      GROUP BY p.id, product
+      HAVING MAX(c."countDate") IS NULL OR MAX(c."countDate") < $1
+      ORDER BY MAX(c."countDate") ASC NULLS FIRST
+      LIMIT 100
+    `,
+      thirtyDaysAgo,
+    )) as Array<{ id: string; product: string; last_count: Date | null }>;
+    const now = Date.now();
+    return {
+      type,
+      columns: [
+        { key: "product", label: "product" },
+        { key: "daysWithout", label: "daysWithout" },
+      ],
+      rows: rows.map((r) => ({
+        id: r.id,
+        product: r.product,
+        daysWithout: r.last_count
+          ? Math.floor((now - new Date(r.last_count).getTime()) / (24 * 60 * 60 * 1000))
+          : null,
+      })),
+    };
+  }
+
+  if (type === "highUsage" || type === "noMovement") {
+    const usage = (await prismaAny.$queryRawUnsafe(
+      `
+      SELECT
+        p.id,
+        COALESCE(NULLIF(p."nameHe", ''), p."name") AS product,
+        COALESCE(SUM(CASE WHEN c."difference" < 0 THEN -c."difference" ELSE 0 END), 0)::float AS usage
+      FROM "InventoryProduct" p
+      LEFT JOIN "InventoryCount" c
+        ON c."inventoryProductId" = p.id
+       AND c."countDate" >= $1 AND c."countDate" <= $2
+      GROUP BY p.id, product
+      ORDER BY usage DESC
+      LIMIT 200
+    `,
+      window.from,
+      window.to,
+    )) as Array<{ id: string; product: string; usage: number }>;
+    const days = Math.max(1, windowDays);
+    if (type === "noMovement") {
+      return {
+        type,
+        columns: [
+          { key: "product", label: "product" },
+          { key: "avgDaily", label: "avgDaily" },
+        ],
+        rows: usage
+          .filter((u) => Number(u.usage) === 0)
+          .slice(0, 100)
+          .map((u) => ({
+            id: u.id,
+            product: u.product,
+            avgDaily: 0,
+          })),
+      };
+    }
+    const positive = usage.filter((u) => Number(u.usage) > 0);
+    const avg = positive.length
+      ? positive.reduce((s, u) => s + Number(u.usage), 0) / positive.length
+      : 0;
+    return {
+      type,
+      columns: [
+        { key: "product", label: "product" },
+        { key: "avgDaily", label: "avgDaily" },
+        { key: "avgWeekly", label: "avgWeekly" },
+        { key: "avgMonthly", label: "avgMonthly" },
+      ],
+      rows: positive
+        .filter((u) => avg === 0 || Number(u.usage) >= avg)
+        .slice(0, 50)
+        .map((u) => {
+          const daily = Number(u.usage) / days;
+          return {
+            id: u.id,
+            product: u.product,
+            avgDaily: Math.round(daily * 100) / 100,
+            avgWeekly: Math.round(daily * 7 * 100) / 100,
+            avgMonthly: Math.round(daily * 30 * 100) / 100,
+          };
+        }),
+    };
+  }
+
+  if (type === "counts") {
+    const sessions = (await prismaAny.inventoryCountSession.findMany({
+      where: {
+        countDate: { gte: window.from, lte: window.to },
+        ...(input.locationId ? { locationId: input.locationId } : {}),
+      },
+      orderBy: { createdAt: "desc" },
+      take: 100,
+      select: {
+        id: true,
+        sessionNumber: true,
+        locationName: true,
+        productCount: true,
+        shortageCount: true,
+        surplusCount: true,
+        createdAt: true,
+      },
+    })) as Array<{
+      id: string;
+      sessionNumber: number;
+      locationName: string;
+      productCount: number;
+      shortageCount: number;
+      surplusCount: number;
+      createdAt: Date;
+    }>;
+    return {
+      type,
+      columns: [
+        { key: "session", label: "session" },
+        { key: "location", label: "location" },
+        { key: "products", label: "products" },
+        { key: "shortage", label: "shortage" },
+        { key: "surplus", label: "surplus" },
+        { key: "when", label: "when" },
+      ],
+      rows: sessions.map((s) => ({
+        id: s.id,
+        session: `#${s.sessionNumber}`,
+        location: s.locationName || "—",
+        products: s.productCount,
+        shortage: s.shortageCount,
+        surplus: s.surplusCount,
+        when: s.createdAt.toISOString(),
+      })),
+    };
+  }
+
+  if (type === "locations" || type === "activeLocations") {
+    const dash = await getInventoryAnalyticsDashboard(input);
+    const list =
+      type === "activeLocations"
+        ? dash.locations.filter((l) => l.lastCountedAt)
+        : dash.locations;
+    return {
+      type,
+      columns: [
+        { key: "location", label: "location" },
+        { key: "products", label: "products" },
+        { key: "shortage", label: "shortage" },
+        { key: "surplus", label: "surplus" },
+        { key: "accuracy", label: "accuracy" },
+        { key: "last", label: "last" },
+      ],
+      rows: list.map((l) => ({
+        id: l.id,
+        location: l.name,
+        products: l.productCount,
+        shortage: l.shortageCount,
+        surplus: l.surplusCount,
+        accuracy: `${l.accuracyPct}%`,
+        last: l.lastCountedAt,
+      })),
+    };
+  }
+
+  if (type === "workers") {
+    const dash = await getInventoryAnalyticsDashboard(input);
+    return {
+      type,
+      columns: [
+        { key: "worker", label: "worker" },
+        { key: "products", label: "products" },
+        { key: "units", label: "units" },
+        { key: "accuracy", label: "accuracy" },
+        { key: "areas", label: "areas" },
+      ],
+      rows: dash.workers.map((w) => ({
+        id: w.id,
+        worker: w.name,
+        products: w.productsCounted,
+        units: w.unitsCounted,
+        accuracy: `${w.accuracyPct}%`,
+        areas: w.areaCount,
+      })),
+    };
+  }
+
+  return { type, columns: [], rows: [] };
+}
+
+/** תאימות לאחור */
+export async function getAnalyticsDrill(
+  type: AnalyticsDrillType,
+  input: Parameters<typeof getAnalyticsDrillTable>[1],
+) {
+  const table = await getAnalyticsDrillTable(type, input);
+  return table.rows.map((r, i) => ({
+    id: String(r.id ?? i),
+    title: String(r.product ?? r.location ?? r.worker ?? r.session ?? r.id ?? ""),
+    subtitle: r.location != null ? String(r.location) : undefined,
+    value: typeof r.missing === "number" ? r.missing : typeof r.surplus === "number" ? r.surplus : undefined,
+    meta: r.when != null ? String(r.when) : undefined,
+  }));
 }

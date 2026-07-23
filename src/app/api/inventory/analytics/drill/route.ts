@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireDb } from "@/lib/api-route";
-import { getAnalyticsDrill } from "@/lib/inventory/analytics-service";
+import { getAnalyticsDrillTable } from "@/lib/inventory/analytics-service";
 import type { AnalyticsDrillType } from "@/lib/inventory/analytics-types";
 
 const TYPES = new Set<AnalyticsDrillType>([
@@ -9,10 +9,12 @@ const TYPES = new Set<AnalyticsDrillType>([
   "uncounted",
   "belowMinimum",
   "noMovement",
+  "highUsage",
   "activeLocations",
   "counts",
   "workers",
   "locations",
+  "dayUsage",
 ]);
 
 export async function GET(req: NextRequest) {
@@ -26,12 +28,14 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const data = await getAnalyticsDrill(type, {
+    const data = await getAnalyticsDrillTable(type, {
       range: sp.get("range"),
       from: sp.get("from"),
       to: sp.get("to"),
       locationId: sp.get("locationId"),
       category: sp.get("category"),
+      productId: sp.get("productId"),
+      day: sp.get("day"),
     });
     return NextResponse.json({ ok: true, data });
   } catch (e) {

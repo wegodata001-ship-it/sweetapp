@@ -1,13 +1,15 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   ArrowRight,
   BarChart3,
   Download,
   Loader2,
   RefreshCw,
+  Search,
+  X,
 } from "lucide-react";
 import {
   Area,
@@ -29,25 +31,28 @@ import {
 import { useI18n } from "@/components/i18n-provider";
 import type {
   AnalyticsDashboardDto,
-  AnalyticsDrillRow,
+  AnalyticsDrillTable,
   AnalyticsDrillType,
   AnalyticsRange,
+  ProductSearchHit,
 } from "@/lib/inventory/analytics-types";
 
 const PIE_COLORS = ["#6c4cff", "#0ea5e9", "#10b981", "#f59e0b", "#ef4444", "#64748b"];
 
-type DrillState = { type: AnalyticsDrillType; title: string } | null;
+type DrillState = { type: AnalyticsDrillType; title: string; day?: string } | null;
 
 function KpiCard({
   label,
   value,
   onClick,
   tone = "default",
+  hint,
 }: {
   label: string;
   value: string | number;
   onClick?: () => void;
   tone?: "default" | "danger" | "ok" | "warn";
+  hint?: string;
 }) {
   const toneCls =
     tone === "danger"
@@ -63,11 +68,12 @@ function KpiCard({
       type={onClick ? "button" : undefined}
       onClick={onClick}
       className={`min-w-0 rounded-2xl p-3 text-start ring-1 shadow-sm ${toneCls} ${
-        onClick ? "transition hover:brightness-95 active:scale-[0.99]" : ""
+        onClick ? "cursor-pointer transition hover:brightness-95 active:scale-[0.99]" : ""
       }`}
     >
       <p className="text-[11px] font-bold opacity-70">{label}</p>
       <p className="mt-1 truncate text-xl font-black tabular-nums">{value}</p>
+      {hint ? <p className="mt-0.5 text-[10px] font-semibold opacity-60">{hint}</p> : null}
     </Comp>
   );
 }
@@ -122,57 +128,76 @@ function ProductList({
   );
 }
 
-function Heatmap({ cells, t }: { cells: { day: number; hour: number; value: number }[]; t: (k: string) => string }) {
-  /** 6 בלוקים של 4 שעות — בלי גלילה אופקית במובייל */
-  const buckets = [0, 4, 8, 12, 16, 20];
-  const agg = new Map<string, number>();
-  for (const c of cells) {
-    const b = Math.floor(c.hour / 4) * 4;
-    const key = `${c.day}-${b}`;
-    agg.set(key, (agg.get(key) ?? 0) + c.value);
-  }
-  const max = Math.max(1, ...agg.values());
-  const days = [0, 1, 2, 3, 4, 5, 6];
-  const dayLabels = [
-    t("heatSun"),
-    t("heatMon"),
-    t("heatTue"),
-    t("heatWed"),
-    t("heatThu"),
-    t("heatFri"),
-    t("heatSat"),
-  ];
-
+function DrillSheet({
+  open,
+  title,
+  loading,
+  table,
+  onClose,
+  t,
+  dir,
+}: {
+  open: boolean;
+  title: string;
+  loading: boolean;
+  table: AnalyticsDrillTable | null;
+  onClose: () => void;
+  t: (k: string) => string;
+  dir: string;
+}) {
+  if (!open) return null;
+  const colLabel = (key: string) => t(`col_${key}`);
   return (
-    <div className="w-full">
-      <div className="mb-1 grid grid-cols-[2rem_repeat(6,minmax(0,1fr))] gap-1 text-[9px] font-bold text-slate-400">
-        <span />
-        {buckets.map((h) => (
-          <span key={h} className="text-center">
-            {h}
-          </span>
-        ))}
-      </div>
-      {days.map((d) => (
-        <div
-          key={d}
-          className="mb-1 grid grid-cols-[2rem_repeat(6,minmax(0,1fr))] gap-1"
-        >
-          <span className="text-[10px] font-bold text-slate-500">{dayLabels[d]}</span>
-          {buckets.map((h) => {
-            const v = agg.get(`${d}-${h}`) ?? 0;
-            const alpha = v === 0 ? 0.06 : 0.15 + (v / max) * 0.85;
-            return (
-              <div
-                key={h}
-                title={`${dayLabels[d]} ${h}:00 — ${v}`}
-                className="h-7 rounded-md sm:h-8"
-                style={{ background: `rgba(108, 76, 255, ${alpha})` }}
-              />
-            );
-          })}
+    <div className="fixed inset-0 z-[90] flex items-end justify-center bg-slate-950/50 p-0 sm:items-center sm:p-4">
+      <div
+        className="flex max-h-[88dvh] w-full max-w-3xl flex-col rounded-t-3xl bg-white shadow-xl sm:rounded-3xl"
+        dir={dir}
+      >
+        <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
+          <h3 className="text-base font-black text-slate-900">{title}</h3>
+          <button
+            type="button"
+            onClick={onClose}
+            className="grid h-10 w-10 place-items-center rounded-xl text-slate-500 hover:bg-slate-100"
+          >
+            <X className="h-5 w-5" />
+          </button>
         </div>
-      ))}
+        <div className="min-h-0 flex-1 overflow-auto px-3 py-3 sm:px-4">
+          {loading ? (
+            <div className="flex justify-center py-10">
+              <Loader2 className="h-6 w-6 animate-spin text-[#6c4cff]" />
+            </div>
+          ) : !table || table.rows.length === 0 ? (
+            <p className="py-8 text-center text-sm font-semibold text-slate-400">{t("empty")}</p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[520px] text-start text-xs sm:text-sm">
+                <thead>
+                  <tr className="border-b border-slate-100 text-slate-500">
+                    {table.columns.map((c) => (
+                      <th key={c.key} className="px-2 py-2 font-bold">
+                        {colLabel(c.key)}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {table.rows.map((row, idx) => (
+                    <tr key={String(row.id ?? idx)} className="border-b border-slate-50">
+                      {table.columns.map((c) => (
+                        <td key={c.key} className="px-2 py-2 font-semibold tabular-nums text-slate-800">
+                          {row[c.key] == null || row[c.key] === "" ? "—" : String(row[c.key])}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
@@ -189,22 +214,29 @@ export function InventoryAnalyticsDashboard() {
   const [locationId, setLocationId] = useState("");
   const [workerId, setWorkerId] = useState("");
   const [category, setCategory] = useState("");
+  const [productId, setProductId] = useState("");
+  const [productLabel, setProductLabel] = useState("");
+  const [productQ, setProductQ] = useState("");
+  const [productHits, setProductHits] = useState<ProductSearchHit[]>([]);
+  const [productSearching, setProductSearching] = useState(false);
   const [data, setData] = useState<AnalyticsDashboardDto | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [loadMs, setLoadMs] = useState<number | null>(null);
   const [drill, setDrill] = useState<DrillState>(null);
-  const [drillRows, setDrillRows] = useState<AnalyticsDrillRow[]>([]);
+  const [drillTable, setDrillTable] = useState<AnalyticsDrillTable | null>(null);
   const [drillLoading, setDrillLoading] = useState(false);
   const [trendTab, setTrendTab] = useState<"daily" | "weekly" | "monthly" | "yearly">("daily");
+  const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const query = useMemo(() => {
     const p = new URLSearchParams({ range });
     if (locationId) p.set("locationId", locationId);
     if (workerId) p.set("workerId", workerId);
     if (category) p.set("category", category);
+    if (productId) p.set("productId", productId);
     return p.toString();
-  }, [range, locationId, workerId, category]);
+  }, [range, locationId, workerId, category, productId]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -239,16 +271,48 @@ export function InventoryAnalyticsDashboard() {
     void load();
   }, [load]);
 
-  const openDrill = async (type: AnalyticsDrillType, title: string) => {
-    setDrill({ type, title });
+  useEffect(() => {
+    if (searchTimer.current) clearTimeout(searchTimer.current);
+    const q = productQ.trim();
+    if (q.length < 1) {
+      setProductHits([]);
+      return;
+    }
+    searchTimer.current = setTimeout(() => {
+      void (async () => {
+        setProductSearching(true);
+        try {
+          const res = await fetch(
+            `/api/inventory/analytics/products?q=${encodeURIComponent(q)}`,
+            { credentials: "same-origin" },
+          );
+          const j = (await res.json()) as { data?: ProductSearchHit[] };
+          setProductHits(j.data ?? []);
+        } catch {
+          setProductHits([]);
+        } finally {
+          setProductSearching(false);
+        }
+      })();
+    }, 280);
+    return () => {
+      if (searchTimer.current) clearTimeout(searchTimer.current);
+    };
+  }, [productQ]);
+
+  const openDrill = async (type: AnalyticsDrillType, title: string, day?: string) => {
+    setDrill({ type, title, day });
     setDrillLoading(true);
-    setDrillRows([]);
+    setDrillTable(null);
     try {
-      const res = await fetch(`/api/inventory/analytics/drill?type=${type}&${query}`, {
+      const params = new URLSearchParams(query);
+      params.set("type", type);
+      if (day) params.set("day", day);
+      const res = await fetch(`/api/inventory/analytics/drill?${params}`, {
         credentials: "same-origin",
       });
-      const j = (await res.json()) as { ok?: boolean; data?: AnalyticsDrillRow[] };
-      setDrillRows(j.data ?? []);
+      const j = (await res.json()) as { ok?: boolean; data?: AnalyticsDrillTable };
+      setDrillTable(j.data ?? null);
     } finally {
       setDrillLoading(false);
     }
@@ -258,6 +322,13 @@ export function InventoryAnalyticsDashboard() {
     window.open(`/api/inventory/analytics/export?format=${format}&${query}`, "_blank");
   };
 
+  const clearProduct = () => {
+    setProductId("");
+    setProductLabel("");
+    setProductQ("");
+    setProductHits([]);
+  };
+
   const trendData = data?.usage[trendTab] ?? [];
   const pieAccuracy = data
     ? [
@@ -265,6 +336,7 @@ export function InventoryAnalyticsDashboard() {
         { name: t("gap"), value: Math.max(0, 100 - data.kpis.avgAccuracyPct) },
       ]
     : [];
+  const focus = data?.productFocus ?? null;
 
   const selectCls =
     "h-10 w-full rounded-2xl border border-[#e7ecf5] bg-white px-3 text-sm font-semibold outline-none focus:border-[#6c4cff] sm:w-auto";
@@ -366,6 +438,57 @@ export function InventoryAnalyticsDashboard() {
             </option>
           ))}
         </select>
+
+        <div className="relative w-full min-w-[14rem] flex-1 sm:max-w-md">
+          <Search className="pointer-events-none absolute top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400 ltr:left-3 rtl:right-3" />
+          <input
+            value={productId ? productLabel : productQ}
+            onChange={(e) => {
+              if (productId) clearProduct();
+              setProductQ(e.target.value);
+            }}
+            placeholder={t("filterProduct")}
+            className={`${selectCls} w-full ltr:pl-9 rtl:pr-9`}
+          />
+          {productId ? (
+            <button
+              type="button"
+              onClick={clearProduct}
+              className="absolute top-1/2 -translate-y-1/2 rounded-lg p-1 text-slate-400 hover:bg-slate-100 ltr:right-2 rtl:left-2"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          ) : null}
+          {!productId && (productSearching || productHits.length > 0) ? (
+            <ul className="absolute z-20 mt-1 max-h-56 w-full overflow-y-auto rounded-2xl border border-[#e7ecf5] bg-white py-1 shadow-lg">
+              {productSearching ? (
+                <li className="flex justify-center py-3">
+                  <Loader2 className="h-4 w-4 animate-spin text-[#6c4cff]" />
+                </li>
+              ) : (
+                productHits.map((hit) => (
+                  <li key={hit.id}>
+                    <button
+                      type="button"
+                      className="flex w-full flex-col px-3 py-2 text-start hover:bg-[#f6f8fc]"
+                      onClick={() => {
+                        setProductId(hit.id);
+                        setProductLabel(hit.name);
+                        setProductQ("");
+                        setProductHits([]);
+                      }}
+                    >
+                      <span className="text-sm font-black text-slate-900">{hit.name}</span>
+                      <span className="text-[10px] font-semibold text-slate-400">
+                        {[hit.barcode, hit.sku, hit.nameAr, hit.nameEn].filter(Boolean).join(" · ")}
+                      </span>
+                    </button>
+                  </li>
+                ))
+              )}
+            </ul>
+          ) : null}
+        </div>
       </div>
 
       {loading && !data ? (
@@ -378,8 +501,53 @@ export function InventoryAnalyticsDashboard() {
         </p>
       ) : data ? (
         <>
+          {focus ? (
+            <Section title={t("productFocusTitle", { name: focus.name })}>
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
+                <KpiCard label={t("avgDaily")} value={focus.avgDaily} tone="ok" />
+                <KpiCard label={t("avgWeekly")} value={focus.avgWeekly} />
+                <KpiCard label={t("avgMonthly")} value={focus.avgMonthly} />
+                <KpiCard label={t("avgYearly")} value={focus.avgYearly} />
+                <KpiCard
+                  label={t("daysLeft")}
+                  value={focus.daysLeft != null ? focus.daysLeft : "—"}
+                  tone={focus.daysLeft != null && focus.daysLeft < 7 ? "danger" : "warn"}
+                  hint={focus.daysLeft != null ? t("daysLeftHint", { d: focus.daysLeft }) : undefined}
+                />
+                <KpiCard
+                  label={t("lastUsage")}
+                  value={
+                    focus.lastUsageAt
+                      ? new Date(focus.lastUsageAt).toLocaleDateString()
+                      : "—"
+                  }
+                />
+                <KpiCard label={t("countsPerformed")} value={focus.countsPerformed} />
+                <KpiCard label={t("currentStock")} value={focus.currentQty} />
+              </div>
+              <div className="mt-3">
+                <p className="mb-2 text-xs font-black text-slate-600">{t("productLocations")}</p>
+                <ul className="space-y-1">
+                  {focus.locations.map((loc, i) => (
+                    <li
+                      key={`${loc.id ?? "x"}-${i}`}
+                      className="flex items-center justify-between rounded-xl bg-slate-50 px-3 py-2 text-sm ring-1 ring-slate-100"
+                    >
+                      <span className="font-bold text-slate-800">{loc.name}</span>
+                      <span className="font-black tabular-nums">{loc.qty}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </Section>
+          ) : null}
+
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
-            <KpiCard label={t("kpiProducts")} value={data.kpis.totalProducts} />
+            <KpiCard
+              label={t("kpiProducts")}
+              value={data.kpis.totalProducts}
+              onClick={() => void openDrill("highUsage", t("kpiProducts"))}
+            />
             <KpiCard
               label={t("kpiLocations")}
               value={data.kpis.totalLocations}
@@ -402,11 +570,13 @@ export function InventoryAnalyticsDashboard() {
               value={data.kpis.shortageProducts}
               tone="danger"
               onClick={() => void openDrill("shortages", t("kpiShortage"))}
+              hint={t("tapForTable")}
             />
             <KpiCard
               label={t("kpiSurplus")}
               value={data.kpis.surplusProducts}
               onClick={() => void openDrill("surpluses", t("kpiSurplus"))}
+              hint={t("tapForTable")}
             />
             <KpiCard label={t("kpiUnits")} value={data.kpis.totalUnits} />
             <KpiCard
@@ -414,6 +584,7 @@ export function InventoryAnalyticsDashboard() {
               value={data.kpis.uncountedOver30Days}
               tone="warn"
               onClick={() => void openDrill("uncounted", t("kpiUncounted30"))}
+              hint={t("tapForTable")}
             />
             <KpiCard
               label={t("kpiAvgDuration")}
@@ -448,7 +619,15 @@ export function InventoryAnalyticsDashboard() {
           >
             <div className="h-56 w-full sm:h-72">
               <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={trendData}>
+                <AreaChart
+                  data={trendData}
+                  onClick={(state) => {
+                    const period = (state as { activeLabel?: string } | undefined)?.activeLabel;
+                    if (period && trendTab === "daily") {
+                      void openDrill("dayUsage", t("dayDrillTitle", { day: period }), period);
+                    }
+                  }}
+                >
                   <CartesianGrid strokeDasharray="3 3" stroke="#e7ecf5" />
                   <XAxis dataKey="period" tick={{ fontSize: 10 }} />
                   <YAxis tick={{ fontSize: 10 }} width={36} />
@@ -460,6 +639,7 @@ export function InventoryAnalyticsDashboard() {
                     name={t("usage")}
                     stroke="#6c4cff"
                     fill="#6c4cff33"
+                    style={{ cursor: "pointer" }}
                   />
                   <Area
                     type="monotone"
@@ -471,6 +651,9 @@ export function InventoryAnalyticsDashboard() {
                 </AreaChart>
               </ResponsiveContainer>
             </div>
+            <p className="mt-1 text-center text-[10px] font-bold text-slate-400">
+              {t("chartClickHint")}
+            </p>
             <div className="mt-4 h-56 w-full sm:h-64">
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={trendData}>
@@ -498,17 +681,19 @@ export function InventoryAnalyticsDashboard() {
                   <BarChart data={data.topProducts.mostUsed.slice(0, 10)} layout="vertical">
                     <CartesianGrid strokeDasharray="3 3" stroke="#e7ecf5" />
                     <XAxis type="number" tick={{ fontSize: 10 }} />
-                    <YAxis
-                      type="category"
-                      dataKey="name"
-                      width={90}
-                      tick={{ fontSize: 10 }}
-                    />
+                    <YAxis type="category" dataKey="name" width={90} tick={{ fontSize: 10 }} />
                     <Tooltip />
                     <Bar dataKey="quantity" name={t("usage")} fill="#6c4cff" radius={4} />
                   </BarChart>
                 </ResponsiveContainer>
               </div>
+              <button
+                type="button"
+                onClick={() => void openDrill("highUsage", t("topMostUsed"))}
+                className="mt-2 w-full rounded-xl bg-[#6c4cff]/10 py-2 text-xs font-black text-[#6c4cff]"
+              >
+                {t("tapForTable")}
+              </button>
             </Section>
             <Section title={t("accuracyPie")}>
               <div className="h-56">
@@ -533,6 +718,13 @@ export function InventoryAnalyticsDashboard() {
             </Section>
             <Section title={t("topNoMovement")}>
               <ProductList items={data.topProducts.noMovement} empty={t("empty")} />
+              <button
+                type="button"
+                onClick={() => void openDrill("noMovement", t("topNoMovement"))}
+                className="mt-2 w-full rounded-xl bg-slate-100 py-2 text-xs font-black text-slate-700"
+              >
+                {t("tapForTable")}
+              </button>
             </Section>
             <Section title={t("topAnomalous")}>
               <ProductList items={data.topProducts.anomalous} empty={t("empty")} />
@@ -555,40 +747,18 @@ export function InventoryAnalyticsDashboard() {
                 </BarChart>
               </ResponsiveContainer>
             </div>
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[640px] text-start text-xs sm:text-sm">
-                <thead>
-                  <tr className="border-b border-slate-100 text-slate-500">
-                    <th className="py-2 font-bold">{t("colWorker")}</th>
-                    <th className="py-2 font-bold">{t("colProducts")}</th>
-                    <th className="py-2 font-bold">{t("colUnits")}</th>
-                    <th className="py-2 font-bold">{t("colDiffs")}</th>
-                    <th className="py-2 font-bold">{t("kpiAccuracy")}</th>
-                    <th className="py-2 font-bold">{t("colAreas")}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.workers.map((w) => (
-                    <tr key={w.id} className="border-b border-slate-50">
-                      <td className="py-2 font-semibold">{w.name}</td>
-                      <td className="py-2 tabular-nums">{w.productsCounted}</td>
-                      <td className="py-2 tabular-nums">{w.unitsCounted}</td>
-                      <td className="py-2 tabular-nums">{w.diffCount}</td>
-                      <td className="py-2 tabular-nums">{w.accuracyPct}%</td>
-                      <td className="py-2">{w.areaCount}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              {data.workers.length === 0 ? (
-                <p className="py-6 text-center text-sm font-semibold text-slate-400">{t("emptyWorkers")}</p>
-              ) : null}
-            </div>
+            <button
+              type="button"
+              onClick={() => void openDrill("workers", t("workersTitle"))}
+              className="w-full rounded-xl bg-slate-100 py-2 text-xs font-black text-slate-700"
+            >
+              {t("tapForTable")}
+            </button>
           </Section>
 
           <Section title={t("locationsTitle")}>
             <div className="space-y-2">
-              {data.locations.map((loc) => (
+              {data.locations.slice(0, 12).map((loc) => (
                 <div
                   key={loc.id}
                   className="rounded-2xl bg-slate-50 px-3 py-3 ring-1 ring-slate-100"
@@ -599,14 +769,21 @@ export function InventoryAnalyticsDashboard() {
                       {loc.lastCountedAt
                         ? new Date(loc.lastCountedAt).toLocaleString()
                         : t("neverCounted")}
-                      {loc.lastCountedBy ? ` · ${loc.lastCountedBy}` : ""}
                     </p>
                   </div>
                   <div className="mt-2 grid grid-cols-2 gap-2 text-xs font-bold sm:grid-cols-4">
-                    <span>{t("colProducts")}: {loc.productCount}</span>
-                    <span className="text-rose-600">{t("kpiShortage")}: {loc.shortageCount}</span>
-                    <span className="text-emerald-700">{t("kpiSurplus")}: {loc.surplusCount}</span>
-                    <span>{t("kpiAccuracy")}: {loc.accuracyPct}%</span>
+                    <span>
+                      {t("colProducts")}: {loc.productCount}
+                    </span>
+                    <span className="text-rose-600">
+                      {t("kpiShortage")}: {loc.shortageCount}
+                    </span>
+                    <span className="text-emerald-700">
+                      {t("kpiSurplus")}: {loc.surplusCount}
+                    </span>
+                    <span>
+                      {t("kpiAccuracy")}: {loc.accuracyPct}%
+                    </span>
                   </div>
                 </div>
               ))}
@@ -615,35 +792,16 @@ export function InventoryAnalyticsDashboard() {
 
           <Section title={t("forecastTitle")}>
             <div className="space-y-2">
-              {data.forecast.slice(0, 15).map((f) => (
-                <div
-                  key={f.id}
-                  className="rounded-2xl border border-[#e7ecf5] px-3 py-3"
-                >
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <p className="font-black text-slate-900">{f.name}</p>
-                    <p className="text-xs font-bold text-slate-500">
-                      {t("stock")}: {f.currentQty} · {t("dailyUsage")}: {f.dailyUsage}
-                    </p>
-                  </div>
+              {data.forecast.slice(0, 12).map((f) => (
+                <div key={f.id} className="rounded-2xl border border-[#e7ecf5] px-3 py-3">
+                  <p className="font-black text-slate-900">{f.name}</p>
                   <p className="mt-1 text-sm font-semibold text-slate-700">
                     {f.daysLeft != null
                       ? t("coversDays", { d: f.daysLeft })
                       : t("noUsageSignal")}
                   </p>
-                  <div className="mt-1 flex flex-wrap gap-1 text-[10px] font-black">
-                    <span className={`rounded-full px-2 py-0.5 ${f.covers3d ? "bg-emerald-50 text-emerald-700" : "bg-rose-50 text-rose-700"}`}>
-                      3d
-                    </span>
-                    <span className={`rounded-full px-2 py-0.5 ${f.covers7d ? "bg-emerald-50 text-emerald-700" : "bg-rose-50 text-rose-700"}`}>
-                      7d
-                    </span>
-                    <span className={`rounded-full px-2 py-0.5 ${f.covers30d ? "bg-emerald-50 text-emerald-700" : "bg-rose-50 text-rose-700"}`}>
-                      30d
-                    </span>
-                  </div>
                   {f.orderInDays != null && f.daysLeft != null && f.daysLeft < 14 ? (
-                    <p className="mt-2 text-xs font-black text-amber-700">
+                    <p className="mt-1 text-xs font-black text-amber-700">
                       {t("orderInDays", { d: f.orderInDays })}
                     </p>
                   ) : null}
@@ -656,86 +814,18 @@ export function InventoryAnalyticsDashboard() {
               ) : null}
             </div>
           </Section>
-
-          <Section title={t("criticalTitle")}>
-            <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
-              <div>
-                <p className="mb-1 text-xs font-black text-rose-600">{t("critBelowMin")}</p>
-                <ProductList items={data.critical.belowMinimum} empty={t("empty")} />
-              </div>
-              <div>
-                <p className="mb-1 text-xs font-black text-amber-600">{t("critEndsWeek")}</p>
-                <ProductList items={data.critical.endsThisWeek} empty={t("empty")} />
-              </div>
-              <div>
-                <p className="mb-1 text-xs font-black text-slate-600">{t("critNever")}</p>
-                <ProductList items={data.critical.neverCounted} empty={t("empty")} />
-              </div>
-              <div>
-                <p className="mb-1 text-xs font-black text-slate-600">{t("critNoMove")}</p>
-                <ProductList items={data.critical.noMovement} empty={t("empty")} />
-              </div>
-              <div>
-                <p className="mb-1 text-xs font-black text-[#6c4cff]">{t("critAnomaly")}</p>
-                <ProductList items={data.critical.anomalous} empty={t("empty")} />
-              </div>
-            </div>
-          </Section>
-
-          <Section title={t("heatmapTitle")}>
-            <Heatmap cells={data.heatmap} t={t} />
-          </Section>
         </>
       ) : null}
 
-      {drill ? (
-        <div className="fixed inset-0 z-[90] flex items-end justify-center bg-slate-950/50 p-0 sm:items-center sm:p-4">
-          <div
-            className="flex max-h-[85dvh] w-full max-w-lg flex-col rounded-t-3xl bg-white shadow-xl sm:rounded-3xl"
-            dir={dir}
-          >
-            <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
-              <h3 className="text-base font-black text-slate-900">{drill.title}</h3>
-              <button
-                type="button"
-                onClick={() => setDrill(null)}
-                className="rounded-xl px-3 py-1.5 text-sm font-bold text-slate-500 hover:bg-slate-100"
-              >
-                {t("close")}
-              </button>
-            </div>
-            <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
-              {drillLoading ? (
-                <div className="flex justify-center py-10">
-                  <Loader2 className="h-6 w-6 animate-spin text-[#6c4cff]" />
-                </div>
-              ) : drillRows.length === 0 ? (
-                <p className="py-8 text-center text-sm font-semibold text-slate-400">{t("empty")}</p>
-              ) : (
-                <ul className="divide-y divide-slate-100">
-                  {drillRows.map((row) => (
-                    <li key={row.id} className="flex items-start justify-between gap-2 py-2.5">
-                      <div className="min-w-0">
-                        <p className="truncate font-bold text-slate-900">{row.title}</p>
-                        {row.subtitle || row.meta ? (
-                          <p className="truncate text-xs font-semibold text-slate-400">
-                            {row.subtitle ?? row.meta}
-                          </p>
-                        ) : null}
-                      </div>
-                      {row.value != null ? (
-                        <span className="shrink-0 font-black tabular-nums text-slate-800">
-                          {row.value}
-                        </span>
-                      ) : null}
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          </div>
-        </div>
-      ) : null}
+      <DrillSheet
+        open={!!drill}
+        title={drill?.title ?? ""}
+        loading={drillLoading}
+        table={drillTable}
+        onClose={() => setDrill(null)}
+        t={t}
+        dir={dir}
+      />
     </div>
   );
 }

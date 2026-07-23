@@ -127,6 +127,7 @@ export function ProductEditModal({ open, initial, onClose, onSaved, t }: Props) 
               value={form.nameHe}
               onChange={(e) => setForm((f) => (f ? { ...f, nameHe: e.target.value } : f))}
               className={inputClass}
+              dir="rtl"
             />
           </label>
           <label className="block">
@@ -166,6 +167,40 @@ export function ProductEditModal({ open, initial, onClose, onSaved, t }: Props) 
             />
           </label>
           <label className="block">
+            <span className="text-xs font-bold text-slate-600">{t("minimum")}</span>
+            <input
+              type="number"
+              min={0}
+              value={form.minimumQuantity}
+              onChange={(e) =>
+                setForm((f) =>
+                  f ? { ...f, minimumQuantity: Number(e.target.value) || 0 } : f,
+                )
+              }
+              className={inputClass}
+            />
+          </label>
+          <label className="block">
+            <span className="text-xs font-bold text-slate-600">{t("maximum")}</span>
+            <input
+              type="number"
+              min={0}
+              value={form.maximumQuantity ?? ""}
+              onChange={(e) =>
+                setForm((f) =>
+                  f
+                    ? {
+                        ...f,
+                        maximumQuantity:
+                          e.target.value === "" ? null : Number(e.target.value),
+                      }
+                    : f,
+                )
+              }
+              className={inputClass}
+            />
+          </label>
+          <label className="block">
             <span className="text-xs font-bold text-slate-600">{t("unit")}</span>
             <input
               value={form.unit}
@@ -173,42 +208,6 @@ export function ProductEditModal({ open, initial, onClose, onSaved, t }: Props) 
               className={inputClass}
             />
           </label>
-          <div className="grid grid-cols-2 gap-2">
-            <label className="block">
-              <span className="text-xs font-bold text-slate-600">{t("minimum")}</span>
-              <input
-                type="number"
-                min={0}
-                value={form.minimumQuantity}
-                onChange={(e) =>
-                  setForm((f) =>
-                    f ? { ...f, minimumQuantity: Number(e.target.value) || 0 } : f,
-                  )
-                }
-                className={inputClass}
-              />
-            </label>
-            <label className="block">
-              <span className="text-xs font-bold text-slate-600">{t("maximum")}</span>
-              <input
-                type="number"
-                min={0}
-                value={form.maximumQuantity ?? ""}
-                onChange={(e) =>
-                  setForm((f) =>
-                    f
-                      ? {
-                          ...f,
-                          maximumQuantity:
-                            e.target.value === "" ? null : Number(e.target.value),
-                        }
-                      : f,
-                  )
-                }
-                className={inputClass}
-              />
-            </label>
-          </div>
           {error ? <p className="text-sm font-bold text-rose-600">{error}</p> : null}
         </div>
 

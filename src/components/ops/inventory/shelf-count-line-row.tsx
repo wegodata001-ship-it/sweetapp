@@ -18,7 +18,7 @@ import type { LocationWorkerDto } from "@/components/ops/inventory-count/types";
 
 export type CountRowVariant = "table" | "card";
 
-/** productId → workerId → qty string */
+/** productId → workerId → qty string (מנגנון שמירה ללא שינוי) */
 export type WorkerQtyMap = Record<string, string>;
 
 export type ShelfCountLineRowProps = {
@@ -32,9 +32,7 @@ export type ShelfCountLineRowProps = {
   systemShortage: number;
   minimumQuantity: number;
   workers: LocationWorkerDto[];
-  /** כמויות לפי עובד (כשיש עובדים במיקום) */
   workerQtys: WorkerQtyMap;
-  /** סה״כ ידני — רק כשאין עובדים (תאימות לאחור) */
   actualRaw: string;
   saving?: boolean;
   readOnly?: boolean;
@@ -47,7 +45,7 @@ export type ShelfCountLineRowProps = {
   t: (key: string) => string;
 };
 
-/** סה״כ נספר = סכום כמויות העובדים; ריק = 0 אם יש לפחות הזנה אחת */
+/** סה״כ נספר = סכום כמויות מיקומי הספירה (workers) — ללא שינוי לוגיקה */
 export function sumWorkerQuantities(
   workers: LocationWorkerDto[],
   workerQtys: WorkerQtyMap,
@@ -67,83 +65,41 @@ export function sumWorkerQuantities(
   return sum;
 }
 
-/** רוחבי עמודות משותפים — כותרת + שורות חייבות להשתמש באותו template */
-const COL = {
-  icon: "2.5rem",
-  product: "11rem",
-  metric: "5.25rem",
-  area: "5.75rem",
-  qty: "5.75rem",
-  counted: "5.75rem",
-  min: "5.25rem",
-  shortage: "6.75rem",
-  diff: "4.75rem",
-  actions: "8rem",
-} as const;
+/** תווית מיקום ספירה — אזור אחריות, אחרת שם */
+export function countSiteLabel(w: LocationWorkerDto): string {
+  const area = (w.workArea || "").trim();
+  if (area) return area;
+  return (w.displayName || "").trim() || "—";
+}
 
-export function countTableGridTemplate(workerCount: number): string {
-  const workerCols = Array.from(
-    { length: Math.max(0, workerCount) },
-    () => `${COL.metric} ${COL.area} ${COL.qty}`,
-  ).join(" ");
+/** Grid קבוע — עמודת مواقع الجرد דינמית בתוכה (לא עמודה לכל עובד) */
+export function countTableGridTemplate(_workerCount?: number): string {
   return [
-    COL.icon,
-    COL.product,
-    COL.metric,
-    COL.metric,
-    workerCols,
-    COL.counted,
-    COL.min,
-    COL.shortage,
-    COL.diff,
-    COL.actions,
-  ]
-    .filter((part) => part.length > 0)
-    .join(" ");
+    "2.25rem", // icon
+    "minmax(8.5rem, 12rem)", // product
+    "5.5rem", // system total
+    "5.5rem", // required qty
+    "minmax(12rem, 1fr)", // count sites
+    "5rem", // minimum
+    "5rem", // diff
+    "7rem", // actions
+  ].join(" ");
 }
 
 function CountTableGrid({
-  workers,
   className,
   children,
 }: {
-  workers: LocationWorkerDto[];
+  workers?: LocationWorkerDto[];
   className?: string;
   children: ReactNode;
 }) {
   return (
     <div
-      className={`grid min-w-max items-center gap-x-1.5 ${className ?? ""}`}
-      style={{ gridTemplateColumns: countTableGridTemplate(workers.length) }}
+      className={`grid items-center gap-x-2 gap-y-1 ${className ?? ""}`}
+      style={{ gridTemplateColumns: countTableGridTemplate() }}
     >
       {children}
-    </div>
-  );
-}
-
-function Cell({
-  label,
-  value,
-  className,
-  valueClassName,
-  showLabel,
-}: {
-  label: string;
-  value: ReactNode;
-  className?: string;
-  valueClassName?: string;
-  showLabel?: boolean;
-}) {
-  return (
-    <div
-      className={`min-w-0 rounded-xl bg-white/90 px-1.5 py-1 text-center ring-1 ring-[#e7ecf5] ${className ?? ""}`}
-    >
-      {showLabel ? (
-        <span className="block truncate text-[9px] font-bold text-slate-500">{label}</span>
-      ) : null}
-      <p className={`truncate text-sm font-black tabular-nums text-slate-800 ${valueClassName ?? ""}`}>
-        {value}
-      </p>
     </div>
   );
 }
@@ -157,6 +113,26 @@ function HeaderCell({
 }) {
   return (
     <div className={`min-w-0 truncate px-1 text-center ${className ?? ""}`}>{children}</div>
+  );
+}
+
+function MetricCell({
+  value,
+  className,
+  valueClassName,
+}: {
+  value: ReactNode;
+  className?: string;
+  valueClassName?: string;
+}) {
+  return (
+    <div
+      className={`min-w-0 rounded-xl bg-white/90 px-1.5 py-2 text-center ring-1 ring-[#e7ecf5] ${className ?? ""}`}
+    >
+      <p className={`truncate text-sm font-black tabular-nums text-slate-800 ${valueClassName ?? ""}`}>
+        {value}
+      </p>
+    </div>
   );
 }
 
@@ -183,7 +159,94 @@ function StatBlock({
   );
 }
 
-/** כותרת עמודות דינמית — אותו Grid כמו שורות הנתונים */
+function CountSiteSquare({
+  label,
+  value,
+  onChange,
+  readOnly,
+  large,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  readOnly?: boolean;
+  large?: boolean;
+}) {
+  return (
+    <div className="flex w-full min-w-[4.75rem] max-w-[7.5rem] flex-col items-center sm:w-auto">
+      <span
+        className="mb-1 w-full truncate text-center text-[11px] font-black leading-tight text-slate-700"
+        title={label}
+      >
+        {label}
+      </span>
+      <input
+        type="number"
+        inputMode="decimal"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder="—"
+        min={0}
+        readOnly={readOnly}
+        disabled={readOnly}
+        className={`w-full rounded-xl border-2 border-slate-300 bg-white text-center font-black tabular-nums text-slate-900 outline-none transition focus:border-[#6c4cff] focus:ring-2 focus:ring-[#6c4cff]/20 disabled:bg-slate-50 ${
+          large
+            ? "h-14 text-2xl sm:h-16 sm:text-3xl"
+            : "h-12 text-lg sm:h-[3.25rem] sm:text-xl"
+        }`}
+        aria-label={label}
+      />
+    </div>
+  );
+}
+
+function CountSitesPanel({
+  workers,
+  workerQtys,
+  onWorkerQtyChange,
+  countedTotalLabel,
+  countedSumLabel,
+  readOnly,
+  stacked,
+}: {
+  workers: LocationWorkerDto[];
+  workerQtys: WorkerQtyMap;
+  onWorkerQtyChange: (workerId: string, value: string) => void;
+  countedTotalLabel: string;
+  countedSumLabel: string;
+  readOnly?: boolean;
+  stacked?: boolean;
+}) {
+  if (workers.length === 0) return null;
+  return (
+    <div className="min-w-0 rounded-xl bg-slate-50/90 px-2 py-2 ring-1 ring-[#e7ecf5]">
+      <div
+        className={
+          stacked
+            ? "flex flex-col items-stretch gap-3"
+            : "flex flex-wrap items-end justify-center gap-2 sm:gap-3"
+        }
+      >
+        {workers.map((w) => (
+          <CountSiteSquare
+            key={w.id}
+            label={countSiteLabel(w)}
+            value={workerQtys[w.id] ?? ""}
+            onChange={(v) => onWorkerQtyChange(w.id, v)}
+            readOnly={readOnly}
+            large={stacked}
+          />
+        ))}
+      </div>
+      <p className="mt-2 text-center text-[11px] font-black text-emerald-800">
+        {countedSumLabel}:{" "}
+        <span className="tabular-nums text-base">{countedTotalLabel}</span>
+      </p>
+    </div>
+  );
+}
+
+/** כותרת עמודות — מבנה הלקוח */
 export function ShelfCountTableHeader({
   workers,
   t,
@@ -194,26 +257,14 @@ export function ShelfCountTableHeader({
   return (
     <CountTableGrid
       workers={workers}
-      className="rounded-2xl border border-[#e7ecf5] bg-[#f1f5f9] px-2.5 py-2 text-[10px] font-black text-slate-600 sm:px-3"
+      className="rounded-2xl border border-[#e7ecf5] bg-[#f1f5f9] px-2.5 py-2.5 text-[10px] font-black text-slate-600 sm:px-3 sm:text-[11px]"
     >
       <div aria-hidden />
       <HeaderCell className="text-end">{t("productCol")}</HeaderCell>
       <HeaderCell>{t("systemTotal")}</HeaderCell>
       <HeaderCell>{t("locationExpected")}</HeaderCell>
-      {workers.map((w) => {
-        const displayName = w.displayName || "—";
-        const workArea = (w.workArea || "").trim();
-        return (
-          <div key={w.id} className="contents">
-            <HeaderCell className="text-[#6c4cff]">{displayName}</HeaderCell>
-            <HeaderCell>{workArea || `${t("areaOf")} ${displayName}`}</HeaderCell>
-            <HeaderCell className="text-emerald-700">{t("workerQty")}</HeaderCell>
-          </div>
-        );
-      })}
-      <HeaderCell>{t("countedTotal")}</HeaderCell>
+      <HeaderCell className="text-[#6c4cff]">{t("countSites")}</HeaderCell>
       <HeaderCell>{t("minimum")}</HeaderCell>
-      <HeaderCell>{t("systemShortage")}</HeaderCell>
       <HeaderCell>{t("diff")}</HeaderCell>
       <HeaderCell>{t("actionsCol")}</HeaderCell>
     </CountTableGrid>
@@ -250,38 +301,36 @@ function useCountDerived(
         : "border-emerald-200 bg-emerald-50 text-emerald-700";
   const diffLabel =
     diff === null ? "—" : diff === 0 ? "0" : diff > 0 ? `+${diff}` : String(diff);
+  const diffTone =
+    diff === null
+      ? "text-slate-400"
+      : diff < 0
+        ? "text-rose-600"
+        : diff > 0
+          ? "text-amber-600"
+          : "text-emerald-600";
+  const diffBox =
+    diff === null
+      ? "ring-[#e7ecf5] bg-white/90"
+      : diff < 0
+        ? "ring-rose-200 bg-rose-50"
+        : diff > 0
+          ? "ring-amber-200 bg-amber-50"
+          : "ring-emerald-200 bg-emerald-50";
   const totalLabel =
     actual === null || Number.isNaN(actual) ? "—" : String(actual);
-  return { actual, diff, status, st, minimumStatus, minimumClasses, diffLabel, totalLabel };
-}
-
-function ShortageValue({
-  systemShortage,
-  minimumQuantity,
-  systemTotalQuantity,
-  t,
-}: {
-  systemShortage: number;
-  minimumQuantity: number;
-  systemTotalQuantity: number;
-  t: (key: string) => string;
-}) {
-  if (systemShortage <= 0) {
-    return <p className="text-sm font-black tabular-nums text-emerald-600">0</p>;
-  }
-  return (
-    <div className="space-y-0 text-[10px] font-black leading-tight text-rose-600">
-      <p>
-        {t("shortageMin")}: {minimumQuantity}
-      </p>
-      <p>
-        {t("shortageHave")}: {systemTotalQuantity}
-      </p>
-      <p>
-        {t("shortageMissing")}: {systemShortage}
-      </p>
-    </div>
-  );
+  return {
+    actual,
+    diff,
+    status,
+    st,
+    minimumStatus,
+    minimumClasses,
+    diffLabel,
+    diffTone,
+    diffBox,
+    totalLabel,
+  };
 }
 
 function WorkerQtyInput({
@@ -317,7 +366,6 @@ function ShelfCountLineRowInner({
   unit,
   systemQty,
   systemTotalQuantity,
-  systemShortage,
   minimumQuantity,
   workers,
   workerQtys,
@@ -325,7 +373,6 @@ function ShelfCountLineRowInner({
   saving,
   readOnly = false,
   variant = "table",
-  showColumnLabels = true,
   onWorkerQtyChange,
   onActualChange,
   onBump,
@@ -340,8 +387,17 @@ function ShelfCountLineRowInner({
       ? null
       : Number(actualRaw);
 
-  const { diff, status, st, minimumStatus, minimumClasses, diffLabel, totalLabel } =
-    useCountDerived(countedTotal, systemQty, systemTotalQuantity, minimumQuantity);
+  const {
+    diff,
+    status,
+    st,
+    minimumStatus,
+    minimumClasses,
+    diffLabel,
+    diffTone,
+    diffBox,
+    totalLabel,
+  } = useCountDerived(countedTotal, systemQty, systemTotalQuantity, minimumQuantity);
   const meta = [barcode, sku, unit].filter(Boolean).join(" · ");
 
   if (variant === "card") {
@@ -374,77 +430,44 @@ function ShelfCountLineRowInner({
         <div className="mt-3 grid grid-cols-2 gap-2">
           <StatBlock label={t("systemTotal")} value={systemTotalQuantity} />
           <StatBlock label={t("locationExpected")} value={systemQty} />
+        </div>
 
-          {hasWorkers
-            ? workers.map((w) => {
-                const displayName = w.displayName || "—";
-                const workArea = (w.workArea || "").trim();
-                return (
-                  <div key={w.id} className="col-span-2 space-y-2 rounded-2xl bg-slate-50/80 p-2 ring-1 ring-[#e7ecf5]">
-                    <div className="grid grid-cols-2 gap-2">
-                      <StatBlock label={t("workerName")} value={displayName} />
-                      <StatBlock
-                        label={t("workerArea")}
-                        value={workArea || `${t("areaOf")} ${displayName}`}
-                      />
-                    </div>
-                    <div className="rounded-xl bg-white px-2 py-2 text-center ring-1 ring-emerald-200">
-                      <span className="block text-[10px] font-bold text-emerald-700">
-                        {t("workerQty")}
-                      </span>
-                      <WorkerQtyInput
-                        value={workerQtys[w.id] ?? ""}
-                        onChange={(v) => onWorkerQtyChange(w.id, v)}
-                        readOnly={readOnly}
-                        className="mt-0.5 h-12 w-full border-0 bg-transparent text-center text-xl font-black tabular-nums text-slate-900 outline-none"
-                      />
-                    </div>
-                  </div>
-                );
-              })
-            : null}
-
-          <div className="rounded-xl bg-emerald-50/80 px-2 py-2 text-center ring-1 ring-emerald-200">
-            <span className="block text-[10px] font-bold text-emerald-800">{t("countedTotal")}</span>
-            {hasWorkers ? (
-              <p className="mt-0.5 text-xl font-black tabular-nums text-emerald-800">{totalLabel}</p>
-            ) : (
-              <WorkerQtyInput
-                value={actualRaw}
-                onChange={onActualChange}
-                readOnly={readOnly}
-                className="mt-0.5 h-12 w-full border-0 bg-transparent text-center text-xl font-black tabular-nums text-slate-900 outline-none"
-              />
-            )}
+        {hasWorkers ? (
+          <div className="mt-3">
+            <p className="mb-2 text-center text-[11px] font-black text-[#6c4cff]">
+              {t("countSites")}
+            </p>
+            <CountSitesPanel
+              workers={workers}
+              workerQtys={workerQtys}
+              onWorkerQtyChange={onWorkerQtyChange}
+              countedTotalLabel={totalLabel}
+              countedSumLabel={t("countedTotal")}
+              readOnly={readOnly}
+              stacked
+            />
           </div>
+        ) : (
+          <div className="mt-3 rounded-xl bg-emerald-50/80 px-2 py-2 text-center ring-1 ring-emerald-200">
+            <span className="block text-[10px] font-bold text-emerald-800">{t("countedTotal")}</span>
+            <WorkerQtyInput
+              value={actualRaw}
+              onChange={onActualChange}
+              readOnly={readOnly}
+              className="mt-0.5 h-14 w-full border-0 bg-transparent text-center text-2xl font-black tabular-nums text-slate-900 outline-none"
+            />
+          </div>
+        )}
+
+        <div className="mt-3 grid grid-cols-2 gap-2">
           <div className={`rounded-xl border px-2 py-2 text-center ${minimumClasses}`}>
             <span className="block text-[10px] font-bold">{t("minimum")}</span>
             <p className="mt-0.5 text-sm font-black tabular-nums">{minimumQuantity}</p>
           </div>
-          <StatBlock
-            label={t("systemShortage")}
-            value={
-              <ShortageValue
-                systemShortage={systemShortage}
-                minimumQuantity={minimumQuantity}
-                systemTotalQuantity={systemTotalQuantity}
-                t={t}
-              />
-            }
-          />
-          <StatBlock
-            label={t("diff")}
-            value={diffLabel}
-            valueClassName={
-              diff === null
-                ? "text-slate-400"
-                : diff < 0
-                  ? "text-rose-600"
-                  : diff > 0
-                    ? "text-amber-600"
-                    : "text-emerald-600"
-            }
-          />
+          <div className={`rounded-xl px-2 py-2 text-center ring-1 ${diffBox}`}>
+            <span className="block text-[10px] font-bold text-slate-500">{t("diff")}</span>
+            <p className={`mt-0.5 text-lg font-black tabular-nums ${diffTone}`}>{diffLabel}</p>
+          </div>
         </div>
 
         <div className="mt-3 flex items-center justify-between gap-2 border-t border-[#e7ecf5]/80 pt-3">
@@ -496,7 +519,7 @@ function ShelfCountLineRowInner({
   return (
     <CountTableGrid
       workers={workers}
-      className={`rounded-2xl border px-2.5 py-2 text-[10px] font-bold transition-shadow duration-200 sm:px-3 ${st.row}`}
+      className={`rounded-2xl border px-2.5 py-2.5 text-[10px] font-bold transition-shadow duration-200 sm:px-3 ${st.row}`}
     >
       <div className="grid h-9 w-9 place-items-center justify-self-center rounded-xl bg-white text-[#6c4cff] shadow-sm ring-1 ring-[#e7ecf5]">
         <Package className="h-4 w-4" strokeWidth={1.5} aria-hidden />
@@ -527,87 +550,39 @@ function ShelfCountLineRowInner({
         </div>
       </div>
 
-      <Cell label={t("systemTotal")} value={systemTotalQuantity} showLabel={showColumnLabels} />
-      <Cell label={t("locationExpected")} value={systemQty} showLabel={showColumnLabels} />
+      <MetricCell value={systemTotalQuantity} />
+      <MetricCell value={systemQty} />
 
-      {workers.map((w) => {
-        const displayName = w.displayName || "—";
-        const workArea = (w.workArea || "").trim();
-        const areaLabel = workArea || `${t("areaOf")} ${displayName}`;
-        return (
-          <div key={w.id} className="contents">
-            <Cell label={displayName} value={displayName} showLabel={showColumnLabels} />
-            <Cell label={areaLabel} value={workArea || "—"} showLabel={showColumnLabels} />
-            <div className="min-w-0 rounded-xl bg-white/90 px-1.5 py-1 text-center ring-1 ring-emerald-200">
-              {showColumnLabels ? (
-                <span className="block truncate text-[9px] font-bold text-emerald-700">
-                  {t("workerQty")}
-                </span>
-              ) : null}
-              <WorkerQtyInput
-                value={workerQtys[w.id] ?? ""}
-                onChange={(v) => onWorkerQtyChange(w.id, v)}
-                readOnly={readOnly}
-                className="w-full border-0 bg-transparent text-center text-sm font-black tabular-nums text-slate-900 outline-none"
-              />
-            </div>
-          </div>
-        );
-      })}
-
-      <div className="min-w-0 rounded-xl bg-emerald-50/90 px-1.5 py-1 text-center ring-1 ring-emerald-200">
-        {showColumnLabels ? (
-          <span className="block truncate text-[9px] font-bold text-emerald-800">
+      {hasWorkers ? (
+        <CountSitesPanel
+          workers={workers}
+          workerQtys={workerQtys}
+          onWorkerQtyChange={onWorkerQtyChange}
+          countedTotalLabel={totalLabel}
+          countedSumLabel={t("countedTotal")}
+          readOnly={readOnly}
+        />
+      ) : (
+        <div className="min-w-0 rounded-xl bg-emerald-50/90 px-2 py-2 text-center ring-1 ring-emerald-200">
+          <span className="mb-1 block text-[10px] font-bold text-emerald-800">
             {t("countedTotal")}
           </span>
-        ) : null}
-        {hasWorkers ? (
-          <p className="text-sm font-black tabular-nums text-emerald-800">{totalLabel}</p>
-        ) : (
           <WorkerQtyInput
             value={actualRaw}
             onChange={onActualChange}
             readOnly={readOnly}
-            className="w-full border-0 bg-transparent text-center text-sm font-black tabular-nums text-slate-900 outline-none"
+            className="h-12 w-full rounded-xl border-2 border-emerald-200 bg-white text-center text-xl font-black tabular-nums text-slate-900 outline-none"
           />
-        )}
-      </div>
+        </div>
+      )}
 
-      <div className={`min-w-0 rounded-xl border px-1.5 py-1 text-center ${minimumClasses}`}>
-        {showColumnLabels ? (
-          <span className="block truncate text-[9px] font-bold">{t("minimum")}</span>
-        ) : null}
+      <div className={`min-w-0 rounded-xl border px-1.5 py-2 text-center ${minimumClasses}`}>
         <p className="text-sm font-black tabular-nums">{minimumQuantity}</p>
       </div>
 
-      <div className="min-w-0 rounded-xl bg-white/90 px-1.5 py-1 text-center ring-1 ring-[#e7ecf5]">
-        {showColumnLabels ? (
-          <span className="block truncate text-[9px] font-bold text-slate-500">
-            {t("systemShortage")}
-          </span>
-        ) : null}
-        <ShortageValue
-          systemShortage={systemShortage}
-          minimumQuantity={minimumQuantity}
-          systemTotalQuantity={systemTotalQuantity}
-          t={t}
-        />
+      <div className={`min-w-0 rounded-xl px-1.5 py-2 text-center ring-1 ${diffBox}`}>
+        <p className={`text-sm font-black tabular-nums ${diffTone}`}>{diffLabel}</p>
       </div>
-
-      <Cell
-        label={t("diff")}
-        value={diffLabel}
-        showLabel={showColumnLabels}
-        valueClassName={
-          diff === null
-            ? "text-slate-400"
-            : diff < 0
-              ? "text-rose-600"
-              : diff > 0
-                ? "text-amber-600"
-                : "text-emerald-600"
-        }
-      />
 
       <div className="flex min-w-0 flex-wrap items-center justify-center gap-1">
         {!readOnly ? (

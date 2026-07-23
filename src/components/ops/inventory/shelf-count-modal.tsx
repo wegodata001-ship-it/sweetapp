@@ -26,8 +26,11 @@ import {
 import { LocationWorkersModal } from "./location-workers-modal";
 import { ProductEditModal, type ProductEditValues } from "./product-edit-modal";
 
-const TABLE_ROW_HEIGHT = 104;
-const CARD_ROW_HEIGHT = 380;
+/** גובה משוער לשורת טבלה / כרטיס — כולל ריבועי مواقع الجرد */
+const TABLE_ROW_BASE = 112;
+const TABLE_SITE_ROW = 78;
+const CARD_ROW_BASE = 260;
+const CARD_SITE_ROW = 100;
 const REFRESH_SHELVES_MS = 1200;
 const MOBILE_MQ = "(max-width: 767px)";
 /** עמוד ראשון קטן — אין pageSize 500; המשך ב־infinite scroll */
@@ -118,8 +121,11 @@ function ShelfCountModalInner({
   const [scrollTop, setScrollTop] = useState(0);
   const [viewportH, setViewportH] = useState(480);
   const isMobile = useIsMobileLayout();
-  const rowHeight = isMobile ? CARD_ROW_HEIGHT : TABLE_ROW_HEIGHT;
   const rowVariant = isMobile ? ("card" as const) : ("table" as const);
+  const siteCount = Math.max(workers.length, 1);
+  const rowHeight = isMobile
+    ? CARD_ROW_BASE + siteCount * CARD_SITE_ROW
+    : TABLE_ROW_BASE + Math.ceil(siteCount / 3) * TABLE_SITE_ROW;
 
   const listRef = useRef<HTMLDivElement>(null);
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);

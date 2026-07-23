@@ -176,6 +176,8 @@ export function ShelfAddProductsModal({
       headers: { "Content-Type": "application/json" },
       credentials: "same-origin",
       body: JSON.stringify({
+        /** name + nameHe — תאימות לאחור ללקוחות ישנים */
+        name: trimmed,
         nameHe: trimmed,
         nameAr: newNameAr.trim() || null,
         nameEn: newNameEn.trim() || null,
@@ -327,7 +329,7 @@ export function ShelfAddProductsModal({
         role="dialog"
         aria-modal="true"
       >
-        <div className="flex max-h-[90vh] w-full max-w-md flex-col rounded-t-[24px] border border-[#e7ecf5] bg-white shadow-2xl sm:rounded-[24px]">
+        <div className="flex max-h-[92dvh] w-full max-w-lg flex-col rounded-t-[24px] border border-[#e7ecf5] bg-white shadow-2xl sm:max-h-[90vh] sm:rounded-[24px]">
           <header className="flex items-center justify-between border-b border-[#e7ecf5] px-4 py-4">
             <button
               type="button"
@@ -436,15 +438,16 @@ export function ShelfAddProductsModal({
               </>
             ) : (
               <>
-                <p className="text-xs font-black text-slate-700">{tM("sectionGeneral")}</p>
+                <p className="text-xs font-black text-slate-700">{tM("sectionNames")}</p>
                 <label className="block">
                   <span className="text-xs font-bold text-slate-600">{tM("nameHe")}</span>
                   <input
                     value={newNameHe}
                     onChange={(e) => setNewNameHe(e.target.value)}
-                    className="mt-1 h-12 w-full rounded-2xl border border-[#e7ecf5] px-3 text-sm font-semibold"
+                    className="mt-1 h-12 w-full rounded-2xl border border-[#e7ecf5] bg-[#f6f8fc] px-3 text-sm font-semibold outline-none focus:border-[#6c4cff] focus:ring-2 focus:ring-[#6c4cff]/15"
                     placeholder={tM("newNamePlaceholder")}
                     autoFocus
+                    dir="rtl"
                   />
                 </label>
                 <label className="block">
@@ -452,8 +455,9 @@ export function ShelfAddProductsModal({
                   <input
                     value={newNameAr}
                     onChange={(e) => setNewNameAr(e.target.value)}
-                    className="mt-1 h-12 w-full rounded-2xl border border-[#e7ecf5] px-3 text-sm font-semibold"
+                    className="mt-1 h-12 w-full rounded-2xl border border-[#e7ecf5] bg-[#f6f8fc] px-3 text-sm font-semibold outline-none focus:border-[#6c4cff] focus:ring-2 focus:ring-[#6c4cff]/15"
                     dir="rtl"
+                    placeholder={tM("nameArPlaceholder")}
                   />
                 </label>
                 <label className="block">
@@ -461,62 +465,66 @@ export function ShelfAddProductsModal({
                   <input
                     value={newNameEn}
                     onChange={(e) => setNewNameEn(e.target.value)}
-                    className="mt-1 h-12 w-full rounded-2xl border border-[#e7ecf5] px-3 text-sm font-semibold"
+                    className="mt-1 h-12 w-full rounded-2xl border border-[#e7ecf5] bg-[#f6f8fc] px-3 text-sm font-semibold outline-none focus:border-[#6c4cff] focus:ring-2 focus:ring-[#6c4cff]/15"
                     dir="ltr"
+                    placeholder={tM("nameEnPlaceholder")}
                   />
                 </label>
-                <div className="grid grid-cols-2 gap-2">
-                  <label className="block">
-                    <span className="text-xs font-bold text-slate-600">{tM("barcode")}</span>
-                    <input
-                      value={newBarcode}
-                      onChange={(e) => setNewBarcode(e.target.value)}
-                      className="mt-1 h-12 w-full rounded-2xl border border-[#e7ecf5] px-3 text-sm font-semibold"
-                      dir="ltr"
-                    />
-                  </label>
-                  <label className="block">
-                    <span className="text-xs font-bold text-slate-600">{tM("sku")}</span>
-                    <input
-                      value={newSku}
-                      onChange={(e) => setNewSku(e.target.value)}
-                      className="mt-1 h-12 w-full rounded-2xl border border-[#e7ecf5] px-3 text-sm font-semibold"
-                      dir="ltr"
-                    />
-                  </label>
-                </div>
+
+                <p className="pt-1 text-xs font-black text-slate-700">{tM("sectionCodes")}</p>
+                <label className="block">
+                  <span className="text-xs font-bold text-slate-600">{tM("barcode")}</span>
+                  <input
+                    value={newBarcode}
+                    onChange={(e) => setNewBarcode(e.target.value)}
+                    className="mt-1 h-12 w-full rounded-2xl border border-[#e7ecf5] bg-[#f6f8fc] px-3 text-sm font-semibold outline-none focus:border-[#6c4cff] focus:ring-2 focus:ring-[#6c4cff]/15"
+                    dir="ltr"
+                    inputMode="numeric"
+                    placeholder={tM("barcodePlaceholder")}
+                  />
+                </label>
+                <label className="block">
+                  <span className="text-xs font-bold text-slate-600">{tM("sku")}</span>
+                  <input
+                    value={newSku}
+                    onChange={(e) => setNewSku(e.target.value)}
+                    className="mt-1 h-12 w-full rounded-2xl border border-[#e7ecf5] bg-[#f6f8fc] px-3 text-sm font-semibold outline-none focus:border-[#6c4cff] focus:ring-2 focus:ring-[#6c4cff]/15"
+                    dir="ltr"
+                    placeholder={tM("skuPlaceholder")}
+                  />
+                </label>
+
                 <p className="pt-1 text-xs font-black text-slate-700">{tM("sectionStock")}</p>
-                <div className="grid grid-cols-2 gap-2">
-                  <label className="block">
-                    <span className="text-xs font-bold text-slate-600">{tM("newMinimum")}</span>
-                    <input
-                      type="number"
-                      value={newMinimum}
-                      onChange={(e) => setNewMinimum(e.target.value)}
-                      className="mt-1 h-12 w-full rounded-2xl border border-[#e7ecf5] px-3 text-sm font-semibold"
-                      min={0}
-                    />
-                  </label>
-                  <label className="block">
-                    <span className="text-xs font-bold text-slate-600">{tM("newMaximum")}</span>
-                    <input
-                      type="number"
-                      value={newMaximum}
-                      onChange={(e) => setNewMaximum(e.target.value)}
-                      className="mt-1 h-12 w-full rounded-2xl border border-[#e7ecf5] px-3 text-sm font-semibold"
-                      min={0}
-                    />
-                  </label>
-                </div>
+                <label className="block">
+                  <span className="text-xs font-bold text-slate-600">{tM("newMinimum")}</span>
+                  <input
+                    type="number"
+                    value={newMinimum}
+                    onChange={(e) => setNewMinimum(e.target.value)}
+                    className="mt-1 h-12 w-full rounded-2xl border border-[#e7ecf5] bg-[#f6f8fc] px-3 text-sm font-semibold outline-none focus:border-[#6c4cff] focus:ring-2 focus:ring-[#6c4cff]/15"
+                    min={0}
+                  />
+                </label>
+                <label className="block">
+                  <span className="text-xs font-bold text-slate-600">{tM("newMaximum")}</span>
+                  <input
+                    type="number"
+                    value={newMaximum}
+                    onChange={(e) => setNewMaximum(e.target.value)}
+                    className="mt-1 h-12 w-full rounded-2xl border border-[#e7ecf5] bg-[#f6f8fc] px-3 text-sm font-semibold outline-none focus:border-[#6c4cff] focus:ring-2 focus:ring-[#6c4cff]/15"
+                    min={0}
+                  />
+                </label>
                 <label className="block">
                   <span className="text-xs font-bold text-slate-600">{tM("newUnit")}</span>
                   <input
                     value={newUnit}
                     onChange={(e) => setNewUnit(e.target.value)}
-                    className="mt-1 h-12 w-full rounded-2xl border border-[#e7ecf5] px-3 text-sm font-semibold"
+                    className="mt-1 h-12 w-full rounded-2xl border border-[#e7ecf5] bg-[#f6f8fc] px-3 text-sm font-semibold outline-none focus:border-[#6c4cff] focus:ring-2 focus:ring-[#6c4cff]/15"
                     placeholder={tM("newUnitPlaceholder")}
                   />
                 </label>
+
                 <div className="pt-1">
                   <LocationWorkersEditor
                     workers={workers}
@@ -524,32 +532,55 @@ export function ShelfAddProductsModal({
                     t={(k) => t(`ops.inventory.warehouse.modal.${k}`)}
                   />
                 </div>
+
+                <label className="block">
+                  <span className="text-xs font-bold text-slate-600">{tM("initialQty")}</span>
+                  <input
+                    type="number"
+                    inputMode="decimal"
+                    value={quantity}
+                    onChange={(e) => setQuantity(e.target.value)}
+                    className="mt-1 h-12 w-full rounded-2xl border border-[#e7ecf5] bg-[#f6f8fc] px-3 text-sm font-semibold outline-none focus:border-[#6c4cff] focus:ring-2 focus:ring-[#6c4cff]/15"
+                    placeholder="0"
+                  />
+                </label>
+
+                <label className="block">
+                  <span className="text-xs font-bold text-slate-600">{tM("slotNote")}</span>
+                  <input
+                    value={slotNote}
+                    onChange={(e) => setSlotNote(e.target.value)}
+                    className="mt-1 h-12 w-full rounded-2xl border border-[#e7ecf5] bg-[#f6f8fc] px-3 text-sm font-semibold outline-none focus:border-[#6c4cff] focus:ring-2 focus:ring-[#6c4cff]/15"
+                    placeholder={tM("slotOptional")}
+                  />
+                </label>
               </>
             )}
 
-            <label className="block">
-              <span className="text-xs font-bold text-slate-600">
-                {mode === "new" ? tM("initialQty") : tM("quantity")}
-              </span>
-              <input
-                type="number"
-                inputMode="decimal"
-                value={quantity}
-                onChange={(e) => setQuantity(e.target.value)}
-                className="mt-1 h-12 w-full rounded-2xl border border-[#e7ecf5] px-3 text-sm font-semibold"
-                placeholder="0"
-              />
-            </label>
-
-            <label className="block">
-              <span className="text-xs font-bold text-slate-600">{tM("slotNote")}</span>
-              <input
-                value={slotNote}
-                onChange={(e) => setSlotNote(e.target.value)}
-                className="mt-1 h-11 w-full rounded-2xl border border-[#e7ecf5] px-3 text-sm font-semibold"
-                placeholder={tM("slotOptional")}
-              />
-            </label>
+            {mode === "existing" ? (
+              <>
+                <label className="block">
+                  <span className="text-xs font-bold text-slate-600">{tM("quantity")}</span>
+                  <input
+                    type="number"
+                    inputMode="decimal"
+                    value={quantity}
+                    onChange={(e) => setQuantity(e.target.value)}
+                    className="mt-1 h-12 w-full rounded-2xl border border-[#e7ecf5] bg-[#f6f8fc] px-3 text-sm font-semibold outline-none focus:border-[#6c4cff] focus:ring-2 focus:ring-[#6c4cff]/15"
+                    placeholder="0"
+                  />
+                </label>
+                <label className="block">
+                  <span className="text-xs font-bold text-slate-600">{tM("slotNote")}</span>
+                  <input
+                    value={slotNote}
+                    onChange={(e) => setSlotNote(e.target.value)}
+                    className="mt-1 h-12 w-full rounded-2xl border border-[#e7ecf5] bg-[#f6f8fc] px-3 text-sm font-semibold outline-none focus:border-[#6c4cff] focus:ring-2 focus:ring-[#6c4cff]/15"
+                    placeholder={tM("slotOptional")}
+                  />
+                </label>
+              </>
+            ) : null}
 
             {error ? <p className="text-sm font-bold text-rose-600">{error}</p> : null}
           </div>

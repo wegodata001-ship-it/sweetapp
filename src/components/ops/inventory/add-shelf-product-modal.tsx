@@ -20,7 +20,10 @@ type Props = {
   t: (key: string) => string;
 };
 
-/** יצירת מוצר בסיסית — עובדים מנוהלים רק דרך InventoryLocationWorker (לא כאן) */
+/**
+ * יצירת מוצר בסיסית (legacy modal) — אותם שדות כמו טופס ההוספה המלא.
+ * עובדים מנוהלים רק דרך InventoryLocationWorker.
+ */
 export function AddShelfProductModal({
   open,
   shelfName,
@@ -29,20 +32,40 @@ export function AddShelfProductModal({
   onCreated,
   t,
 }: Props) {
-  const [name, setName] = useState("");
+  const [nameHe, setNameHe] = useState("");
+  const [nameAr, setNameAr] = useState("");
+  const [nameEn, setNameEn] = useState("");
+  const [barcode, setBarcode] = useState("");
+  const [sku, setSku] = useState("");
   const [unit, setUnit] = useState("");
   const [minimumQuantity, setMinimumQuantity] = useState("0");
+  const [maximumQuantity, setMaximumQuantity] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   if (!open) return null;
 
+  const inputClass =
+    "mt-1 h-12 w-full rounded-2xl border border-[#e7ecf5] bg-[#f6f8fc] px-3 text-sm font-semibold outline-none focus:border-[#6c4cff]";
+
   const submit = async () => {
-    const trimmed = name.trim();
+    const trimmed = nameHe.trim();
     if (!trimmed) {
       setError(t("nameRequired"));
       return;
     }
+    const min = Number(minimumQuantity);
+    if (!Number.isFinite(min) || min < 0) {
+      setError(t("invalidMinimum"));
+      return;
+    }
+    const maxRaw = maximumQuantity.trim();
+    const max = maxRaw === "" ? null : Number(maxRaw);
+    if (max !== null && (!Number.isFinite(max) || max < 0)) {
+      setError(t("invalidMaximum"));
+      return;
+    }
+
     setBusy(true);
     setError(null);
     try {
@@ -51,11 +74,17 @@ export function AddShelfProductModal({
         headers: { "Content-Type": "application/json" },
         credentials: "same-origin",
         body: JSON.stringify({
+          name: trimmed,
           nameHe: trimmed,
+          nameAr: nameAr.trim() || null,
+          nameEn: nameEn.trim() || null,
+          barcode: barcode.trim() || null,
+          sku: sku.trim() || null,
           locationId,
           unit: unit.trim() || null,
           category: "כללי",
-          minimumQuantity: Number(minimumQuantity) || 0,
+          minimumQuantity: min,
+          maximumQuantity: max,
         }),
       });
       const j = (await res.json()) as {
@@ -73,12 +102,17 @@ export function AddShelfProductModal({
         location: shelfName,
         unit: j.data.unit,
         previousQuantity: 0,
-        minimumQuantity: Number(minimumQuantity) || 0,
+        minimumQuantity: min,
         lastCountedAt: null,
       });
-      setName("");
+      setNameHe("");
+      setNameAr("");
+      setNameEn("");
+      setBarcode("");
+      setSku("");
       setUnit("");
       setMinimumQuantity("0");
+      setMaximumQuantity("");
       onClose();
     } catch {
       setError(t("saveFailed"));
@@ -88,8 +122,11 @@ export function AddShelfProductModal({
   };
 
   return (
-    <div className="fixed inset-0 z-[95] flex items-center justify-center bg-slate-900/40 p-4 backdrop-blur-sm">
-      <div className="w-full max-w-sm rounded-[20px] border border-[#e7ecf5] bg-white p-5 shadow-2xl">
+    <div className="fixed inset-0 z-[95] flex items-end justify-center bg-slate-900/40 p-0 backdrop-blur-sm sm:items-center sm:p-4">
+      <div
+        className="max-h-[92dvh] w-full max-w-lg overflow-y-auto rounded-t-[24px] border border-[#e7ecf5] bg-white p-5 shadow-2xl sm:rounded-[24px]"
+        dir="rtl"
+      >
         <div className="flex items-center justify-between">
           <h3 className="text-lg font-black text-slate-900">{t("title")}</h3>
           <button type="button" onClick={onClose} className="rounded-xl p-2 hover:bg-slate-100">
@@ -98,19 +135,48 @@ export function AddShelfProductModal({
         </div>
         <div className="mt-4 space-y-3 text-end">
           <label className="block">
-            <span className="text-xs font-bold text-slate-600">{t("name")}</span>
+            <span className="text-xs font-bold text-slate-600">{t("nameHe")}</span>
             <input
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              className="mt-1 h-11 w-full rounded-xl border border-[#e7ecf5] px-3 text-sm font-semibold"
+              value={nameHe}
+              onChange={(e) => setNameHe(e.target.value)}
+              className={inputClass}
+              dir="rtl"
             />
           </label>
           <label className="block">
-            <span className="text-xs font-bold text-slate-600">{t("unit")}</span>
+            <span className="text-xs font-bold text-slate-600">{t("nameAr")}</span>
             <input
-              value={unit}
-              onChange={(e) => setUnit(e.target.value)}
-              className="mt-1 h-11 w-full rounded-xl border border-[#e7ecf5] px-3 text-sm font-semibold"
+              value={nameAr}
+              onChange={(e) => setNameAr(e.target.value)}
+              className={inputClass}
+              dir="rtl"
+            />
+          </label>
+          <label className="block">
+            <span className="text-xs font-bold text-slate-600">{t("nameEn")}</span>
+            <input
+              value={nameEn}
+              onChange={(e) => setNameEn(e.target.value)}
+              className={inputClass}
+              dir="ltr"
+            />
+          </label>
+          <label className="block">
+            <span className="text-xs font-bold text-slate-600">{t("barcode")}</span>
+            <input
+              value={barcode}
+              onChange={(e) => setBarcode(e.target.value)}
+              className={inputClass}
+              dir="ltr"
+            />
+          </label>
+          <label className="block">
+            <span className="text-xs font-bold text-slate-600">{t("sku")}</span>
+            <input
+              value={sku}
+              onChange={(e) => setSku(e.target.value)}
+              className={inputClass}
+              dir="ltr"
             />
           </label>
           <label className="block">
@@ -119,7 +185,24 @@ export function AddShelfProductModal({
               type="number"
               value={minimumQuantity}
               onChange={(e) => setMinimumQuantity(e.target.value)}
-              className="mt-1 h-11 w-full rounded-xl border border-[#e7ecf5] px-3 text-sm font-semibold"
+              className={inputClass}
+            />
+          </label>
+          <label className="block">
+            <span className="text-xs font-bold text-slate-600">{t("maximum")}</span>
+            <input
+              type="number"
+              value={maximumQuantity}
+              onChange={(e) => setMaximumQuantity(e.target.value)}
+              className={inputClass}
+            />
+          </label>
+          <label className="block">
+            <span className="text-xs font-bold text-slate-600">{t("unit")}</span>
+            <input
+              value={unit}
+              onChange={(e) => setUnit(e.target.value)}
+              className={inputClass}
             />
           </label>
           {error ? <p className="text-sm font-bold text-[#ff5b6e]">{error}</p> : null}
