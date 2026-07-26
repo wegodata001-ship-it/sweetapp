@@ -3,6 +3,7 @@
 import { memo, type ReactNode } from "react";
 import {
   AlertTriangle,
+  GripVertical,
   Loader2,
   Minus,
   Package,
@@ -24,12 +25,13 @@ export type WorkerQtyMap = Record<string, string>;
 export type ShelfCountLineRowProps = {
   id: string;
   name: string;
-  barcode: string | null;
-  sku: string | null;
   unit: string | null;
+  /** ספירה אחרונה במיקום — לבסיס diff / bump */
   systemQty: number;
+  /** إجمالي المخزون — סה״כ בכל המיקומים */
   systemTotalQuantity: number;
-  systemShortage: number;
+  /** الكمية المطلوبة — כמה חסר למינימום (≥0) */
+  requiredQuantity: number;
   minimumQuantity: number;
   workers: LocationWorkerDto[];
   workerQtys: WorkerQtyMap;
@@ -38,6 +40,9 @@ export type ShelfCountLineRowProps = {
   readOnly?: boolean;
   variant?: CountRowVariant;
   showColumnLabels?: boolean;
+  /** Drag & Drop — האירועים על העטיפה במודל; כאן רק הידית */
+  draggable?: boolean;
+  onDragStart?: () => void;
   onWorkerQtyChange: (workerId: string, value: string) => void;
   onActualChange: (value: string) => void;
   onBump: (delta: number) => void;
@@ -75,6 +80,7 @@ export function countSiteLabel(w: LocationWorkerDto): string {
 /** Grid קבוע — עמודת مواقع الجرد דינמית בתוכה (לא עמודה לכל עובד) */
 export function countTableGridTemplate(_workerCount?: number): string {
   return [
+    "2rem", // drag
     "2.25rem", // icon
     "minmax(8.5rem, 12rem)", // product
     "5.5rem", // system total
@@ -260,6 +266,7 @@ export function ShelfCountTableHeader({
       className="rounded-2xl border border-[#e7ecf5] bg-[#f1f5f9] px-2.5 py-2.5 text-[10px] font-black text-slate-600 sm:px-3 sm:text-[11px]"
     >
       <div aria-hidden />
+      <div aria-hidden />
       <HeaderCell className="text-end">{t("productCol")}</HeaderCell>
       <HeaderCell>{t("systemTotal")}</HeaderCell>
       <HeaderCell>{t("locationExpected")}</HeaderCell>
@@ -359,13 +366,39 @@ function WorkerQtyInput({
   );
 }
 
+function DragHandle({
+  draggable,
+  onDragStart,
+}: {
+  draggable?: boolean;
+  onDragStart?: () => void;
+}) {
+  if (!draggable) {
+    return <div aria-hidden className="h-8 w-8" />;
+  }
+  return (
+    <button
+      type="button"
+      draggable
+      onDragStart={(e) => {
+        e.dataTransfer.effectAllowed = "move";
+        onDragStart?.();
+      }}
+      className="grid h-8 w-8 cursor-grab place-items-center justify-self-center rounded-lg text-slate-400 active:cursor-grabbing hover:bg-white hover:text-slate-600"
+      aria-label="Reorder"
+      title="Drag"
+    >
+      <GripVertical className="h-4 w-4" aria-hidden />
+    </button>
+  );
+}
+
 function ShelfCountLineRowInner({
   name,
-  barcode,
-  sku,
   unit,
   systemQty,
   systemTotalQuantity,
+  requiredQuantity,
   minimumQuantity,
   workers,
   workerQtys,
@@ -373,6 +406,8 @@ function ShelfCountLineRowInner({
   saving,
   readOnly = false,
   variant = "table",
+  draggable = false,
+  onDragStart,
   onWorkerQtyChange,
   onActualChange,
   onBump,
@@ -388,7 +423,6 @@ function ShelfCountLineRowInner({
       : Number(actualRaw);
 
   const {
-    diff,
     status,
     st,
     minimumStatus,
@@ -398,21 +432,19 @@ function ShelfCountLineRowInner({
     diffBox,
     totalLabel,
   } = useCountDerived(countedTotal, systemQty, systemTotalQuantity, minimumQuantity);
-  const meta = [barcode, sku, unit].filter(Boolean).join(" · ");
 
   if (variant === "card") {
     return (
       <div className={`rounded-2xl border px-3 py-3 ${st.row}`}>
-        <div className="flex items-start gap-3">
+        <div className="flex items-start gap-2">
+          <DragHandle draggable={draggable && !readOnly} onDragStart={onDragStart} />
           <div className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-white text-[#6c4cff] shadow-sm ring-1 ring-[#e7ecf5]">
             <Package className="h-5 w-5" strokeWidth={1.5} aria-hidden />
           </div>
           <div className="min-w-0 flex-1 text-end">
             <p className="break-words text-base font-black leading-tight text-slate-900">{name}</p>
-            {meta ? (
-              <p className="mt-0.5 truncate text-[11px] font-semibold tabular-nums text-slate-500">
-                {meta}
-              </p>
+            {unit ? (
+              <p className="mt-0.5 text-[11px] font-semibold text-slate-500">{unit}</p>
             ) : null}
           </div>
           {!readOnly ? (
@@ -429,7 +461,7 @@ function ShelfCountLineRowInner({
 
         <div className="mt-3 grid grid-cols-2 gap-2">
           <StatBlock label={t("systemTotal")} value={systemTotalQuantity} />
-          <StatBlock label={t("locationExpected")} value={systemQty} />
+          <StatBlock label={t("locationExpected")} value={requiredQuantity} />
         </div>
 
         {hasWorkers ? (
@@ -521,6 +553,8 @@ function ShelfCountLineRowInner({
       workers={workers}
       className={`rounded-2xl border px-2.5 py-2.5 text-[10px] font-bold transition-shadow duration-200 sm:px-3 ${st.row}`}
     >
+      <DragHandle draggable={draggable && !readOnly} onDragStart={onDragStart} />
+
       <div className="grid h-9 w-9 place-items-center justify-self-center rounded-xl bg-white text-[#6c4cff] shadow-sm ring-1 ring-[#e7ecf5]">
         <Package className="h-4 w-4" strokeWidth={1.5} aria-hidden />
       </div>
@@ -541,17 +575,15 @@ function ShelfCountLineRowInner({
             <p className="line-clamp-2 break-words text-sm font-black leading-tight text-slate-900 sm:text-[13px]">
               {name}
             </p>
-            {meta ? (
-              <p className="truncate text-[10px] font-semibold tabular-nums text-slate-500">
-                {meta}
-              </p>
+            {unit ? (
+              <p className="truncate text-[10px] font-semibold text-slate-500">{unit}</p>
             ) : null}
           </div>
         </div>
       </div>
 
       <MetricCell value={systemTotalQuantity} />
-      <MetricCell value={systemQty} />
+      <MetricCell value={requiredQuantity} />
 
       {hasWorkers ? (
         <CountSitesPanel

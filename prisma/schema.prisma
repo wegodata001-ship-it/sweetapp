@@ -529,6 +529,8 @@ model InventoryProduct {
   category          String                       @default("כללי")
   minimumQuantity   Float                        @default(0)
   maximumQuantity   Float?
+  /// סדר תצוגה בספירה (Drag & Drop) — 0 = ברירת מחדל / לפי שם
+  displayOrder      Int                          @default(0)
   /// מיקום ראשי ישן (אופציונלי) — לתאימות; השיוך המלא ב־InventoryProductOnLocation
   locationId        String?
   /// שדות עובדים ישנים — נשמרים לתאימות; התצוגה מ־InventoryLocationWorker
@@ -546,6 +548,7 @@ model InventoryProduct {
   @@index([category])
   @@index([barcode])
   @@index([sku])
+  @@index([displayOrder])
 }
 
 /// שיוך מוצר↔מיקום (N:M) — מוצר אחד במספר מיקומי אחסון
