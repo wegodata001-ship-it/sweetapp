@@ -25,7 +25,7 @@ export async function generateCashFlowPdfBytes(entryId: string): Promise<Uint8Ar
   let y = PDF_PAGE_H - PDF_MARGIN;
 
   const entryD = new Date(row.entry_date + "T12:00:00");
-  y = drawHeader(
+  y = await drawHeader(
     page,
     { he: fonts.he, heBold: fonts.heBold, enBold: fonts.enBold },
     {
@@ -42,7 +42,7 @@ export async function generateCashFlowPdfBytes(entryId: string): Promise<Uint8Ar
     row.inflow > 0 ? `הכנסה (${row.entry_type ?? ""})` : row.outflow > 0 ? `הוצאה (${row.entry_type ?? ""})` : "תנועה";
   const amt = row.inflow > 0 ? row.inflow : row.outflow;
 
-  y = drawLabeledSection(
+  y = await drawLabeledSection(
     page,
     fonts,
     "פירוט תנועה",
@@ -61,7 +61,7 @@ export async function generateCashFlowPdfBytes(entryId: string): Promise<Uint8Ar
     CONTENT_W,
   );
 
-  drawFooter(page, { en: fonts.en, enBold: fonts.enBold });
+  await drawFooter(page, { en: fonts.en, enBold: fonts.enBold });
   return pdfDoc.save();
 }
 

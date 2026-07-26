@@ -1,6 +1,8 @@
+import { ltrIsolate } from "./pdf-utils";
+
 /**
- * מטבע ל־PDF — מחרוזת LTR אחידה (₪ ואז מספר) בלי תווי bidi, ספרות ASCII ב־en-US.
- * חובה לשרטט עם גופן Unicode (למשל Noto Sans Hebrew VF), לא Helvetica.
+ * מטבע ל־PDF — מחרוזת LTR אחידה (₪ ואז מספר), ספרות ASCII ב־en-US.
+ * מבודד ב־LRM כדי שסימן מינוס לא יעבור לצד השני בשורה בעברית או בערבית.
  */
 export function formatCurrencyILS(amount: number): string {
   const n = Number.isFinite(amount) ? amount : 0;
@@ -8,14 +10,16 @@ export function formatCurrencyILS(amount: number): string {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(n);
-  return `₪\u00A0${formatted}`;
+  return ltrIsolate(`₪\u00A0${formatted}`);
 }
 
 export function formatDateIL(d: Date | null | undefined): string {
   if (!d || !Number.isFinite(d.getTime())) return "—";
-  return new Intl.DateTimeFormat("he-IL", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-  }).format(d);
+  return ltrIsolate(
+    new Intl.DateTimeFormat("he-IL", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+    }).format(d),
+  );
 }

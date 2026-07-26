@@ -25,7 +25,7 @@ export async function generatePaymentPdfBytes(paymentId: string): Promise<Uint8A
   const page = pdfDoc.addPage([PDF_PAGE_W, PDF_PAGE_H]);
   let y = PDF_PAGE_H - PDF_MARGIN;
 
-  y = drawHeader(
+  y = await drawHeader(
     page,
     { he: fonts.he, heBold: fonts.heBold, enBold: fonts.enBold },
     {
@@ -38,7 +38,7 @@ export async function generatePaymentPdfBytes(paymentId: string): Promise<Uint8A
     },
   );
 
-  y = drawLabeledSection(
+  y = await drawLabeledSection(
     page,
     fonts,
     "פרטי תשלום",
@@ -54,7 +54,7 @@ export async function generatePaymentPdfBytes(paymentId: string): Promise<Uint8A
     CONTENT_W,
   );
 
-  drawFooter(page, { en: fonts.en, enBold: fonts.enBold });
+  await drawFooter(page, { en: fonts.en, enBold: fonts.enBold });
   return pdfDoc.save();
 }
 

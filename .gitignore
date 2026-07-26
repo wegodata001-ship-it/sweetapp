@@ -22,6 +22,8 @@
 
 # misc
 tmp/ocr-debug/
+# locally generated PDF/PNG samples for reviewing document output
+tmp-pdf-samples/
 .DS_Store
 *.pem
 

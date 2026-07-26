@@ -1,5 +1,6 @@
 import { PDFDocument } from "pdf-lib";
 import { embedInvoicePdfFonts } from "@/lib/pdf/font-cache";
+import { ltrIsolate } from "@/lib/pdf/pdf-utils";
 import {
   PDF_PAGE_W,
   PDF_PAGE_H,
@@ -22,11 +23,14 @@ const ROWS_PER_PAGE = 13;
 
 function fmtAmount(n: number | null): string {
   if (n === null || n === undefined) return "—";
-  return `${n.toLocaleString("he-IL", { minimumFractionDigits: 0, maximumFractionDigits: 2 })} ₪`;
+  // Isolated so a negative difference keeps its minus sign on the left in a Hebrew row.
+  return ltrIsolate(
+    `${n.toLocaleString("he-IL", { minimumFractionDigits: 0, maximumFractionDigits: 2 })} ₪`,
+  );
 }
 
 function fmtDate(iso: string): string {
-  return new Date(iso).toLocaleDateString("he-IL");
+  return ltrIsolate(new Date(iso).toLocaleDateString("he-IL"));
 }
 
 const COLUMNS: ItemColumn[] = [
@@ -53,9 +57,10 @@ export async function generateReconciliationPdf(detail: ReconImportDetailDto): P
   }
   if (chunks.length === 0) chunks.push([]);
 
-  chunks.forEach((chunk, pageIdx) => {
+  for (let pageIdx = 0; pageIdx < chunks.length; pageIdx++) {
+    const chunk = chunks[pageIdx];
     const page = pdfDoc.addPage([PDF_PAGE_W, PDF_PAGE_H]);
-    let y = drawHeader(page, fonts, {
+    let y = await drawHeader(page, fonts, {
       reportTitleHe: "התאמת מערכות",
       metaFields: [
         { label: "מדינה", value: countryLabel },
@@ -66,7 +71,7 @@ export async function generateReconciliationPdf(detail: ReconImportDetailDto): P
     });
 
     if (pageIdx === 0) {
-      y = drawSummaryLines(
+      y = await drawSummaryLines(
         page,
         { he: fonts.he, bold: fonts.heBold },
         [
@@ -93,9 +98,9 @@ export async function generateReconciliationPdf(detail: ReconImportDetailDto): P
       status: RECON_STATUS_LABELS_HE[r.status],
     }));
 
-    drawDataTable(page, { he: fonts.he, num: fonts.num }, COLUMNS, dataRows, PDF_MARGIN, y, CONTENT_W);
-    drawFooter(page, { en: fonts.en, enBold: fonts.enBold });
-  });
+    await drawDataTable(page, { he: fonts.he, num: fonts.num }, COLUMNS, dataRows, PDF_MARGIN, y, CONTENT_W);
+    await drawFooter(page, { en: fonts.en, enBold: fonts.enBold });
+  }
 
   return pdfDoc.save();
 }

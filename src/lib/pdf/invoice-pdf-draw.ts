@@ -1,5 +1,55 @@
-import type { PDFFont, PDFPage } from "pdf-lib";
+import type { PDFPage, RGB } from "pdf-lib";
 import { rgb } from "pdf-lib";
+import type { PdfFontHandle } from "./font-cache";
+import type { PdfDirection } from "./pdf-i18n";
+import { drawText as drawBidiText, measureText } from "./pdf-text";
+
+/**
+ * These generators produce Hebrew-first documents, so their base direction is unchanged.
+ * Arabic or Latin inside a field is still handled: the bidi layer resolves each run and the
+ * font layer picks a face that contains the glyphs.
+ */
+const LEGACY_DIRECTION: PdfDirection = "rtl";
+
+/** Width of `text` using the same run/font resolution that drawing will use. */
+export async function measureLegacyText(
+  handle: PdfFontHandle,
+  text: string,
+  size: number,
+): Promise<number> {
+  const { width } = await measureText(
+    handle.set,
+    text,
+    { size, weight: handle.weight },
+    LEGACY_DIRECTION,
+  );
+  return width;
+}
+
+/**
+ * Draws `text` with its left edge exactly at `x`, matching the old single-font behaviour so
+ * every existing coordinate in these documents keeps its meaning.
+ */
+async function drawAtX(
+  page: PDFPage,
+  handle: PdfFontHandle,
+  text: string,
+  x: number,
+  yBaseline: number,
+  size: number,
+  color: RGB,
+  width: number,
+): Promise<void> {
+  await drawBidiText(page, handle.set, text, LEGACY_DIRECTION, {
+    x,
+    y: yBaseline,
+    boxWidth: width,
+    size,
+    weight: handle.weight,
+    color,
+    align: "start",
+  });
+}
 
 /** A4 landscape — רוחב תוכן ~760pt */
 export const PDF_PAGE_W = 841.89;
@@ -24,42 +74,44 @@ export const C = {
   footerLine: rgb(212 / 255, 175 / 255, 55 / 255),
 };
 
-export function drawRtlText(
+/** Right-aligned text: `rightX` is the right edge, as before. */
+export async function drawRtlText(
   page: PDFPage,
-  font: PDFFont,
+  handle: PdfFontHandle,
   text: string,
   rightX: number,
   yBaseline: number,
   size: number,
   color = C.text,
 ) {
-  const w = font.widthOfTextAtSize(text, size);
-  page.drawText(text, { x: rightX - w, y: yBaseline, size, font, color });
+  const w = await measureLegacyText(handle, text, size);
+  await drawAtX(page, handle, text, rightX - w, yBaseline, size, color, w);
 }
 
-export function drawLtrText(
+export async function drawLtrText(
   page: PDFPage,
-  font: PDFFont,
+  handle: PdfFontHandle,
   text: string,
   leftX: number,
   yBaseline: number,
   size: number,
   color = C.text,
 ) {
-  page.drawText(text, { x: leftX, y: yBaseline, size, font, color });
+  const w = await measureLegacyText(handle, text, size);
+  await drawAtX(page, handle, text, leftX, yBaseline, size, color, w);
 }
 
-export function drawAmountInCell(
+export async function drawAmountInCell(
   page: PDFPage,
-  font: PDFFont,
+  handle: PdfFontHandle,
   text: string,
   cellRight: number,
   yBaseline: number,
   size: number,
   color = C.text,
 ) {
-  const w = font.widthOfTextAtSize(text, size);
-  page.drawText(text, { x: cellRight - w, y: yBaseline, size, font, color });
+  const w = await measureLegacyText(handle, text, size);
+  await drawAtX(page, handle, text, cellRight - w, yBaseline, size, color, w);
 }
 
 export function drawCard(
@@ -98,11 +150,11 @@ function parseMetaFields(params: {
   });
 }
 
-export function drawHeader(
+export async function drawHeader(
   page: PDFPage,
-  fonts: { he: PDFFont; heBold: PDFFont; enBold: PDFFont },
+  fonts: { he: PdfFontHandle; heBold: PdfFontHandle; enBold: PdfFontHandle },
   params: { reportTitleHe: string; metaFields?: HeaderMetaField[]; metaLines?: string[] },
-): number {
+): Promise<number> {
   const top = PDF_PAGE_H - PDF_MARGIN;
   const bandH = 92;
   const yBandBottom = top - bandH;
@@ -125,9 +177,9 @@ export function drawHeader(
 
   const titleRight = PDF_MARGIN + CONTENT_W - 18;
   const brand = "WEGO ERP";
-  const brandW = fonts.enBold.widthOfTextAtSize(brand, 12);
-  drawLtrText(page, fonts.enBold, brand, titleRight - brandW, yBandBottom + bandH - 24, 12, C.navy);
-  drawRtlText(page, fonts.heBold, params.reportTitleHe, titleRight, yBandBottom + bandH - 46, 18, C.navy);
+  const brandW = await measureLegacyText(fonts.enBold, brand, 12);
+  await drawLtrText(page, fonts.enBold, brand, titleRight - brandW, yBandBottom + bandH - 24, 12, C.navy);
+  await drawRtlText(page, fonts.heBold, params.reportTitleHe, titleRight, yBandBottom + bandH - 46, 18, C.navy);
 
   const metaW = 250;
   const metaX = PDF_MARGIN + 18;
@@ -136,9 +188,9 @@ export function drawHeader(
   let my = yBandBottom + bandH - 24;
   for (const field of fields) {
     if (field.label) {
-      drawRtlText(page, fonts.heBold, field.label, labelRight, my, 9, C.muted);
+      await drawRtlText(page, fonts.heBold, field.label, labelRight, my, 9, C.muted);
     }
-    drawRtlText(page, fonts.he, field.value, valueRight, my, 9, C.text);
+    await drawRtlText(page, fonts.he, field.value, valueRight, my, 9, C.text);
     my -= 15;
   }
 
@@ -146,28 +198,28 @@ export function drawHeader(
 }
 
 /** כרטיס סעיף: כותרת + שורות תווית | ערך (RTL) */
-export function drawLabeledSection(
+export async function drawLabeledSection(
   page: PDFPage,
-  fonts: { he: PDFFont; bold: PDFFont },
+  fonts: { he: PdfFontHandle; bold: PdfFontHandle },
   title: string,
   rows: { label: string; value: string }[],
   x: number,
   yTop: number,
   w: number,
-): number {
+): Promise<number> {
   const pad = 18;
   const titleGap = 28;
   const rowH = 22;
   const h = pad + titleGap + rows.length * rowH + pad;
   const yBottom = yTop - h;
   drawCard(page, x, yBottom, w, h);
-  drawRtlText(page, fonts.bold, title, x + w - pad, yTop - pad, 12, C.text);
+  await drawRtlText(page, fonts.bold, title, x + w - pad, yTop - pad, 12, C.text);
   const labelRight = x + w - pad;
   const valueFieldRight = labelRight - 160;
   let cy = yTop - pad - titleGap;
   for (const row of rows) {
-    drawRtlText(page, fonts.bold, row.label, labelRight, cy, 10, C.muted);
-    drawRtlText(page, fonts.he, row.value, valueFieldRight, cy, 10, C.text);
+    await drawRtlText(page, fonts.bold, row.label, labelRight, cy, 10, C.muted);
+    await drawRtlText(page, fonts.he, row.value, valueFieldRight, cy, 10, C.text);
     cy -= rowH;
   }
   return yBottom - 18;
@@ -175,15 +227,15 @@ export function drawLabeledSection(
 
 export type ItemColumn = { key: string; width: number; header: string; numeric?: boolean };
 
-export function drawDataTable(
+export async function drawDataTable(
   page: PDFPage,
-  fonts: { he: PDFFont; num?: PDFFont },
+  fonts: { he: PdfFontHandle; num?: PdfFontHandle },
   columns: ItemColumn[],
   dataRows: Record<string, string>[],
   x: number,
   yTop: number,
   width: number,
-): number {
+): Promise<number> {
   const headerH = 30;
   const rowH = 28;
   const totalH = headerH + dataRows.length * rowH;
@@ -209,35 +261,35 @@ export function drawDataTable(
 
   let colRight = x + width - 12;
   for (const col of columns) {
-    drawRtlText(page, fonts.he, col.header, colRight, yTop - headerH + 10, 9, C.white);
+    await drawRtlText(page, fonts.he, col.header, colRight, yTop - headerH + 10, 9, C.white);
     colRight -= col.width;
   }
 
   let rowY = yTop - headerH;
-  dataRows.forEach((row, idx) => {
+  for (let idx = 0; idx < dataRows.length; idx++) {
+    const row = dataRows[idx];
     rowY -= rowH;
     const bg = idx % 2 === 0 ? C.zebraA : C.zebraB;
     page.drawRectangle({ x, y: rowY, width, height: rowH, color: bg });
     let cRight = x + width - 12;
     for (const col of columns) {
       const val = row[col.key] ?? "";
-      // תמיד גופן עברית לתאים — מכיל ₪ ומספרים; WinAnsis לא תומך ב־₪/תווי bidi
-      drawAmountInCell(page, fonts.he, val, cRight, rowY + 9, 9, C.text);
+      await drawAmountInCell(page, fonts.he, val, cRight, rowY + 9, 9, C.text);
       cRight -= col.width;
     }
-  });
+  }
 
   return yBottom - 12;
 }
 
-export function drawSummaryLines(
+export async function drawSummaryLines(
   page: PDFPage,
-  fonts: { he: PDFFont; bold: PDFFont },
+  fonts: { he: PdfFontHandle; bold: PdfFontHandle },
   items: { label: string; amount: string; emphasize?: boolean }[],
   x: number,
   yTop: number,
   width: number,
-): number {
+): Promise<number> {
   const rowH = 22;
   const padTop = 10;
   const padBottom = 8;
@@ -261,8 +313,8 @@ export function drawSummaryLines(
   for (const item of items) {
     const fg = item.emphasize ? C.navy : C.text;
     const size = item.emphasize ? 11 : 10;
-    drawRtlText(page, item.emphasize ? fonts.bold : fonts.he, item.label, rightEdge, cy, size, fg);
-    drawAmountInCell(page, fonts.he, item.amount, amountRight, cy, size, fg);
+    await drawRtlText(page, item.emphasize ? fonts.bold : fonts.he, item.label, rightEdge, cy, size, fg);
+    await drawAmountInCell(page, fonts.he, item.amount, amountRight, cy, size, fg);
     cy -= rowH;
   }
   drawRule(cy + 10);
@@ -270,14 +322,14 @@ export function drawSummaryLines(
   return yBottom - 14;
 }
 
-export function drawTwoColPaymentTable(
+export async function drawTwoColPaymentTable(
   page: PDFPage,
-  fonts: { he: PDFFont; bold: PDFFont },
+  fonts: { he: PdfFontHandle; bold: PdfFontHandle },
   rows: { method: string; amount: string }[],
   x: number,
   yTop: number,
   width: number,
-): number {
+): Promise<number> {
   const headerH = 28;
   const rowH = 26;
   const totalH = headerH + rows.length * rowH;
@@ -293,27 +345,28 @@ export function drawTwoColPaymentTable(
     borderWidth: 1,
   });
   page.drawRectangle({ x, y: yTop - headerH, width, height: headerH, color: C.tableHeader });
-  drawRtlText(page, fonts.bold, "סכום", x + width * 0.28, yTop - headerH + 10, 9, C.white);
-  drawRtlText(page, fonts.bold, "אמצעי תשלום", x + width - 14, yTop - headerH + 10, 9, C.white);
+  await drawRtlText(page, fonts.bold, "סכום", x + width * 0.28, yTop - headerH + 10, 9, C.white);
+  await drawRtlText(page, fonts.bold, "אמצעי תשלום", x + width - 14, yTop - headerH + 10, 9, C.white);
 
   let ry = yTop - headerH;
-  rows.forEach((r, idx) => {
+  for (let idx = 0; idx < rows.length; idx++) {
+    const r = rows[idx];
     ry -= rowH;
     page.drawRectangle({ x, y: ry, width, height: rowH, color: idx % 2 === 0 ? C.zebraA : C.zebraB });
-    drawRtlText(page, fonts.he, r.method, x + width - 14, ry + 9, 10, C.text);
-    drawAmountInCell(page, fonts.he, r.amount, x + width * 0.28, ry + 9, 10, C.text);
-  });
+    await drawRtlText(page, fonts.he, r.method, x + width - 14, ry + 9, 10, C.text);
+    await drawAmountInCell(page, fonts.he, r.amount, x + width * 0.28, ry + 9, 10, C.text);
+  }
   return yBottom - 10;
 }
 
-export function drawOpenBalanceBox(
+export async function drawOpenBalanceBox(
   page: PDFPage,
-  fonts: { he: PDFFont; bold: PDFFont },
+  fonts: { he: PdfFontHandle; bold: PdfFontHandle },
   amountFormatted: string,
   x: number,
   yTop: number,
   width: number,
-): number {
+): Promise<number> {
   const h = 46;
   const yb = yTop - h;
   page.drawRectangle({
@@ -325,12 +378,15 @@ export function drawOpenBalanceBox(
     borderColor: C.danger,
     borderWidth: 1,
   });
-  drawRtlText(page, fonts.bold, "יתרה פתוחה", x + width - 16, yb + h - 18, 12, C.danger);
-  drawAmountInCell(page, fonts.he, amountFormatted, x + width * 0.4, yb + h - 18, 14, C.danger);
+  await drawRtlText(page, fonts.bold, "יתרה פתוחה", x + width - 16, yb + h - 18, 12, C.danger);
+  await drawAmountInCell(page, fonts.he, amountFormatted, x + width * 0.4, yb + h - 18, 14, C.danger);
   return yb - 14;
 }
 
-export function drawFooter(page: PDFPage, fonts: { en: PDFFont; enBold?: PDFFont }) {
+export async function drawFooter(
+  page: PDFPage,
+  fonts: { en: PdfFontHandle; enBold?: PdfFontHandle },
+) {
   const lineY = PDF_MARGIN + 36;
   page.drawLine({
     start: { x: PDF_MARGIN, y: lineY },
@@ -340,10 +396,10 @@ export function drawFooter(page: PDFPage, fonts: { en: PDFFont; enBold?: PDFFont
   });
   const brandFont = fonts.enBold ?? fonts.en;
   const brand = "WEGO ERP";
-  const brandW = brandFont.widthOfTextAtSize(brand, 8);
+  const brandW = await measureLegacyText(brandFont, brand, 8);
   const centerX = PDF_PAGE_W / 2;
-  drawLtrText(page, brandFont, brand, centerX - brandW / 2, PDF_MARGIN + 18, 8, C.navy);
+  await drawLtrText(page, brandFont, brand, centerX - brandW / 2, PDF_MARGIN + 18, 8, C.navy);
   const tagline = "Financial Management System";
-  const tagW = fonts.en.widthOfTextAtSize(tagline, 7);
-  drawLtrText(page, fonts.en, tagline, centerX - tagW / 2, PDF_MARGIN + 6, 7, C.muted);
+  const tagW = await measureLegacyText(fonts.en, tagline, 7);
+  await drawLtrText(page, fonts.en, tagline, centerX - tagW / 2, PDF_MARGIN + 6, 7, C.muted);
 }

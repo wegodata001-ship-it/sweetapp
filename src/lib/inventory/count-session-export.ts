@@ -10,6 +10,7 @@ import {
   drawRtlText,
 } from "@/lib/pdf/invoice-pdf-draw";
 import { loadInvoicePdfFonts, safeFilePart } from "@/lib/pdf/pdf-helpers";
+import { ltrIsolate } from "@/lib/pdf/pdf-utils";
 import type { CountSessionDetail } from "@/lib/inventory/count-session-service";
 
 function businessName(): string {
@@ -123,7 +124,7 @@ export async function countSessionPdfBytes(detail: CountSessionDetail): Promise<
   let y = PDF_PAGE_H - PDF_MARGIN;
   const { date, time } = fmtDateTime(detail.createdAt);
 
-  y = drawHeader(
+  y = await drawHeader(
     page,
     { he: fonts.he, heBold: fonts.heBold, enBold: fonts.enBold },
     {
@@ -144,14 +145,14 @@ export async function countSessionPdfBytes(detail: CountSessionDetail): Promise<
     `עודפים: ${detail.surplusCount}`,
     `סה״כ נספר: ${detail.totalCountedQty}`,
   ].join("  |  ");
-  drawRtlText(page, fonts.heBold, summary, PDF_PAGE_W - PDF_MARGIN, y, 10);
+  await drawRtlText(page, fonts.heBold, summary, PDF_PAGE_W - PDF_MARGIN, y, 10);
   y -= 22;
 
   const headers = ["מוצר", "ברקוד", "במיקום", "מינ׳", "נספר", "הפרש", "חוסר"];
   const colW = [180, 90, 70, 55, 70, 60, 55];
   const tableRight = PDF_PAGE_W - PDF_MARGIN;
 
-  const drawTableHeader = () => {
+  const drawTableHeader = async () => {
     let x = tableRight;
     page.drawRectangle({
       x: PDF_MARGIN,
@@ -161,20 +162,20 @@ export async function countSessionPdfBytes(detail: CountSessionDetail): Promise<
       color: rgb(0.02, 0.08, 0.18),
     });
     for (let i = 0; i < headers.length; i++) {
-      drawRtlText(page, fonts.heBold, headers[i], x - 4, y, 8, rgb(1, 1, 1));
+      await drawRtlText(page, fonts.heBold, headers[i], x - 4, y, 8, rgb(1, 1, 1));
       x -= colW[i];
     }
     y -= 20;
   };
 
-  drawTableHeader();
+  await drawTableHeader();
 
   for (const line of detail.lines) {
     if (y < 90) {
-      drawFooter(page, { en: fonts.en, enBold: fonts.enBold });
+      await drawFooter(page, { en: fonts.en, enBold: fonts.enBold });
       page = pdfDoc.addPage([PDF_PAGE_W, PDF_PAGE_H]);
       y = PDF_PAGE_H - PDF_MARGIN;
-      drawTableHeader();
+      await drawTableHeader();
     }
     const shortage =
       line.minimumQuantity > 0
@@ -182,16 +183,17 @@ export async function countSessionPdfBytes(detail: CountSessionDetail): Promise<
         : 0;
     const cells = [
       line.name.slice(0, 28),
-      (line.barcode ?? "—").slice(0, 14),
-      String(line.previousQuantity),
-      String(line.minimumQuantity),
-      String(line.currentQuantity),
-      String(line.difference),
-      String(shortage),
+      ltrIsolate((line.barcode ?? "—").slice(0, 14)),
+      ltrIsolate(String(line.previousQuantity)),
+      ltrIsolate(String(line.minimumQuantity)),
+      ltrIsolate(String(line.currentQuantity)),
+      // Signed: without isolation a difference of -2 reads as "2-" in a right-to-left row.
+      ltrIsolate(String(line.difference)),
+      ltrIsolate(String(shortage)),
     ];
     let x = tableRight;
     for (let i = 0; i < cells.length; i++) {
-      drawRtlText(page, fonts.he, cells[i], x - 4, y, 8);
+      await drawRtlText(page, fonts.he, cells[i], x - 4, y, 8);
       x -= colW[i];
     }
     y -= 14;
@@ -204,27 +206,27 @@ export async function countSessionPdfBytes(detail: CountSessionDetail): Promise<
         )
         .join(" · ");
       if (y < 70) {
-        drawFooter(page, { en: fonts.en, enBold: fonts.enBold });
+        await drawFooter(page, { en: fonts.en, enBold: fonts.enBold });
         page = pdfDoc.addPage([PDF_PAGE_W, PDF_PAGE_H]);
         y = PDF_PAGE_H - PDF_MARGIN;
       }
-      drawRtlText(page, fonts.he, `עובדים: ${wText}`.slice(0, 110), tableRight, y, 7, rgb(0.3, 0.35, 0.4));
+      await drawRtlText(page, fonts.he, `עובדים: ${wText}`.slice(0, 110), tableRight, y, 7, rgb(0.3, 0.35, 0.4));
       y -= 12;
     }
   }
 
   y -= 16;
   if (y < 100) {
-    drawFooter(page, { en: fonts.en, enBold: fonts.enBold });
+    await drawFooter(page, { en: fonts.en, enBold: fonts.enBold });
     page = pdfDoc.addPage([PDF_PAGE_W, PDF_PAGE_H]);
     y = PDF_PAGE_H - PDF_MARGIN;
   }
 
-  drawRtlText(page, fonts.heBold, "חתימת מבצע הספירה: ____________________", tableRight, y, 10);
+  await drawRtlText(page, fonts.heBold, "חתימת מבצע הספירה: ____________________", tableRight, y, 10);
   y -= 22;
-  drawRtlText(page, fonts.heBold, "חתימת מנהל: ____________________", tableRight, y, 10);
+  await drawRtlText(page, fonts.heBold, "חתימת מנהל: ____________________", tableRight, y, 10);
 
-  drawFooter(page, { en: fonts.en, enBold: fonts.enBold });
+  await drawFooter(page, { en: fonts.en, enBold: fonts.enBold });
   return pdfDoc.save();
 }
 

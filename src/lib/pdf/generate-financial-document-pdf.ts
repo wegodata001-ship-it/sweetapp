@@ -92,7 +92,7 @@ export async function generateFinancialDocumentPdfBytes(documentId: string): Pro
   const counterpartyMetaLabel = isExpense ? "ספק" : "לקוח";
   const docNumber = doc.id.slice(0, 8).toUpperCase();
 
-  y = drawHeader(page, { he: fonts.he, heBold: fonts.heBold, enBold: fonts.enBold }, {
+  y = await drawHeader(page, { he: fonts.he, heBold: fonts.heBold, enBold: fonts.enBold }, {
     reportTitleHe: reportTitleHe(doc.category, payload?.kind, doc.documentType),
     metaFields: [
       { label: "מספר מסמך", value: docNumber },
@@ -133,7 +133,7 @@ export async function generateFinancialDocumentPdfBytes(documentId: string): Pro
       ...(payInstr !== "—" ? [{ label: "אמצעי תשלום", value: payInstr }] : []),
     ];
     if (detailRows.length > 0) {
-      y = drawLabeledSection(
+      y = await drawLabeledSection(
         page,
         fonts,
         isExpense ? "פרטי ספק" : "פרטי לקוח",
@@ -151,7 +151,7 @@ export async function generateFinancialDocumentPdfBytes(documentId: string): Pro
     const creditTotal = z.creditTaxable + z.creditExempt;
     const gross = cashTotal + creditTotal + z.transfers;
     ensureSpace(160);
-    y = drawLabeledSection(page, fonts, "סיכום דוח Z", [
+    y = await drawLabeledSection(page, fonts, "סיכום דוח Z", [
       { label: "מספר דוח Z", value: z.zNumber || "—" },
       { label: "תאריך דוח", value: z.zDate || "—" },
       { label: "מזומן חייב", value: formatCurrencyILS(z.cashTaxable) },
@@ -182,7 +182,7 @@ export async function generateFinancialDocumentPdfBytes(documentId: string): Pro
     const rowH = 28;
     const tableH = headerH + dataRows.length * rowH + 16;
     ensureSpace(tableH);
-    y = drawDataTable(page, { he: fonts.he, num: fonts.num }, cols, dataRows, PDF_MARGIN, y, CONTENT_W);
+    y = await drawDataTable(page, { he: fonts.he, num: fonts.num }, cols, dataRows, PDF_MARGIN, y, CONTENT_W);
   }
 
   if (!isZ && doc.items.length > 0) {
@@ -194,7 +194,7 @@ export async function generateFinancialDocumentPdfBytes(documentId: string): Pro
     const productTotal = doc.items.reduce((sum, it) => sum + it.total, 0);
     const netAmount = productTotal - vatAmount;
     ensureSpace(90);
-    y = drawSummaryLines(
+    y = await drawSummaryLines(
       page,
       fonts,
       [
@@ -208,7 +208,7 @@ export async function generateFinancialDocumentPdfBytes(documentId: string): Pro
     );
     if (depositAmount > 1e-6) {
       ensureSpace(40);
-      drawRtlText(page, fonts.he, `פיקדון: ${formatCurrencyILS(depositAmount)}`, PDF_MARGIN + CONTENT_W - 18, y, 10, C.muted);
+      await drawRtlText(page, fonts.he, `פיקדון: ${formatCurrencyILS(depositAmount)}`, PDF_MARGIN + CONTENT_W - 18, y, 10, C.muted);
       y -= 22;
     }
   }
@@ -230,32 +230,32 @@ export async function generateFinancialDocumentPdfBytes(documentId: string): Pro
 
   if (!isZ && paymentRows.length > 0) {
     ensureSpace(36);
-    drawRtlText(page, fonts.heBold, "אמצעי תשלום", PDF_MARGIN + CONTENT_W - 18, y - 4, 13, C.text);
+    await drawRtlText(page, fonts.heBold, "אמצעי תשלום", PDF_MARGIN + CONTENT_W - 18, y - 4, 13, C.text);
     y -= 26;
     const th = 28 + paymentRows.length * 26 + 20;
     ensureSpace(th);
-    y = drawTwoColPaymentTable(page, fonts, paymentRows, PDF_MARGIN, y, CONTENT_W);
+    y = await drawTwoColPaymentTable(page, fonts, paymentRows, PDF_MARGIN, y, CONTENT_W);
   }
 
   if (!isZ) {
     ensureSpace(54);
-    drawRtlText(page, fonts.he, `שולם: ${formatCurrencyILS(paidAmount)}`, PDF_MARGIN + CONTENT_W - 18, y, 10, C.navy);
+    await drawRtlText(page, fonts.he, `שולם: ${formatCurrencyILS(paidAmount)}`, PDF_MARGIN + CONTENT_W - 18, y, 10, C.navy);
     y -= 16;
-    drawRtlText(page, fonts.he, `יתרה פתוחה: ${formatCurrencyILS(remainingAmount)}`, PDF_MARGIN + CONTENT_W - 18, y, 10, C.text);
+    await drawRtlText(page, fonts.he, `יתרה פתוחה: ${formatCurrencyILS(remainingAmount)}`, PDF_MARGIN + CONTENT_W - 18, y, 10, C.text);
     y -= 20;
 
     if (remainingAmount > 1e-6) {
       ensureSpace(54);
-      y = drawOpenBalanceBox(page, fonts, formatCurrencyILS(remainingAmount), PDF_MARGIN, y, CONTENT_W);
+      y = await drawOpenBalanceBox(page, fonts, formatCurrencyILS(remainingAmount), PDF_MARGIN, y, CONTENT_W);
     }
   }
 
   if (doc.notes?.trim()) {
     ensureSpace(40);
-    y = drawLabeledSection(page, fonts, "הערות", [{ label: "מסמך", value: doc.notes.trim() }], PDF_MARGIN, y, CONTENT_W);
+    y = await drawLabeledSection(page, fonts, "הערות", [{ label: "מסמך", value: doc.notes.trim() }], PDF_MARGIN, y, CONTENT_W);
   }
 
-  drawFooter(page, { en: fonts.en, enBold: fonts.enBold });
+  await drawFooter(page, { en: fonts.en, enBold: fonts.enBold });
 
   return pdfDoc.save();
 }
