@@ -7,6 +7,7 @@
     "build": "prisma generate && next build",
     "start": "next start",
     "lint": "eslint",
+    "db:audit": "node scripts/audit-db-schema.mjs",
     "test:pdf-pipeline": "tsx src/lib/document-scan/pdf-pipeline.test.ts",
     "test:supplier-price-compare": "tsx src/lib/procurement/supplier-product-match.test.ts",
     "icons:generate": "node scripts/generate-brand-icons.mjs",
