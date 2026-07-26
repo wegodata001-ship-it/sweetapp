@@ -14,35 +14,12 @@ import {
   resolveShelf,
   resolveShelfWithWorkers,
 } from "@/lib/inventory/shelf-service";
-
-/** סה״כ מערכת ממערך ספירות שכבר נטען (ללא N+1) */
-function systemTotalFromCounts(
-  counts: { locationId: string | null; currentQuantity: number }[],
-): number {
-  const seen = new Set<string>();
-  let total = 0;
-  for (const c of counts) {
-    const key = c.locationId ?? "__legacy__";
-    if (seen.has(key)) continue;
-    seen.add(key);
-    total += Number(c.currentQuantity || 0);
-  }
-  return total;
-}
-
-function previousQtyFromCounts(
-  counts: { locationId: string | null; currentQuantity: number }[],
-  locationId: string | null,
-): number {
-  if (locationId) {
-    return (
-      counts.find((c) => c.locationId === locationId)?.currentQuantity ??
-      counts.find((c) => !c.locationId)?.currentQuantity ??
-      0
-    );
-  }
-  return counts[0]?.currentQuantity ?? 0;
-}
+import {
+  LATEST_COUNT_ORDER_BY,
+  previousQtyFromCounts,
+  requiredQtyToMinimum,
+  systemTotalFromCounts,
+} from "@/lib/inventory/count-latest";
 
 const PRODUCT_SELECT = {
   id: true,
@@ -57,6 +34,7 @@ const PRODUCT_SELECT = {
   unit: true,
   minimumQuantity: true,
   maximumQuantity: true,
+  displayOrder: true,
   inventoryLocation: { select: { name: true } },
 } as const;
 
@@ -73,28 +51,45 @@ type ProductRow = {
   unit: string | null;
   minimumQuantity: number;
   maximumQuantity: number | null;
+  displayOrder?: number;
   inventoryLocation?: { name: string } | null;
 };
 
 type CountQtyRow = {
+  id: string;
   inventoryProductId: string;
   locationId: string | null;
   currentQuantity: number;
   countDate: Date;
+  createdAt: Date;
+  workerLines: {
+    inventoryLocationWorkerId: string;
+    countedQuantity: number;
+  }[];
 };
+
+const PRODUCT_ORDER_BY = [{ displayOrder: "asc" as const }, { name: "asc" as const }];
 
 async function loadLatestCountsForProducts(productIds: string[]): Promise<Map<string, CountQtyRow[]>> {
   const countsByProduct = new Map<string, CountQtyRow[]>();
   if (productIds.length === 0) return countsByProduct;
   const latestCounts = (await prismaAny.inventoryCount.findMany({
     where: { inventoryProductId: { in: productIds } },
-    orderBy: { countDate: "desc" },
+    orderBy: LATEST_COUNT_ORDER_BY,
     distinct: ["inventoryProductId", "locationId"],
     select: {
+      id: true,
       inventoryProductId: true,
       locationId: true,
       currentQuantity: true,
       countDate: true,
+      createdAt: true,
+      workerLines: {
+        select: {
+          inventoryLocationWorkerId: true,
+          countedQuantity: true,
+        },
+      },
     },
   })) as CountQtyRow[];
   for (const c of latestCounts) {
@@ -118,12 +113,16 @@ function mapProductRow(
     null;
   const locationQty = latestForShelf?.currentQuantity ?? 0;
   const systemTotal = systemTotalFromCounts(counts);
-  const systemShortage =
-    p.minimumQuantity > 0 ? Math.max(0, p.minimumQuantity - systemTotal) : 0;
+  const systemShortage = requiredQtyToMinimum(systemTotal, p.minimumQuantity);
   const tier = classifyStockTier(locationQty, p.minimumQuantity);
+  const lastWorkerQtys =
+    latestForShelf?.workerLines?.map((w) => ({
+      inventoryLocationWorkerId: w.inventoryLocationWorkerId,
+      countedQuantity: w.countedQuantity,
+    })) ?? [];
   return {
     id: p.id,
-    name: p.nameHe?.trim() || p.name,
+    name: p.nameHe?.trim() || p.nameAr?.trim() || p.name,
     nameHe: p.nameHe,
     nameAr: p.nameAr,
     nameEn: p.nameEn,
@@ -135,11 +134,15 @@ function mapProductRow(
     previousQuantity: locationQty,
     systemTotalQuantity: systemTotal,
     systemShortage,
+    /** الكمية المطلوبة = כמה חסר למינימום (לא כמות במיקום) */
+    requiredQuantity: systemShortage,
     minimumQuantity: p.minimumQuantity,
     maximumQuantity: p.maximumQuantity,
+    displayOrder: p.displayOrder ?? 0,
     lastCountedAt: latestForShelf?.countDate
       ? new Date(latestForShelf.countDate).toISOString()
       : null,
+    lastWorkerQtys,
     stockTier: tier,
   };
 }
@@ -201,7 +204,7 @@ export async function GET(req: NextRequest) {
     if (stock !== "all") {
       const products = (await prismaAny.inventoryProduct.findMany({
         where,
-        orderBy: [{ name: "asc" }],
+        orderBy: PRODUCT_ORDER_BY,
         select: PRODUCT_SELECT,
       })) as ProductRow[];
       const countsByProduct = await loadLatestCountsForProducts(products.map((p) => p.id));
@@ -231,7 +234,7 @@ export async function GET(req: NextRequest) {
       prismaAny.inventoryProduct.count({ where }),
       prismaAny.inventoryProduct.findMany({
         where,
-        orderBy: [{ name: "asc" }],
+        orderBy: PRODUCT_ORDER_BY,
         skip: (page - 1) * pageSize,
         take: pageSize,
         select: PRODUCT_SELECT,
@@ -301,9 +304,29 @@ export async function POST(req: NextRequest) {
     }
 
     const rawDate = body.countDate?.trim() || body.countedAt?.trim();
-    const countDate = rawDate ? new Date(rawDate) : new Date();
-    if (Number.isNaN(countDate.getTime())) {
-      return NextResponse.json({ ok: false, error: "תאריך ספירה לא תקין" }, { status: 400 });
+    /** תאריך עסקי מהלקוח + שעת שמירה אמיתית — מונע tie באותו יום */
+    let countDate = new Date();
+    if (rawDate) {
+      // date-only: פרסינג מקומי (לא UTC midnight) + זמן שמירה נוכחי
+      const ymd = rawDate.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      if (ymd) {
+        const now = new Date();
+        countDate = new Date(
+          Number(ymd[1]),
+          Number(ymd[2]) - 1,
+          Number(ymd[3]),
+          now.getHours(),
+          now.getMinutes(),
+          now.getSeconds(),
+          now.getMilliseconds(),
+        );
+      } else {
+        const parsed = new Date(rawDate);
+        if (Number.isNaN(parsed.getTime())) {
+          return NextResponse.json({ ok: false, error: "תאריך ספירה לא תקין" }, { status: 400 });
+        }
+        countDate = parsed;
+      }
     }
 
     const shelf = await resolveShelf(body.locationId?.trim() ?? null, body.location?.trim());
@@ -344,19 +367,27 @@ export async function POST(req: NextRequest) {
     const [existingProducts, prevCounts, workers] = await Promise.all([
       prismaAny.inventoryProduct.findMany({
         where: { id: { in: rawPids } },
-        select: { id: true },
+        select: { id: true, minimumQuantity: true },
       }),
       rawPids.length === 0
         ? Promise.resolve([] as CountQtyRow[])
         : (prismaAny.inventoryCount.findMany({
             where: { inventoryProductId: { in: rawPids } },
-            orderBy: { countDate: "desc" },
+            orderBy: LATEST_COUNT_ORDER_BY,
             distinct: ["inventoryProductId", "locationId"],
             select: {
+              id: true,
               inventoryProductId: true,
               locationId: true,
               currentQuantity: true,
               countDate: true,
+              createdAt: true,
+              workerLines: {
+                select: {
+                  inventoryLocationWorkerId: true,
+                  countedQuantity: true,
+                },
+              },
             },
           }) as Promise<CountQtyRow[]>),
       allWorkerIds.size > 0
@@ -370,7 +401,12 @@ export async function POST(req: NextRequest) {
         : Promise.resolve([] as { id: string; displayName: string; workArea: string }[]),
     ]);
 
-    const productOk = new Set((existingProducts as { id: string }[]).map((p) => p.id));
+    const productMeta = new Map(
+      (existingProducts as { id: string; minimumQuantity: number }[]).map((p) => [
+        p.id,
+        p.minimumQuantity,
+      ]),
+    );
     const countsByProduct = new Map<string, CountQtyRow[]>();
     for (const c of prevCounts) {
       const list = countsByProduct.get(c.inventoryProductId) ?? [];
@@ -387,7 +423,7 @@ export async function POST(req: NextRequest) {
     const prepared: PreparedLine[] = [];
     for (const line of body.lines) {
       const pid = (line.inventoryProductId ?? line.productId)?.trim();
-      if (!pid || !productOk.has(pid)) continue;
+      if (!pid || !productMeta.has(pid)) continue;
 
       const workerLines: PreparedWorker[] = Array.isArray(line.workers)
         ? line.workers
@@ -509,15 +545,29 @@ export async function POST(req: NextRequest) {
       return {
         sessionId: countSession.id,
         sessionNumber: countSession.sessionNumber,
-        rows: uniquePrepared.map((p) => ({
-          id: countIdByProduct.get(p.inventoryProductId) ?? "",
-          inventoryProductId: p.inventoryProductId,
-          previousQuantity: p.previousQuantity,
-          currentQuantity: p.currentQuantity,
-          difference: p.difference,
-          locationId,
-          workers: p.workers,
-        })),
+        rows: uniquePrepared.map((p) => {
+          const prevCountsForProduct = countsByProduct.get(p.inventoryProductId) ?? [];
+          // מחליפים את הספירה האחרונה של המיקום הנוכחי — בלי לגעת בהיסטוריה ב-DB
+          const nextCounts = prevCountsForProduct
+            .filter((c) => c.locationId !== locationId)
+            .map((c) => ({ locationId: c.locationId, currentQuantity: c.currentQuantity }));
+          nextCounts.push({ locationId, currentQuantity: p.currentQuantity });
+          const systemTotal = systemTotalFromCounts(nextCounts);
+          const minQty = productMeta.get(p.inventoryProductId) ?? 0;
+          const required = requiredQtyToMinimum(systemTotal, minQty);
+          return {
+            id: countIdByProduct.get(p.inventoryProductId) ?? "",
+            inventoryProductId: p.inventoryProductId,
+            previousQuantity: p.currentQuantity,
+            currentQuantity: p.currentQuantity,
+            difference: p.difference,
+            locationId,
+            systemTotalQuantity: systemTotal,
+            systemShortage: required,
+            requiredQuantity: required,
+            workers: p.workers,
+          };
+        }),
       };
     });
 

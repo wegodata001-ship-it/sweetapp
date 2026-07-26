@@ -4,6 +4,7 @@ import {
   WORKER_SELECT,
   type LocationWorkerRow,
 } from "@/lib/inventory/location-workers";
+import { LATEST_COUNT_ORDER_BY } from "@/lib/inventory/count-latest";
 
 export type ResolvedShelf = {
   id: string | null;
@@ -375,7 +376,7 @@ export async function listShelfSummaries(): Promise<ShelfSummaryStats[]> {
       ? []
       : ((await prismaAny.inventoryCount.findMany({
           where: { inventoryProductId: { in: allProductIds } },
-          orderBy: { countDate: "desc" },
+          orderBy: LATEST_COUNT_ORDER_BY,
           distinct: ["inventoryProductId", "locationId"],
           select: {
             inventoryProductId: true,
@@ -446,7 +447,7 @@ export async function summarizeShelf(shelf: ResolvedShelf): Promise<ShelfSummary
       ? ([] as CountDiffRow[])
       : ((await prismaAny.inventoryCount.findMany({
           where: { inventoryProductId: { in: productIds } },
-          orderBy: { countDate: "desc" },
+          orderBy: LATEST_COUNT_ORDER_BY,
           distinct: ["inventoryProductId", "locationId"],
           select: {
             inventoryProductId: true,

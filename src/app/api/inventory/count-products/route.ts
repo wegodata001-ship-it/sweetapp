@@ -11,6 +11,7 @@ import {
   type InventoryListQuery,
   type StockFilterTier,
 } from "@/lib/inventory/product-filters";
+import { LATEST_COUNT_ORDER_BY } from "@/lib/inventory/count-latest";
 
 function mapProduct(row: {
   id: string;
@@ -90,7 +91,7 @@ export async function GET(req: NextRequest) {
         inventoryLocation: { select: { id: true, name: true } },
         _count: { select: { counts: true } },
         counts: {
-          orderBy: { countDate: "desc" },
+          orderBy: LATEST_COUNT_ORDER_BY,
           take: 1,
           select: { currentQuantity: true },
         },

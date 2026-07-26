@@ -29,6 +29,11 @@ export type LocationWorkerDto = {
   isActive?: boolean;
 };
 
+export type LastWorkerQtyDto = {
+  inventoryLocationWorkerId: string;
+  countedQuantity: number;
+};
+
 export type InventoryCountProductRow = {
   id: string;
   name: string;
@@ -43,11 +48,15 @@ export type InventoryCountProductRow = {
   previousQuantity: number;
   /** סה״כ קיים בכל המערכת (כל המיקומים) */
   systemTotalQuantity?: number;
-  /** כמה חסר במערכת מול המינימום */
+  /** כמה חסר במערכת מול המינימום (= الكمية المطلوبة) */
   systemShortage?: number;
+  requiredQuantity?: number;
   minimumQuantity: number;
   maximumQuantity?: number | null;
+  displayOrder?: number;
   lastCountedAt: string | null;
+  /** פירוט עובדים מהספירה האחרונה — לטעינת ברירת מחדל */
+  lastWorkerQtys?: LastWorkerQtyDto[];
 };
 
 export type MonthlyCountRow = InventoryCountProductRow & {

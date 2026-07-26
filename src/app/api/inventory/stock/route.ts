@@ -9,6 +9,7 @@ import {
   matchesStockFilter,
   type StockFilterTier,
 } from "@/lib/inventory/product-filters";
+import { LATEST_COUNT_ORDER_BY } from "@/lib/inventory/count-latest";
 
 function inventoryStatus(
   current: number | null,
@@ -69,7 +70,7 @@ export async function GET(req: NextRequest) {
       include: {
         inventoryLocation: { select: { id: true, name: true } },
         counts: {
-          orderBy: { countDate: "desc" },
+          orderBy: LATEST_COUNT_ORDER_BY,
           take: 1,
           include: {
             countedBy: { select: { id: true, fullName: true, email: true } },

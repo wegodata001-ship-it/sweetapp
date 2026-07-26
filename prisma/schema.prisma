@@ -529,7 +529,8 @@ model InventoryProduct {
   category          String                       @default("כללי")
   minimumQuantity   Float                        @default(0)
   maximumQuantity   Float?
-  /// סדר תצוגה ידני (Drag & Drop). 0 = ברירת מחדל; מיון תמיד displayOrder ואז name
+  /// סדר תצוגה בספירה (Drag & Drop). מיון תמיד displayOrder ואז name.
+  /// אוכלס לפי סדר השם בעת ההוספה, כך שהסדר הקיים נשמר
   displayOrder      Int                          @default(0)
   /// מיקום ראשי ישן (אופציונלי) — לתאימות; השיוך המלא ב־InventoryProductOnLocation
   locationId        String?

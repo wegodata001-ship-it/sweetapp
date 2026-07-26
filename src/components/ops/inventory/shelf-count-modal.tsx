@@ -32,9 +32,43 @@ const TABLE_SITE_ROW = 78;
 const CARD_ROW_BASE = 260;
 const CARD_SITE_ROW = 100;
 const REFRESH_SHELVES_MS = 1200;
+const ORDER_SAVE_MS = 500;
 const MOBILE_MQ = "(max-width: 767px)";
 /** עמוד ראשון קטן — אין pageSize 500; המשך ב־infinite scroll */
 const COUNT_PAGE_SIZE = 80;
+
+/** טעינת ברירת מחדל מהספירה האחרונה — לא מאפסים ל־0 */
+function buildPrefillFromLastCount(
+  rows: InventoryCountProductRow[],
+  workers: LocationWorkerDto[],
+): { actual: Record<string, string>; workerQty: Record<string, WorkerQtyMap> } {
+  const actual: Record<string, string> = {};
+  const workerQty: Record<string, WorkerQtyMap> = {};
+  for (const row of rows) {
+    if (workers.length > 0) {
+      const map: WorkerQtyMap = {};
+      const last = row.lastWorkerQtys ?? [];
+      if (last.length > 0) {
+        for (const w of workers) {
+          const found = last.find((l) => l.inventoryLocationWorkerId === w.id);
+          map[w.id] = found != null ? String(found.countedQuantity) : "0";
+        }
+      } else {
+        const first = workers[0];
+        if (first) {
+          map[first.id] = String(row.previousQuantity ?? 0);
+          for (let i = 1; i < workers.length; i++) {
+            map[workers[i]!.id] = "0";
+          }
+        }
+      }
+      workerQty[row.id] = map;
+    } else {
+      actual[row.id] = String(row.previousQuantity ?? 0);
+    }
+  }
+  return { actual, workerQty };
+}
 
 function useIsMobileLayout() {
   const [isMobile, setIsMobile] = useState(false);
@@ -112,6 +146,8 @@ function ShelfCountModalInner({
   >({});
   const [savingIds, setSavingIds] = useState<Set<string>>(new Set());
   const [savingAll, setSavingAll] = useState(false);
+  /** רק מוצרים שהמשתמש שינה — prefill לא נחשב dirty */
+  const [touchedIds, setTouchedIds] = useState<Set<string>>(new Set());
   const [confirmCloseOpen, setConfirmCloseOpen] = useState(false);
   const [workersOpen, setWorkersOpen] = useState(false);
   const [editProduct, setEditProduct] = useState<ProductEditValues | null>(null);
@@ -120,6 +156,7 @@ function ShelfCountModalInner({
   const [scanQ, setScanQ] = useState("");
   const [scrollTop, setScrollTop] = useState(0);
   const [viewportH, setViewportH] = useState(480);
+  const [dragProductId, setDragProductId] = useState<string | null>(null);
   const isMobile = useIsMobileLayout();
   const rowVariant = isMobile ? ("card" as const) : ("table" as const);
   const siteCount = Math.max(workers.length, 1);
@@ -129,10 +166,20 @@ function ShelfCountModalInner({
 
   const listRef = useRef<HTMLDivElement>(null);
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const orderTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const rowRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const loadingMoreRef = useRef(false);
   const tRef = useRef(t);
   tRef.current = t;
+
+  const markTouched = useCallback((productId: string) => {
+    setTouchedIds((prev) => {
+      if (prev.has(productId)) return prev;
+      const next = new Set(prev);
+      next.add(productId);
+      return next;
+    });
+  }, []);
 
   /**
    * טעינה יחידה בפתיחה — ללא תלות ב־t / callbacks לא יציבים.
@@ -145,6 +192,8 @@ function ShelfCountModalInner({
     const ac = new AbortController();
 
     setSavingIds(new Set());
+    setTouchedIds(new Set());
+    setDragProductId(null);
     setConfirmCloseOpen(false);
     setWorkersOpen(false);
     setEditProduct(null);
@@ -235,14 +284,14 @@ function ShelfCountModalInner({
           return;
         }
 
-        setActualById({});
-        setWorkerQtyByProduct({});
         setActiveSessionId(null);
         setSessionNumber(null);
 
         if (!shelfName.trim() && !locationId?.trim()) {
           setProducts([]);
           setWorkers([]);
+          setActualById({});
+          setWorkerQtyByProduct({});
           return;
         }
 
@@ -273,11 +322,18 @@ function ShelfCountModalInner({
           setError(j.error ?? tRef.current("saveFailed"));
           setProducts([]);
           setWorkers([]);
+          setActualById({});
+          setWorkerQtyByProduct({});
           return;
         }
         const rows = j.data ?? [];
+        const nextWorkers = j.meta?.workers ?? [];
+        const prefill = buildPrefillFromLastCount(rows, nextWorkers);
         setProducts(rows);
-        setWorkers(j.meta?.workers ?? []);
+        setWorkers(nextWorkers);
+        setActualById(prefill.actual);
+        setWorkerQtyByProduct(prefill.workerQty);
+        setTouchedIds(new Set());
         setListTotal(j.meta?.total ?? rows.length);
         setHasMore(Boolean(j.meta?.hasMore));
         setNextPage(2);
@@ -332,6 +388,10 @@ function ShelfCountModalInner({
         }
         return merged;
       });
+      // prefill רק לשורות חדשות — prev גובר (כבר נטען / נערך)
+      const prefill = buildPrefillFromLastCount(rows, workers);
+      setActualById((prev) => ({ ...prefill.actual, ...prev }));
+      setWorkerQtyByProduct((prev) => ({ ...prefill.workerQty, ...prev }));
       setListTotal(j.meta?.total ?? listTotal);
       setHasMore(Boolean(j.meta?.hasMore));
       setNextPage((p) => p + 1);
@@ -339,7 +399,7 @@ function ShelfCountModalInner({
       loadingMoreRef.current = false;
       setLoadingMore(false);
     }
-  }, [hasMore, listTotal, loading, locationId, nextPage, readOnly, sessionId, shelfName]);
+  }, [hasMore, listTotal, loading, locationId, nextPage, readOnly, sessionId, shelfName, workers]);
 
   useEffect(() => {
     if (!open || !listRef.current) return;
@@ -370,25 +430,34 @@ function ShelfCountModalInner({
     }, REFRESH_SHELVES_MS);
   }, [onShelfStatsChange]);
 
-  const setActual = useCallback((productId: string, value: string) => {
-    setNotice(null);
-    setError(null);
-    setActualById((prev) => ({ ...prev, [productId]: value }));
-  }, []);
+  const setActual = useCallback(
+    (productId: string, value: string) => {
+      setNotice(null);
+      setError(null);
+      markTouched(productId);
+      setActualById((prev) => ({ ...prev, [productId]: value }));
+    },
+    [markTouched],
+  );
 
-  const setWorkerQty = useCallback((productId: string, workerId: string, value: string) => {
-    setNotice(null);
-    setError(null);
-    setWorkerQtyByProduct((prev) => ({
-      ...prev,
-      [productId]: { ...(prev[productId] ?? {}), [workerId]: value },
-    }));
-  }, []);
+  const setWorkerQty = useCallback(
+    (productId: string, workerId: string, value: string) => {
+      setNotice(null);
+      setError(null);
+      markTouched(productId);
+      setWorkerQtyByProduct((prev) => ({
+        ...prev,
+        [productId]: { ...(prev[productId] ?? {}), [workerId]: value },
+      }));
+    },
+    [markTouched],
+  );
 
   const bump = useCallback(
     (productId: string, systemQty: number, delta: number) => {
       setNotice(null);
       setError(null);
+      markTouched(productId);
       if (workers.length > 0) {
         const firstWorkerId = workers[0]?.id;
         if (!firstWorkerId) return;
@@ -408,7 +477,52 @@ function ShelfCountModalInner({
         return { ...prev, [productId]: String(next) };
       });
     },
-    [workers],
+    [markTouched, workers],
+  );
+
+  const persistProductOrder = useCallback(
+    (orderedIds: string[]) => {
+      if (orderTimer.current) clearTimeout(orderTimer.current);
+      orderTimer.current = setTimeout(() => {
+        void (async () => {
+          try {
+            await fetch("/api/inventory/product-order", {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              credentials: "same-origin",
+              body: JSON.stringify({
+                productIds: orderedIds,
+                locationId: locationId?.trim() || undefined,
+                location: shelfName.trim() || undefined,
+              }),
+            });
+          } catch {
+            /* שמירת סדר לא חוסמת ספירה */
+          }
+        })();
+      }, ORDER_SAVE_MS);
+    },
+    [locationId, shelfName],
+  );
+
+  const reorderProduct = useCallback(
+    (fromId: string, toId: string) => {
+      if (!fromId || !toId || fromId === toId) return;
+      if (scanQ.trim()) return;
+      setProducts((prev) => {
+        const fromIdx = prev.findIndex((p) => p.id === fromId);
+        const toIdx = prev.findIndex((p) => p.id === toId);
+        if (fromIdx < 0 || toIdx < 0) return prev;
+        const next = [...prev];
+        const [item] = next.splice(fromIdx, 1);
+        if (!item) return prev;
+        next.splice(toIdx, 0, item);
+        const withOrder = next.map((p, i) => ({ ...p, displayOrder: i + 1 }));
+        persistProductOrder(withOrder.map((p) => p.id));
+        return withOrder;
+      });
+    },
+    [persistProductOrder, scanQ],
   );
 
   const sortedProducts = useMemo(() => {
@@ -445,20 +559,9 @@ function ShelfCountModalInner({
   const padTop = startIdx * rowHeight;
   const padBottom = Math.max(0, (sortedProducts.length - endIdx) * rowHeight);
   const hasWorkers = workers.length > 0;
-  const dirtyProductIds = useMemo(() => {
-    const ids = new Set<string>();
-    if (hasWorkers) {
-      for (const [productId, map] of Object.entries(workerQtyByProduct)) {
-        if (Object.values(map).some((raw) => raw !== "")) ids.add(productId);
-      }
-    } else {
-      for (const [productId, raw] of Object.entries(actualById)) {
-        if (raw !== "") ids.add(productId);
-      }
-    }
-    return ids;
-  }, [actualById, hasWorkers, workerQtyByProduct]);
+  const dirtyProductIds = touchedIds;
   const hasDirtyChanges = dirtyProductIds.size > 0;
+  const canDragReorder = !sessionId && !readOnly && !scanQ.trim();
   const hasInvalidChanges = useMemo(() => {
     if (hasWorkers) {
       for (const productId of dirtyProductIds) {
@@ -518,7 +621,8 @@ function ShelfCountModalInner({
           });
         }
       } else {
-        for (const [id, raw] of Object.entries(actualById)) {
+        for (const id of dirtyProductIds) {
+          const raw = actualById[id] ?? "";
           if (raw === "") continue;
           const qty = Number(raw);
           if (!Number.isFinite(qty) || qty < 0) continue;
@@ -554,7 +658,17 @@ function ShelfCountModalInner({
             saved?: number;
             sessionId?: string;
             sessionNumber?: number;
-            rows?: { inventoryProductId: string; currentQuantity: number }[];
+            rows?: {
+              inventoryProductId: string;
+              currentQuantity: number;
+              systemTotalQuantity?: number;
+              systemShortage?: number;
+              requiredQuantity?: number;
+              workers?: {
+                inventoryLocationWorkerId: string;
+                countedQuantity: number;
+              }[];
+            }[];
           };
         };
 
@@ -564,16 +678,38 @@ function ShelfCountModalInner({
         }
 
         const savedRows = j.data?.rows ?? [];
-        setProducts((prev) =>
-          prev.map((product) => {
+        setProducts((prev) => {
+          const next = prev.map((product) => {
             const saved = savedRows.find((row) => row.inventoryProductId === product.id);
-            return saved ? { ...product, previousQuantity: saved.currentQuantity } : product;
-          }),
-        );
+            if (!saved) return product;
+            const systemTotal =
+              saved.systemTotalQuantity ?? product.systemTotalQuantity ?? saved.currentQuantity;
+            const required =
+              saved.requiredQuantity ??
+              saved.systemShortage ??
+              Math.max(0, (product.minimumQuantity || 0) - systemTotal);
+            return {
+              ...product,
+              previousQuantity: saved.currentQuantity,
+              systemTotalQuantity: systemTotal,
+              systemShortage: required,
+              requiredQuantity: required,
+              lastWorkerQtys:
+                saved.workers?.map((w) => ({
+                  inventoryLocationWorkerId: w.inventoryLocationWorkerId,
+                  countedQuantity: w.countedQuantity,
+                })) ?? product.lastWorkerQtys,
+            };
+          });
+          // אחרי שמירה — ברירת המחדל = מה שנשמר (לא איפוס ל־0)
+          const prefill = buildPrefillFromLastCount(next, workers);
+          setActualById(prefill.actual);
+          setWorkerQtyByProduct(prefill.workerQty);
+          return next;
+        });
         if (j.data?.sessionId) setActiveSessionId(j.data.sessionId);
         if (j.data?.sessionNumber != null) setSessionNumber(j.data.sessionNumber);
-        setActualById({});
-        setWorkerQtyByProduct({});
+        setTouchedIds(new Set());
         setConfirmCloseOpen(false);
         setNotice(t("savedSuccess"));
         scheduleShelfRefresh();
@@ -775,65 +911,78 @@ function ShelfCountModalInner({
               ) : null}
               {useVirtual ? <div style={{ height: padTop }} aria-hidden /> : null}
               <div className={isMobile ? "space-y-3" : "space-y-2"}>
-                {visible.map((row) => (
-                  <div
-                    key={row.id}
-                    ref={(el) => {
-                      if (el) rowRefs.current.set(row.id, el);
-                      else rowRefs.current.delete(row.id);
-                    }}
-                  >
-                    <ShelfCountLineRow
-                      id={row.id}
-                      name={row.name}
-                      barcode={row.barcode ?? null}
-                      sku={row.sku ?? null}
-                      unit={row.unit}
-                      systemQty={row.previousQuantity}
-                      systemTotalQuantity={row.systemTotalQuantity ?? row.previousQuantity}
-                      systemShortage={
-                        row.systemShortage ??
-                        Math.max(
-                          0,
-                          (row.minimumQuantity || 0) -
-                            (row.systemTotalQuantity ?? row.previousQuantity),
-                        )
-                      }
-                      minimumQuantity={row.minimumQuantity}
-                      workers={workers}
-                      workerQtys={workerQtyByProduct[row.id] ?? {}}
-                      actualRaw={actualById[row.id] ?? ""}
-                      saving={savingIds.has(row.id)}
-                      readOnly={isReadOnly}
-                      variant={rowVariant}
-                      showColumnLabels={false}
-                      onWorkerQtyChange={(workerId, v) => {
-                        if (!isReadOnly) setWorkerQty(row.id, workerId, v);
+                {visible.map((row) => {
+                  const requiredQty =
+                    row.requiredQuantity ??
+                    row.systemShortage ??
+                    Math.max(
+                      0,
+                      (row.minimumQuantity || 0) -
+                        (row.systemTotalQuantity ?? row.previousQuantity),
+                    );
+                  return (
+                    <div
+                      key={row.id}
+                      ref={(el) => {
+                        if (el) rowRefs.current.set(row.id, el);
+                        else rowRefs.current.delete(row.id);
                       }}
-                      onActualChange={(v) => {
-                        if (!isReadOnly) setActual(row.id, v);
+                      onDragOver={(e) => {
+                        if (!canDragReorder) return;
+                        e.preventDefault();
                       }}
-                      onBump={(d) => {
-                        if (!isReadOnly) bump(row.id, row.previousQuantity, d);
+                      onDrop={(e) => {
+                        if (!canDragReorder || !dragProductId) return;
+                        e.preventDefault();
+                        reorderProduct(dragProductId, row.id);
+                        setDragProductId(null);
                       }}
-                      onEditProduct={() => {
-                        if (isReadOnly) return;
-                        setEditProduct({
-                          id: row.id,
-                          nameHe: row.nameHe ?? row.name,
-                          nameAr: row.nameAr ?? "",
-                          nameEn: row.nameEn ?? "",
-                          barcode: row.barcode ?? "",
-                          sku: row.sku ?? "",
-                          unit: row.unit ?? "",
-                          minimumQuantity: row.minimumQuantity,
-                          maximumQuantity: row.maximumQuantity ?? null,
-                        });
-                      }}
-                      t={t}
-                    />
-                  </div>
-                ))}
+                    >
+                      <ShelfCountLineRow
+                        id={row.id}
+                        name={row.name}
+                        unit={row.unit}
+                        systemQty={row.previousQuantity}
+                        systemTotalQuantity={row.systemTotalQuantity ?? row.previousQuantity}
+                        requiredQuantity={requiredQty}
+                        minimumQuantity={row.minimumQuantity}
+                        workers={workers}
+                        workerQtys={workerQtyByProduct[row.id] ?? {}}
+                        actualRaw={actualById[row.id] ?? ""}
+                        saving={savingIds.has(row.id)}
+                        readOnly={isReadOnly}
+                        variant={rowVariant}
+                        showColumnLabels={false}
+                        draggable={canDragReorder}
+                        onDragStart={() => setDragProductId(row.id)}
+                        onWorkerQtyChange={(workerId, v) => {
+                          if (!isReadOnly) setWorkerQty(row.id, workerId, v);
+                        }}
+                        onActualChange={(v) => {
+                          if (!isReadOnly) setActual(row.id, v);
+                        }}
+                        onBump={(d) => {
+                          if (!isReadOnly) bump(row.id, row.previousQuantity, d);
+                        }}
+                        onEditProduct={() => {
+                          if (isReadOnly) return;
+                          setEditProduct({
+                            id: row.id,
+                            nameHe: row.nameHe ?? row.name,
+                            nameAr: row.nameAr ?? "",
+                            nameEn: row.nameEn ?? "",
+                            barcode: row.barcode ?? "",
+                            sku: row.sku ?? "",
+                            unit: row.unit ?? "",
+                            minimumQuantity: row.minimumQuantity,
+                            maximumQuantity: row.maximumQuantity ?? null,
+                          });
+                        }}
+                        t={t}
+                      />
+                    </div>
+                  );
+                })}
               </div>
               {useVirtual ? <div style={{ height: padBottom }} aria-hidden /> : null}
               {loadingMore ? (
@@ -918,7 +1067,21 @@ function ShelfCountModalInner({
         open={workersOpen}
         locationId={locationId ?? null}
         onClose={() => setWorkersOpen(false)}
-        onSaved={(next) => setWorkers(next)}
+        onSaved={(next) => {
+          setWorkers(next);
+          // שומרים כמויות לפי workerId קיים; עובדים חדשים מתחילים מ־0
+          setWorkerQtyByProduct((prev) => {
+            const out: Record<string, WorkerQtyMap> = {};
+            for (const [productId, map] of Object.entries(prev)) {
+              const nextMap: WorkerQtyMap = {};
+              for (const w of next) {
+                nextMap[w.id] = map[w.id] ?? "0";
+              }
+              out[productId] = nextMap;
+            }
+            return out;
+          });
+        }}
         t={t}
       />
 
@@ -946,6 +1109,7 @@ function ShelfCountModalInner({
                 minimumQuantity,
                 maximumQuantity: p.maximumQuantity,
                 systemShortage,
+                requiredQuantity: systemShortage,
               };
             }),
           );

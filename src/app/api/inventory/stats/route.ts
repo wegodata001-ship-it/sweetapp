@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prismaAny } from "@/lib/prisma";
 import { requireDb } from "@/lib/api-route";
 import { classifyStockTier } from "@/lib/inventory/product-filters";
+import { LATEST_COUNT_ORDER_BY } from "@/lib/inventory/count-latest";
 
 function startOfToday(): Date {
   const d = new Date();
@@ -23,7 +24,7 @@ export async function GET() {
       include: {
         inventoryLocation: { select: { id: true, name: true } },
         counts: {
-          orderBy: { countDate: "desc" },
+          orderBy: LATEST_COUNT_ORDER_BY,
           take: 1,
           select: { currentQuantity: true },
         },

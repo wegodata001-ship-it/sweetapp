@@ -18,6 +18,7 @@ import {
   type ZPosMetrics,
 } from "@/lib/dashboard/financial-engine";
 import { boundsForDashboardRange, type RangeKeyed } from "@/lib/dashboard/time-range";
+import { LATEST_COUNT_ORDER_BY } from "@/lib/inventory/count-latest";
 
 export type WeddingSectionStats = {
   weddings: number;
@@ -487,7 +488,7 @@ async function loadSummary(locale: string): Promise<DashboardSummary> {
         name: true,
         counts: {
           where: { difference: { lt: 0 } },
-          orderBy: { countDate: "desc" },
+          orderBy: LATEST_COUNT_ORDER_BY,
           take: 1,
           select: { difference: true },
         },

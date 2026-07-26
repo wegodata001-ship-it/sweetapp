@@ -3,6 +3,7 @@ import { prismaAny } from "@/lib/prisma";
 import { requireDb } from "@/lib/api-route";
 import { getSessionFromCookie } from "@/lib/auth/get-session";
 import { productsOnShelfWhere, resolveShelf } from "@/lib/inventory/shelf-service";
+import { LATEST_COUNT_ORDER_BY } from "@/lib/inventory/count-latest";
 
 /** GET — ייצוא CSV של ספירה אחרונה למיקום */
 export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
@@ -30,7 +31,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
         unit: true,
         minimumQuantity: true,
         counts: {
-          orderBy: { countDate: "desc" },
+          orderBy: LATEST_COUNT_ORDER_BY,
           take: 1,
           select: {
             previousQuantity: true,
