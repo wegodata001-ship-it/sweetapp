@@ -6,7 +6,7 @@ import {
   PDF_SPACING,
   lineHeightFor,
 } from "./pdf-theme";
-import { drawText, ellipsize, wrapText, type TextAlign } from "./pdf-text";
+import { drawText, ellipsize, measureText, wrapText, type TextAlign } from "./pdf-text";
 
 /**
  * Table renderer for the unified PDF engine.
@@ -35,7 +35,104 @@ export type PdfTableOptions<Row> = {
   /** Shown instead of the table body when there are no rows. */
   emptyText?: string;
   zebra?: boolean;
+  /**
+   * Let a header that does not fit its column wrap onto a second line instead of
+   * being ellipsized, growing the header row. Off by default so the existing
+   * documents keep their exact header height.
+   */
+  wrapHeaders?: boolean;
 };
+
+/** A wrapped header may take at most this many lines before it is ellipsized. */
+const MAX_HEADER_LINES = 2;
+
+/** Header font sizes tried, largest first, before falling back to ellipsizing. */
+const HEADER_SIZE_STEPS = [0, -0.5, -1, -1.5, -2];
+
+/**
+ * Wraps header text at spaces only. A header is never broken mid-word, because a
+ * half word in a column title is unreadable — a word that does not fit is
+ * reported so the caller can try a smaller size.
+ */
+async function wrapHeaderAtWords(
+  layout: PdfLayout,
+  header: string,
+  size: number,
+  maxWidth: number,
+): Promise<{ lines: string[]; overflow: boolean }> {
+  const style = { size, weight: "bold" } as const;
+  const words = header.split(/\s+/).filter(Boolean);
+  if (!words.length) return { lines: [""], overflow: false };
+
+  const lines: string[] = [];
+  let current = "";
+  let overflow = false;
+  for (const word of words) {
+    const candidate = current ? `${current} ${word}` : word;
+    const { width } = await measureText(layout.fonts, candidate, style, layout.direction);
+    if (width <= maxWidth) {
+      current = candidate;
+      continue;
+    }
+    if (current) lines.push(current);
+    current = word;
+    const alone = await measureText(layout.fonts, word, style, layout.direction);
+    if (alone.width > maxWidth) overflow = true;
+  }
+  if (current) lines.push(current);
+  return { lines, overflow };
+}
+
+/**
+ * Picks the largest header size at which every header fits in at most
+ * MAX_HEADER_LINES whole-word lines. If no size fits, the smallest one is used
+ * and the overflowing lines are ellipsized.
+ */
+async function layOutWrappedHeaders<Row>(
+  layout: PdfLayout,
+  visualColumns: Array<PdfTableColumn<Row>>,
+  widths: number[],
+  pad: number,
+  baseSize: number,
+): Promise<{ size: number; lines: string[][] }> {
+  let fallback: { size: number; lines: string[][] } | null = null;
+
+  for (const step of HEADER_SIZE_STEPS) {
+    const size = baseSize + step;
+    const perColumn: string[][] = [];
+    let fits = true;
+    for (let i = 0; i < visualColumns.length; i++) {
+      const boxWidth = widths[i] - pad * 2;
+      const { lines, overflow } = await wrapHeaderAtWords(
+        layout,
+        visualColumns[i].header,
+        size,
+        boxWidth,
+      );
+      perColumn.push(lines);
+      if (overflow || lines.length > MAX_HEADER_LINES) fits = false;
+    }
+    if (fits) return { size, lines: perColumn };
+    fallback = { size, lines: perColumn };
+  }
+
+  const last = fallback ?? { size: baseSize, lines: [] };
+  const trimmed: string[][] = [];
+  for (let i = 0; i < last.lines.length; i++) {
+    const boxWidth = widths[i] - pad * 2;
+    const style = { size: last.size, weight: "bold" } as const;
+    const lines = last.lines[i].slice(0, MAX_HEADER_LINES);
+    if (last.lines[i].length > MAX_HEADER_LINES) {
+      lines[MAX_HEADER_LINES - 1] = last.lines[i].slice(MAX_HEADER_LINES - 1).join(" ");
+    }
+    trimmed.push(
+      await Promise.all(
+        lines.map((line) => ellipsize(layout.fonts, line, style, layout.direction, boxWidth)),
+      ),
+    );
+  }
+  return { size: last.size, lines: trimmed };
+}
 
 export async function drawTable<Row>(
   layout: PdfLayout,
@@ -61,8 +158,37 @@ export async function drawTable<Row>(
   const cellSize = PDF_FONT_SIZES.tableCell;
   const pad = PDF_SPACING.tableCellPadding;
 
+  // Header text is identical on every page, so it is laid out once.
+  let headerFontSize: number = headerSize;
+  let headerLines: string[][] = [];
+  if (options.wrapHeaders) {
+    const attempt = await layOutWrappedHeaders(layout, visualColumns, widths, pad, headerSize);
+    headerFontSize = attempt.size;
+    headerLines = attempt.lines;
+  } else {
+    for (let i = 0; i < visualColumns.length; i++) {
+      headerLines.push([
+        await ellipsize(
+          layout.fonts,
+          visualColumns[i].header,
+          { size: headerSize, weight: "bold" },
+          layout.direction,
+          widths[i] - pad * 2,
+        ),
+      ]);
+    }
+  }
+  const headerLineCount = Math.max(1, ...headerLines.map((lines) => lines.length));
+  const headerHeight =
+    headerLineCount > 1
+      ? Math.max(
+          PDF_SPACING.tableHeaderHeight,
+          headerLineCount * lineHeightFor(headerFontSize) + pad,
+        )
+      : PDF_SPACING.tableHeaderHeight;
+
   const drawHeaderRow = async () => {
-    const height = PDF_SPACING.tableHeaderHeight;
+    const height = headerHeight;
     const y = layout.y - height;
     layout.currentPage.drawRectangle({
       x: layout.left,
@@ -74,27 +200,30 @@ export async function drawTable<Row>(
     for (let i = 0; i < visualColumns.length; i++) {
       const col = visualColumns[i];
       const boxWidth = widths[i] - pad * 2;
-      const shown = await ellipsize(
-        layout.fonts,
-        col.header,
-        { size: headerSize, weight: "bold" },
-        layout.direction,
-        boxWidth,
-      );
-      await drawText(layout.currentPage, layout.fonts, shown, layout.direction, {
-        x: offsets[i] + pad,
-        y: y + height / 2 - headerSize / 2 + 1,
-        boxWidth,
-        size: headerSize,
-        weight: "bold",
-        color: PDF_COLORS.textInverse,
-        align: col.align ?? "start",
-      });
+      const lines = headerLines[i];
+      // Every header block is vertically centred, whatever its own line count.
+      const blockHeight = lines.length * lineHeightFor(headerFontSize);
+      let lineY =
+        headerLineCount === 1
+          ? y + height / 2 - headerFontSize / 2 + 1
+          : y + height / 2 + blockHeight / 2 - lineHeightFor(headerFontSize) + 1;
+      for (const line of lines) {
+        await drawText(layout.currentPage, layout.fonts, line, layout.direction, {
+          x: offsets[i] + pad,
+          y: lineY,
+          boxWidth,
+          size: headerFontSize,
+          weight: "bold",
+          color: PDF_COLORS.textInverse,
+          align: col.align ?? "start",
+        });
+        lineY -= lineHeightFor(headerFontSize);
+      }
     }
     layout.advance(height);
   };
 
-  await layout.ensureSpace(PDF_SPACING.tableHeaderHeight + PDF_SPACING.tableRowHeight * 2);
+  await layout.ensureSpace(headerHeight + PDF_SPACING.tableRowHeight * 2);
   await drawHeaderRow();
 
   if (!rows.length) {

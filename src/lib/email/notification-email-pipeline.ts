@@ -10,6 +10,7 @@ import {
 import { sendSystemEmailAwaitable } from "@/lib/email/send";
 import { getUserEmailPreferences } from "@/lib/email/preferences";
 import { logEmailError, logEmailFailed, logEmailSending, logEmailSkipped } from "@/lib/email/audit";
+import { forwardNotificationToSystemRecipients } from "@/lib/notifications/system-alert-dispatch";
 import { resolveOutboundEmail } from "@/lib/email/test-config";
 import type { NotificationPriorityLevel } from "@/lib/notifications/priority";
 import { isManagerRole } from "@/lib/notifications/me-inbox";
@@ -59,6 +60,21 @@ export async function processNotificationEmail(
     provider: "resend",
     status: "PENDING",
     isRetry: options.isRetry ?? false,
+  });
+
+  /**
+   * העברה לנמעני התראות המערכת.
+   *
+   * מכוון שזה קורה לפני בדיקות המשתמש: התראה שנחסמה בגלל העדפות אישיות, שעות
+   * שקט או משתמש לא פעיל עדיין חייבת להגיע לנמען הקבוע. השליחה אינה חוסמת את
+   * המייל למשתמש ואינה משנה את תוצאתו, וכפילות נמנעת לפי תוכן האירוע.
+   */
+  void forwardNotificationToSystemRecipients(payload).catch((e) => {
+    logEmailError({
+      step: "system_recipients_fanout",
+      notificationId: payload.notificationId,
+      error: String(e),
+    });
   });
 
   if (!cfg.enabled) {

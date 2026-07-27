@@ -27,7 +27,7 @@ export function ShelfDeleteConfirmModal({
   return (
     <div
       dir={dir}
-      className="fixed inset-0 z-[120] flex items-end justify-center bg-slate-950/50 p-3 backdrop-blur-sm sm:items-center"
+      className="fixed inset-0 z-[200] flex items-end justify-center bg-slate-950/50 p-3 backdrop-blur-sm sm:items-center"
       role="dialog"
       aria-modal="true"
       onClick={(e) => {

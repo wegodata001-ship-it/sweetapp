@@ -142,7 +142,7 @@ export function LocationFormModal({
     "mt-1 h-11 w-full rounded-xl border border-[#e7ecf5] px-3 text-sm font-semibold outline-none focus:border-[#6c4cff] focus:ring-2 focus:ring-[#6c4cff]/20";
 
   return (
-    <div className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-900/40 p-4 backdrop-blur-sm">
+    <div className="fixed inset-0 z-[200] flex items-center justify-center bg-slate-900/40 p-4 backdrop-blur-sm">
       <div
         className="max-h-[92vh] w-full max-w-xl overflow-y-auto rounded-[20px] border border-[#e7ecf5] bg-white p-5 shadow-2xl"
         role="dialog"

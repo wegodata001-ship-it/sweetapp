@@ -2,7 +2,7 @@ import { Resend } from "resend";
 import { prismaAny } from "@/lib/prisma";
 import { getEmailConfig, isDeliverableEmail } from "@/lib/email/config";
 import { renderSystemEmail } from "@/lib/email/templates/render-template";
-import { hasRecentEmailLog } from "@/lib/email/dedupe";
+import { hasRecentEmailLog, hasRecentEmailLogByKey } from "@/lib/email/dedupe";
 import {
   logEmailError,
   logEmailFailed,
@@ -29,6 +29,16 @@ async function createEmailLogPending(input: SendSystemEmailInput): Promise<strin
           template: input.template,
           priority: input.priority ?? "MEDIUM",
           renderData: input.data,
+          ...(input.dedupeKey ? { dedupeKey: input.dedupeKey } : {}),
+          // שמות הקבצים בלבד — תוכן הקבצים לא נשמר ביומן
+          ...(input.attachments?.length
+            ? {
+                attachments: input.attachments.map((a) => ({
+                  filename: a.filename,
+                  bytes: a.content.byteLength,
+                })),
+              }
+            : {}),
         },
       },
       select: { id: true },
@@ -38,6 +48,10 @@ async function createEmailLogPending(input: SendSystemEmailInput): Promise<strin
     logEmailError({ step: "create_log", error: String(e) });
     return null;
   }
+}
+
+function toAttachmentBuffer(content: Buffer | Uint8Array): Buffer {
+  return Buffer.isBuffer(content) ? content : Buffer.from(content);
 }
 
 async function updateEmailLog(
@@ -73,6 +87,14 @@ async function sendViaResend(
     to: [input.to],
     subject: input.subject,
     html,
+    ...(input.attachments?.length
+      ? {
+          attachments: input.attachments.map((a) => ({
+            filename: a.filename,
+            content: toAttachmentBuffer(a.content),
+          })),
+        }
+      : {}),
   });
 
   if (result.error) {
@@ -108,7 +130,24 @@ async function sendSystemEmailAsync(input: SendSystemEmailInput): Promise<EmailS
     provider: "resend",
   });
 
-  if (!input.skipDedupe) {
+  if (!input.skipDedupe && input.dedupeKey) {
+    const dup = await hasRecentEmailLogByKey({
+      recipient: to,
+      dedupeKey: input.dedupeKey,
+      sinceHours: input.dedupeWindowHours ?? 12,
+    });
+    if (dup) {
+      logEmailFailed({ reason: "deduped_key", to, type: input.type });
+      return { ok: false, error: "deduped" };
+    }
+  }
+
+  /**
+   * הבדיקה הרחבה (נמען + סוג ב־24 שעות) חלה רק כשאין מפתח מפורש. מפתח מפורש
+   * מגדיר מהו "אותו אירוע", ולכן שני אירועים שונים מאותו סוג — למשל דוח ספירות
+   * של שני ימים שונים — אינם חוסמים זה את זה.
+   */
+  if (!input.skipDedupe && !input.dedupeKey) {
     const dup = await hasRecentEmailLog({
       userId: input.userId,
       recipient: to,

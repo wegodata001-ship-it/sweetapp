@@ -11,6 +11,7 @@
     "test:pdf": "tsx src/lib/pdf/pdf-engine.test.ts",
     "test:pdf-pipeline": "tsx src/lib/document-scan/pdf-pipeline.test.ts",
     "test:supplier-price-compare": "tsx src/lib/procurement/supplier-product-match.test.ts",
+    "test:daily-count-report": "tsx src/lib/inventory/daily-count-report.test.ts",
     "icons:generate": "node scripts/generate-brand-icons.mjs",
     "postinstall": "prisma generate"
   },

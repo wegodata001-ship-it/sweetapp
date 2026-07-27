@@ -20,6 +20,26 @@ import {
   requiredQtyToMinimum,
   systemTotalFromCounts,
 } from "@/lib/inventory/count-latest";
+import {
+  loadExcludedProductIds,
+  resolveCountRoundScope,
+} from "@/lib/inventory/count-exclusions";
+import { scheduleCountSessionCompletedAlert } from "@/lib/inventory/count-session-alert";
+
+/**
+ * שעת פתיחת הספירה מהלקוח.
+ * נשמרת רק כשהיא סבירה (בעבר, ולא יותר מ־24 שעות אחורה), כדי שמשך הספירה
+ * בדוחות יהיה נתון אמיתי ולא ערך שהגיע משעון לקוח שגוי.
+ */
+function parseCountStartedAt(raw: string | null | undefined): Date | null {
+  const value = raw?.trim();
+  if (!value) return null;
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return null;
+  const ms = Date.now() - parsed.getTime();
+  if (ms < 0 || ms > 24 * 60 * 60_000) return null;
+  return parsed;
+}
 
 const PRODUCT_SELECT = {
   id: true,
@@ -179,9 +199,18 @@ export async function GET(req: NextRequest) {
       });
     }
 
+    /**
+     * מוצרים שהוסרו מסבב הספירה הזה (מיקום + יום) — מסתירים מהמסך בלבד.
+     * הסינון כאן ולא בלקוח, כדי ש־total (ומכאן ה־KPI), החלוקה לעמודים
+     * וה־infinite scroll יישארו נכונים גם אחרי רענון הדף.
+     */
+    const roundScope = resolveCountRoundScope(shelf, searchParams.get("countDate"));
+    const excludedProductIds = await loadExcludedProductIds(roundScope);
+
     const where: Record<string, unknown> = {
       AND: [
         productsOnShelfWhere(shelf),
+        ...(excludedProductIds.length > 0 ? [{ id: { notIn: excludedProductIds } }] : []),
         ...(q
           ? [
               {
@@ -225,6 +254,8 @@ export async function GET(req: NextRequest) {
           locationName: shelf.name,
           workers: shelf.workers,
           hasMore: start + pageSize < total,
+          countDay: roundScope.countDay,
+          removedCount: excludedProductIds.length,
         },
       });
     }
@@ -261,6 +292,8 @@ export async function GET(req: NextRequest) {
         locationName: shelf.name,
         workers: shelf.workers,
         hasMore: page * pageSize < total,
+        countDay: roundScope.countDay,
+        removedCount: excludedProductIds.length,
       },
     });
   } catch (e) {
@@ -283,6 +316,8 @@ export async function POST(req: NextRequest) {
     const body = (await req.json()) as {
       countDate?: string | null;
       countedAt?: string | null;
+      /** שעת פתיחת הספירה מהלקוח — אופציונלי, לחישוב משך הספירה בדוחות */
+      startedAt?: string | null;
       locationId?: string | null;
       location?: string | null;
       lines: {
@@ -332,6 +367,7 @@ export async function POST(req: NextRequest) {
     const shelf = await resolveShelf(body.locationId?.trim() ?? null, body.location?.trim());
     const locationId = shelf?.id ?? null;
     const locationName = shelf?.name ?? body.location?.trim() ?? "";
+    const startedAt = parseCountStartedAt(body.startedAt);
 
     type PreparedWorker = {
       inventoryLocationWorkerId: string;
@@ -469,6 +505,18 @@ export async function POST(req: NextRequest) {
     for (const row of prepared) {
       preparedByProduct.set(row.inventoryProductId, row);
     }
+
+    /**
+     * הגנה: לקוח מיושן (טאב שנשאר פתוח) לא יכול לשמור מוצר שהוסר מהסבב.
+     * ההסרה נאכפת בשרת ולא רק ב־UI.
+     */
+    if (shelf) {
+      const scope = resolveCountRoundScope(shelf, body.countDate ?? body.countedAt);
+      for (const productId of await loadExcludedProductIds(scope)) {
+        preparedByProduct.delete(productId);
+      }
+    }
+
     const uniquePrepared = [...preparedByProduct.values()];
 
     if (uniquePrepared.length === 0) {
@@ -484,6 +532,7 @@ export async function POST(req: NextRequest) {
           locationId,
           locationName,
           countDate,
+          startedAt,
           countedByUserId: session.sub,
           status: "COMPLETED",
           productCount: uniquePrepared.length,
@@ -570,6 +619,9 @@ export async function POST(req: NextRequest) {
         }),
       };
     });
+
+    // התראת סיום ספירה לנמעני המערכת — ברקע, כדי לא לעכב את סיום השמירה
+    scheduleCountSessionCompletedAlert(created.sessionId);
 
     return NextResponse.json({
       ok: true,

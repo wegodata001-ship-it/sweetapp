@@ -325,7 +325,7 @@ export function ShelfAddProductsModal({
     <>
       <div
         dir={dir}
-        className="fixed inset-0 z-[110] flex items-end justify-center bg-slate-950/45 p-0 backdrop-blur-sm sm:items-center sm:p-4"
+        className="fixed inset-0 z-[200] flex items-end justify-center bg-slate-950/45 p-0 backdrop-blur-sm sm:items-center sm:p-4"
         role="dialog"
         aria-modal="true"
       >
@@ -616,7 +616,7 @@ export function ShelfAddProductsModal({
       </div>
 
       {existsPrompt ? (
-        <div className="fixed inset-0 z-[115] flex items-center justify-center bg-slate-950/55 p-4">
+        <div className="fixed inset-0 z-[205] flex items-center justify-center bg-slate-950/55 p-4">
           <div className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-2xl" dir={dir}>
             <h4 className="text-base font-black text-slate-900">{tM("existsTitle")}</h4>
             <p className="mt-2 text-sm font-semibold text-slate-600">

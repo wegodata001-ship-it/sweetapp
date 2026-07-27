@@ -148,7 +148,7 @@ function DrillSheet({
   if (!open) return null;
   const colLabel = (key: string) => t(`col_${key}`);
   return (
-    <div className="fixed inset-0 z-[90] flex items-end justify-center bg-slate-950/50 p-0 sm:items-center sm:p-4">
+    <div className="fixed inset-0 z-[200] flex items-end justify-center bg-slate-950/50 p-0 sm:items-center sm:p-4">
       <div
         className="flex max-h-[88dvh] w-full max-w-3xl flex-col rounded-t-3xl bg-white shadow-xl sm:rounded-3xl"
         dir={dir}

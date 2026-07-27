@@ -1,17 +1,29 @@
 "use client";
 
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import {
   AlertTriangle,
+  BarChart3,
   CheckCircle2,
   FileSpreadsheet,
   FileText,
   Loader2,
+  Mail,
+  RotateCcw,
   Save,
   ScanLine,
   Settings2,
   X,
 } from "lucide-react";
+import { resolveCountLineStatus } from "@/components/ops/inventory-count/count-product-status";
 import type {
   InventoryCountProductRow,
   LocationWorkerDto,
@@ -25,15 +37,21 @@ import {
 } from "./shelf-count-line-row";
 import { LocationWorkersModal } from "./location-workers-modal";
 import { ProductEditModal, type ProductEditValues } from "./product-edit-modal";
+import { CountRowRemoveConfirmModal } from "./count-row-remove-confirm-modal";
+import { CountSummaryModal } from "./count-summary-modal";
+import { CountSummaryEmailModal } from "./count-summary-email-modal";
 
 /** גובה משוער לשורת טבלה / כרטיס — כולל ריבועי مواقع الجرد */
 const TABLE_ROW_BASE = 112;
 const TABLE_SITE_ROW = 78;
-const CARD_ROW_BASE = 260;
-const CARD_SITE_ROW = 100;
+const CARD_ROW_BASE = 300;
+/** כל מיקום ספירה בכרטיס: תווית + שורת ➖ כמות ➕ */
+const CARD_SITE_ROW = 92;
 const REFRESH_SHELVES_MS = 1200;
 const ORDER_SAVE_MS = 500;
 const MOBILE_MQ = "(max-width: 767px)";
+/** מתחת לסף הזה מדובר בסרגל כתובת ולא במקלדת */
+const KEYBOARD_MIN_INSET = 120;
 /** עמוד ראשון קטן — אין pageSize 500; המשך ב־infinite scroll */
 const COUNT_PAGE_SIZE = 80;
 
@@ -83,17 +101,85 @@ function useIsMobileLayout() {
   return isMobile;
 }
 
+/**
+ * כמה פיקסלים מהמסך מכוסים במקלדת הווירטואלית.
+ * אנדרואיד/ספארי מרחפים את המקלדת מעל ה־layout viewport, כך ש־100dvh נשאר
+ * בגובה המלא וסרגלי sticky bottom נשארים מתחת למקלדת. הקיזוז מחזיר אותם למסך.
+ * סף KEYBOARD_MIN_INSET מונע רעידות כשסרגל הכתובת נפתח/נסגר בגלילה.
+ */
+function useKeyboardInset(active: boolean) {
+  const [inset, setInset] = useState(0);
+  useEffect(() => {
+    if (!active || typeof window === "undefined") return;
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const apply = () => {
+      const hidden = window.innerHeight - vv.height - vv.offsetTop;
+      setInset(hidden > KEYBOARD_MIN_INSET ? Math.round(hidden) : 0);
+    };
+    apply();
+    vv.addEventListener("resize", apply);
+    vv.addEventListener("scroll", apply);
+    return () => {
+      vv.removeEventListener("resize", apply);
+      vv.removeEventListener("scroll", apply);
+      setInset(0);
+    };
+  }, [active]);
+  return inset;
+}
+
+/** כפתור אייקון בסרגל התחתון — שטח נגיעה 48px ומעלה */
+function MobileBarButton({
+  label,
+  icon,
+  onClick,
+  disabled,
+}: {
+  label: string;
+  icon: ReactNode;
+  onClick: () => void;
+  disabled?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      aria-label={label}
+      title={label}
+      className="grid h-12 w-11 shrink-0 place-items-center rounded-2xl border border-[#e7ecf5] bg-white text-slate-700 transition active:scale-95 disabled:opacity-40 sm:w-12"
+    >
+      {icon}
+    </button>
+  );
+}
+
 type Props = {
   open: boolean;
   shelfName: string;
   locationId?: string | null;
   countDate: string;
+  /** שעת פתיחת הספירה — נשמרת עם הסשן לחישוב משך הספירה בדוחות */
+  startedAt?: string | null;
   /** צפייה בספירה מההיסטוריה */
   sessionId?: string | null;
   readOnly?: boolean;
+  /** הסרת שורה מהספירה — מנהל מערכת / בעל העסק בלבד */
+  canRemoveRows?: boolean;
+  /** צפייה בסיכומי ספירות ושליחתם במייל — מנהל מערכת / בעל העסק בלבד */
+  canViewSummaries?: boolean;
   onClose: () => void;
   onShelfStatsChange?: () => void;
   t: (key: string, vars?: Record<string, string | number>) => string;
+};
+
+/** שורה שהוסרה — נשמרת בזיכרון כדי לאפשר שחזור מיידי ללא טעינה מחדש */
+type RemovedRowSnapshot = {
+  row: InventoryCountProductRow;
+  index: number;
+  actual?: string;
+  workerQty?: WorkerQtyMap;
 };
 
 async function downloadSessionExport(sessionId: string, format: "pdf" | "xlsx") {
@@ -122,8 +208,11 @@ function ShelfCountModalInner({
   shelfName,
   locationId,
   countDate,
+  startedAt = null,
   sessionId = null,
   readOnly = false,
+  canRemoveRows = false,
+  canViewSummaries = false,
   onClose,
   onShelfStatsChange,
   t,
@@ -149,6 +238,12 @@ function ShelfCountModalInner({
   /** רק מוצרים שהמשתמש שינה — prefill לא נחשב dirty */
   const [touchedIds, setTouchedIds] = useState<Set<string>>(new Set());
   const [confirmCloseOpen, setConfirmCloseOpen] = useState(false);
+  const [summariesOpen, setSummariesOpen] = useState(false);
+  const [summaryEmailOpen, setSummaryEmailOpen] = useState(false);
+  /** הסרת שורה מהספירה — יעד האישור, מזהה בתהליך, ואחרונה שהוסרה (לשחזור) */
+  const [removeTarget, setRemoveTarget] = useState<{ id: string; name: string } | null>(null);
+  const [removingId, setRemovingId] = useState<string | null>(null);
+  const [lastRemoved, setLastRemoved] = useState<RemovedRowSnapshot | null>(null);
   const [workersOpen, setWorkersOpen] = useState(false);
   const [editProduct, setEditProduct] = useState<ProductEditValues | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -158,6 +253,7 @@ function ShelfCountModalInner({
   const [viewportH, setViewportH] = useState(480);
   const [dragProductId, setDragProductId] = useState<string | null>(null);
   const isMobile = useIsMobileLayout();
+  const keyboardInset = useKeyboardInset(open && isMobile);
   const rowVariant = isMobile ? ("card" as const) : ("table" as const);
   const siteCount = Math.max(workers.length, 1);
   const rowHeight = isMobile
@@ -197,6 +293,9 @@ function ShelfCountModalInner({
     setConfirmCloseOpen(false);
     setWorkersOpen(false);
     setEditProduct(null);
+    setRemoveTarget(null);
+    setRemovingId(null);
+    setLastRemoved(null);
     setNotice(null);
     setError(null);
     setScanQ("");
@@ -301,6 +400,8 @@ function ShelfCountModalInner({
         });
         if (locationId?.trim()) params.set("locationId", locationId.trim());
         if (shelfName.trim()) params.set("location", shelfName.trim());
+        // מסנן בשרת מוצרים שהוסרו מסבב הספירה של אותו יום
+        if (countDate) params.set("countDate", countDate);
         const res = await fetch(`/api/inventory/monthly-count?${params}`, {
           credentials: "same-origin",
           signal: ac.signal,
@@ -351,7 +452,8 @@ function ShelfCountModalInner({
       cancelled = true;
       ac.abort();
     };
-  }, [open, shelfName, locationId, sessionId]);
+    // countDate הוא מחרוזת יציבה (יום נוכחי) — לא גורם ל-refetch מחזורי
+  }, [open, shelfName, locationId, sessionId, countDate]);
 
   const loadMoreProducts = useCallback(async () => {
     if (sessionId || readOnly) return;
@@ -367,6 +469,7 @@ function ShelfCountModalInner({
       });
       if (locationId?.trim()) params.set("locationId", locationId.trim());
       if (shelfName.trim()) params.set("location", shelfName.trim());
+      if (countDate) params.set("countDate", countDate);
       const res = await fetch(`/api/inventory/monthly-count?${params}`, {
         credentials: "same-origin",
       });
@@ -399,7 +502,18 @@ function ShelfCountModalInner({
       loadingMoreRef.current = false;
       setLoadingMore(false);
     }
-  }, [hasMore, listTotal, loading, locationId, nextPage, readOnly, sessionId, shelfName, workers]);
+  }, [
+    countDate,
+    hasMore,
+    listTotal,
+    loading,
+    locationId,
+    nextPage,
+    readOnly,
+    sessionId,
+    shelfName,
+    workers,
+  ]);
 
   useEffect(() => {
     if (!open || !listRef.current) return;
@@ -525,6 +639,166 @@ function ShelfCountModalInner({
     [persistProductOrder, scanQ],
   );
 
+  /** פרמטרי הסבב הנוכחי — מיקום + יום הספירה */
+  const roundParams = useCallback(() => {
+    const params = new URLSearchParams();
+    if (locationId?.trim()) params.set("locationId", locationId.trim());
+    if (shelfName.trim()) params.set("location", shelfName.trim());
+    if (countDate) params.set("countDate", countDate);
+    return params;
+  }, [countDate, locationId, shelfName]);
+
+  /**
+   * הסרת מוצר מהספירה הנוכחית — Optimistic.
+   * השורה נעלמת מיד וה־KPI מתעדכן; אם השרת מסרב, השורה מוחזרת בדיוק למקומה.
+   * המוצר עצמו אינו נמחק — לא מהקטלוג, לא מהמדף ולא מספירות עבר.
+   */
+  const removeRowFromCount = useCallback(
+    async (productId: string) => {
+      const index = products.findIndex((p) => p.id === productId);
+      if (index < 0) return;
+      const snapshot: RemovedRowSnapshot = {
+        row: products[index]!,
+        index,
+        actual: actualById[productId],
+        workerQty: workerQtyByProduct[productId],
+      };
+
+      setRemovingId(productId);
+      setError(null);
+      setNotice(null);
+
+      // הסרה אופטימית — כולל ניקוי כל ה-state הנלווה ועדכון סך הפריטים
+      setProducts((prev) => prev.filter((p) => p.id !== productId));
+      setListTotal((prev) => Math.max(0, prev - 1));
+      setActualById((prev) => {
+        if (!(productId in prev)) return prev;
+        const next = { ...prev };
+        delete next[productId];
+        return next;
+      });
+      setWorkerQtyByProduct((prev) => {
+        if (!(productId in prev)) return prev;
+        const next = { ...prev };
+        delete next[productId];
+        return next;
+      });
+      setTouchedIds((prev) => {
+        if (!prev.has(productId)) return prev;
+        const next = new Set(prev);
+        next.delete(productId);
+        return next;
+      });
+      setSavingIds((prev) => {
+        if (!prev.has(productId)) return prev;
+        const next = new Set(prev);
+        next.delete(productId);
+        return next;
+      });
+      rowRefs.current.delete(productId);
+
+      const rollback = () => {
+        setProducts((prev) => {
+          if (prev.some((p) => p.id === productId)) return prev;
+          const next = [...prev];
+          next.splice(Math.min(snapshot.index, next.length), 0, snapshot.row);
+          return next;
+        });
+        setListTotal((prev) => prev + 1);
+        if (snapshot.actual !== undefined) {
+          setActualById((prev) => ({ ...prev, [productId]: snapshot.actual! }));
+        }
+        if (snapshot.workerQty !== undefined) {
+          setWorkerQtyByProduct((prev) => ({ ...prev, [productId]: snapshot.workerQty! }));
+        }
+      };
+
+      try {
+        const res = await fetch("/api/inventory/count-exclusions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "same-origin",
+          body: JSON.stringify({
+            inventoryProductId: productId,
+            locationId: locationId?.trim() || undefined,
+            location: shelfName.trim() || undefined,
+            countDate,
+          }),
+        });
+        const j = (await res.json()) as { ok?: boolean; error?: string };
+        if (!res.ok || !j.ok) {
+          rollback();
+          setError(j.error ?? t("removeRowFailed"));
+          return;
+        }
+        setLastRemoved(snapshot);
+        setNotice(t("removeRowDone", { name: snapshot.row.name }));
+        scheduleShelfRefresh();
+      } catch {
+        rollback();
+        setError(t("removeRowFailed"));
+      } finally {
+        setRemovingId(null);
+      }
+    },
+    [
+      actualById,
+      countDate,
+      locationId,
+      products,
+      scheduleShelfRefresh,
+      shelfName,
+      t,
+      workerQtyByProduct,
+    ],
+  );
+
+  /** שחזור המוצר האחרון שהוסר — מחזיר את השורה למקומה ללא טעינה מחדש */
+  const restoreLastRemoved = useCallback(async () => {
+    const snapshot = lastRemoved;
+    if (!snapshot) return;
+    const productId = snapshot.row.id;
+    setRemovingId(productId);
+    setError(null);
+    try {
+      const params = roundParams();
+      params.set("inventoryProductId", productId);
+      const res = await fetch(`/api/inventory/count-exclusions?${params}`, {
+        method: "DELETE",
+        credentials: "same-origin",
+      });
+      const j = (await res.json()) as { ok?: boolean; error?: string };
+      if (!res.ok || !j.ok) {
+        setError(j.error ?? t("removeRowFailed"));
+        return;
+      }
+      setProducts((prev) => {
+        if (prev.some((p) => p.id === productId)) return prev;
+        const next = [...prev];
+        next.splice(Math.min(snapshot.index, next.length), 0, snapshot.row);
+        return next;
+      });
+      setListTotal((prev) => prev + 1);
+      if (snapshot.actual !== undefined) {
+        setActualById((prev) => ({ ...prev, [productId]: snapshot.actual! }));
+      } else {
+        const prefill = buildPrefillFromLastCount([snapshot.row], workers);
+        setActualById((prev) => ({ ...prefill.actual, ...prev }));
+        setWorkerQtyByProduct((prev) => ({ ...prefill.workerQty, ...prev }));
+      }
+      if (snapshot.workerQty !== undefined) {
+        setWorkerQtyByProduct((prev) => ({ ...prev, [productId]: snapshot.workerQty! }));
+      }
+      setLastRemoved(null);
+      setNotice(t("restoreRowDone", { name: snapshot.row.name }));
+      scheduleShelfRefresh();
+    } catch {
+      setError(t("removeRowFailed"));
+    } finally {
+      setRemovingId(null);
+    }
+  }, [lastRemoved, roundParams, scheduleShelfRefresh, t, workers]);
+
   const sortedProducts = useMemo(() => {
     const q = scanQ.trim().toLowerCase();
     if (!q) return products;
@@ -542,12 +816,14 @@ function ShelfCountModalInner({
     return [...hit, ...products.filter((p) => !hitSet.has(p.id))];
   }, [products, scanQ]);
 
+  /** הכרטיס שהסריקה הגיעה אליו — מודגש כל עוד יש טקסט חיפוש */
+  const highlightId =
+    scanQ.trim() && sortedProducts.length > 0 ? sortedProducts[0].id : null;
+
   useEffect(() => {
-    const q = scanQ.trim().toLowerCase();
-    if (!q || sortedProducts.length === 0) return;
-    const first = sortedProducts[0];
-    rowRefs.current.get(first.id)?.scrollIntoView({ block: "nearest", behavior: "smooth" });
-  }, [scanQ, sortedProducts]);
+    if (!highlightId) return;
+    rowRefs.current.get(highlightId)?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }, [highlightId]);
 
   const useVirtual = sortedProducts.length > 40;
   const totalH = sortedProducts.length * rowHeight;
@@ -592,6 +868,24 @@ function ShelfCountModalInner({
       loaded: products.length,
     };
   }, [listTotal, products]);
+
+  /**
+   * עודפים — צבירה של אותו סטטוס שכל כרטיס כבר מציג (נספר > הספירה הקודמת במיקום).
+   * תצוגה בלבד; אינו נוגע בחישובי השמירה.
+   */
+  const surplusCount = useMemo(() => {
+    let surplus = 0;
+    for (const product of products) {
+      const counted = hasWorkers
+        ? sumWorkerQuantities(workers, workerQtyByProduct[product.id] ?? {})
+        : actualById[product.id] === "" || actualById[product.id] == null
+          ? null
+          : Number(actualById[product.id]);
+      if (counted === null || !Number.isFinite(counted)) continue;
+      if (resolveCountLineStatus(counted, product.previousQuantity) === "surplus") surplus += 1;
+    }
+    return surplus;
+  }, [actualById, hasWorkers, products, workerQtyByProduct, workers]);
 
   const saveCount = useCallback(
     async (opts?: { closeAfterSave?: boolean }) => {
@@ -646,6 +940,7 @@ function ShelfCountModalInner({
           credentials: "same-origin",
           body: JSON.stringify({
             countDate,
+            startedAt: startedAt ?? undefined,
             location: shelfName.trim() || undefined,
             locationId: locationId?.trim() || undefined,
             lines,
@@ -732,6 +1027,7 @@ function ShelfCountModalInner({
       onClose,
       scheduleShelfRefresh,
       shelfName,
+      startedAt,
       t,
       workerQtyByProduct,
       workers,
@@ -765,21 +1061,52 @@ function ShelfCountModalInner({
 
   if (!open) return null;
   const isReadOnly = readOnly || !!sessionId;
+  const canRemoveRow = canRemoveRows && !isReadOnly;
+  const saveDisabled = savingAll || !hasDirtyChanges || hasInvalidChanges;
+  const dirtyCount = dirtyProductIds.size;
 
+  const saveButton = (extraClass: string) => (
+    <button
+      type="button"
+      onClick={() => void saveCount()}
+      disabled={saveDisabled}
+      className={`inline-flex items-center justify-center gap-2 rounded-2xl bg-emerald-600 font-black text-white shadow-md shadow-emerald-600/25 transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50 ${extraClass}`}
+    >
+      {savingAll ? (
+        <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+      ) : (
+        <Save className="h-4 w-4" aria-hidden />
+      )}
+      {t("saveCount")}
+      {dirtyCount > 0 ? (
+        <span className="rounded-full bg-white/25 px-1.5 text-[11px] tabular-nums">
+          {dirtyCount}
+        </span>
+      ) : null}
+    </button>
+  );
+
+  // z-200 ומעלה — מעל סרגלי המובייל של האפליקציה (header z-130, bottom nav z-120),
+  // שאחרת מכסים את כפתור השמירה ואת סרגל הפעולות.
   return (
-    <div className="fixed inset-0 z-[85] flex items-stretch justify-center bg-slate-950/55 p-0 backdrop-blur-md md:items-center md:p-3 lg:p-4">
+    <div className="fixed inset-0 z-[200] flex items-stretch justify-center bg-slate-950/55 p-0 backdrop-blur-md md:items-center md:p-3 lg:p-4">
       <div
         className="flex h-[100dvh] w-full max-w-[100vw] flex-col overflow-hidden rounded-none border border-white/10 bg-white/95 shadow-[0_24px_80px_rgba(15,23,42,0.35)] backdrop-blur-xl md:h-[96dvh] md:w-full md:max-w-none md:rounded-[24px] lg:h-[95dvh] lg:w-[95vw] lg:max-w-[95vw]"
+        style={
+          keyboardInset > 0 ? { height: `calc(100dvh - ${keyboardInset}px)` } : undefined
+        }
         role="dialog"
         aria-modal="true"
         dir="rtl"
       >
-        <header className="sticky top-0 z-10 shrink-0 border-b border-[#e7ecf5]/80 bg-white/90 px-3 py-3 backdrop-blur-md sm:px-5 sm:py-4">
+        <header className="sticky top-0 z-10 shrink-0 border-b border-[#e7ecf5]/80 bg-white/90 px-3 py-2.5 backdrop-blur-md sm:px-5 sm:py-4">
+          {/* שורה עליונה — השמירה נשארת כאן תמיד, מעל למקלדת ובלי גלילה */}
           <div className="flex items-center justify-between gap-2">
             <button
               type="button"
               onClick={requestClose}
-              className="grid h-11 w-11 place-items-center rounded-xl text-slate-500 transition hover:bg-slate-100"
+              aria-label={t("cancel")}
+              className="grid h-11 w-11 shrink-0 place-items-center rounded-xl text-slate-500 transition hover:bg-slate-100"
             >
               <X className="h-5 w-5" />
             </button>
@@ -788,16 +1115,20 @@ function ShelfCountModalInner({
                 {t("kicker")}
                 {isReadOnly ? ` · ${t("readOnlyBadge")}` : ""}
               </p>
-              <h2 className="truncate text-lg font-black text-slate-900 sm:text-xl">{shelfName}</h2>
+              <h2 className="truncate text-base font-black text-slate-900 sm:text-xl">
+                {shelfName}
+              </h2>
               {sessionNumber != null ? (
-                <p className="text-xs font-bold text-slate-500">
+                <p className="truncate text-[11px] font-bold text-slate-500 sm:text-xs">
                   {t("sessionNumber", { n: sessionNumber })}
                 </p>
               ) : null}
             </div>
+            {!isReadOnly ? saveButton("h-12 shrink-0 px-4 text-sm") : null}
           </div>
 
-          <div className="mt-3 flex flex-wrap gap-2">
+          {/* פעולות משניות — במובייל הן יורדות לסרגל התחתון */}
+          <div className="mt-3 hidden flex-wrap gap-2 md:flex">
             {!isReadOnly ? (
               <button
                 type="button"
@@ -835,20 +1166,45 @@ function ShelfCountModalInner({
               )}
               {t("exportExcel")}
             </button>
+            {canViewSummaries ? (
+              <>
+                <button
+                  type="button"
+                  onClick={() => setSummariesOpen(true)}
+                  className="inline-flex min-h-11 flex-1 items-center justify-center gap-2 rounded-2xl border border-[#e7ecf5] bg-white px-3 text-xs font-black text-slate-700 sm:flex-none"
+                >
+                  <BarChart3 className="h-4 w-4" />
+                  {t("openSummaries")}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSummaryEmailOpen(true)}
+                  className="inline-flex min-h-11 flex-1 items-center justify-center gap-2 rounded-2xl border border-[#e7ecf5] bg-white px-3 text-xs font-black text-slate-700 sm:flex-none"
+                >
+                  <Mail className="h-4 w-4" />
+                  {t("sendSummaryEmail")}
+                </button>
+              </>
+            ) : null}
           </div>
 
-          <div className="mt-3 grid grid-cols-3 gap-2 text-center text-[11px] font-black">
-            <div className="rounded-2xl bg-slate-50 px-2 py-2 text-slate-700 ring-1 ring-slate-200">
-              <p className="text-[10px] text-slate-500">{t("summaryTotal")}</p>
+          {/* KPI — שתי שורות מסודרות במובייל, שורה אחת מ־sm */}
+          <div className="mt-2.5 grid grid-cols-2 gap-2 text-center text-[11px] font-black sm:grid-cols-4">
+            <div className="rounded-2xl bg-slate-50 px-2 py-1.5 text-slate-700 ring-1 ring-slate-200">
+              <p className="truncate text-[10px] text-slate-500">{t("summaryTotal")}</p>
               <p className="text-base tabular-nums">{minimumSummary.total}</p>
             </div>
-            <div className="rounded-2xl bg-emerald-50 px-2 py-2 text-emerald-700 ring-1 ring-emerald-200">
-              <p className="text-[10px]">{t("summaryOk")}</p>
+            <div className="rounded-2xl bg-emerald-50 px-2 py-1.5 text-emerald-700 ring-1 ring-emerald-200">
+              <p className="truncate text-[10px]">{t("summaryOk")}</p>
               <p className="text-base tabular-nums">{minimumSummary.ok}</p>
             </div>
-            <div className="rounded-2xl bg-rose-50 px-2 py-2 text-rose-700 ring-1 ring-rose-200">
-              <p className="text-[10px]">{t("summaryBelowMinimum")}</p>
+            <div className="rounded-2xl bg-rose-50 px-2 py-1.5 text-rose-700 ring-1 ring-rose-200">
+              <p className="truncate text-[10px]">{t("summaryBelowMinimum")}</p>
               <p className="text-base tabular-nums">{minimumSummary.below}</p>
+            </div>
+            <div className="rounded-2xl bg-amber-50 px-2 py-1.5 text-amber-700 ring-1 ring-amber-200">
+              <p className="truncate text-[10px]">{t("summarySurplus")}</p>
+              <p className="text-base tabular-nums">{surplusCount}</p>
             </div>
           </div>
 
@@ -864,9 +1220,25 @@ function ShelfCountModalInner({
               {error}
             </p>
           ) : null}
+          {lastRemoved && canRemoveRow ? (
+            <div className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-2xl bg-slate-50 px-3 py-2 ring-1 ring-slate-200">
+              <p className="text-xs font-bold text-slate-600">
+                {t("removedFromCount", { name: lastRemoved.row.name })}
+              </p>
+              <button
+                type="button"
+                onClick={() => void restoreLastRemoved()}
+                disabled={removingId !== null}
+                className="inline-flex items-center gap-1 rounded-xl border border-[#e7ecf5] bg-white px-3 py-1.5 text-xs font-black text-[#6c4cff] transition hover:bg-[#f6f8fc] disabled:opacity-50"
+              >
+                <RotateCcw className="h-3.5 w-3.5" aria-hidden />
+                {t("restoreRow")}
+              </button>
+            </div>
+          ) : null}
 
-          <div className="relative mt-3">
-            <ScanLine className="pointer-events-none absolute top-1/2 h-4 w-4 -translate-y-1/2 text-[#6c4cff] ltr:left-3 rtl:right-3" />
+          <div className="relative mt-2.5">
+            <ScanLine className="pointer-events-none absolute top-1/2 h-5 w-5 -translate-y-1/2 text-[#6c4cff] ltr:left-3 rtl:right-3" />
             <input
               type="text"
               value={scanQ}
@@ -875,9 +1247,21 @@ function ShelfCountModalInner({
                 if (e.key === "Enter") e.preventDefault();
               }}
               placeholder={t("scanPlaceholder")}
-              className="h-12 w-full rounded-2xl border border-[#e7ecf5] bg-[#f6f8fc] pr-3 pl-10 text-sm font-bold outline-none focus:border-[#6c4cff] focus:ring-2 focus:ring-[#6c4cff]/15 ltr:pl-10 ltr:pr-3 rtl:pr-10 rtl:pl-3"
-              autoFocus
+              enterKeyHint="search"
+              className="h-12 w-full rounded-2xl border border-[#e7ecf5] bg-[#f6f8fc] text-sm font-bold outline-none focus:border-[#6c4cff] focus:ring-2 focus:ring-[#6c4cff]/15 ltr:pl-11 ltr:pr-11 rtl:pl-11 rtl:pr-11"
+              /* אין autoFocus במובייל — המקלדת הייתה נפתחת מיד ומכסה את המסך */
+              autoFocus={!isMobile}
             />
+            {scanQ ? (
+              <button
+                type="button"
+                onClick={() => setScanQ("")}
+                aria-label={t("clearSearch")}
+                className="absolute top-1/2 grid h-9 w-9 -translate-y-1/2 place-items-center rounded-xl text-slate-400 transition hover:bg-slate-100 hover:text-slate-600 ltr:right-1.5 rtl:left-1.5"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            ) : null}
           </div>
         </header>
 
@@ -923,6 +1307,11 @@ function ShelfCountModalInner({
                   return (
                     <div
                       key={row.id}
+                      className={
+                        highlightId === row.id
+                          ? "rounded-2xl ring-2 ring-[#6c4cff] ring-offset-2 transition-shadow"
+                          : undefined
+                      }
                       ref={(el) => {
                         if (el) rowRefs.current.set(row.id, el);
                         else rowRefs.current.delete(row.id);
@@ -942,6 +1331,7 @@ function ShelfCountModalInner({
                         id={row.id}
                         name={row.name}
                         unit={row.unit}
+                        locationName={isMobile ? shelfName : null}
                         systemQty={row.previousQuantity}
                         systemTotalQuantity={row.systemTotalQuantity ?? row.previousQuantity}
                         requiredQuantity={requiredQty}
@@ -954,6 +1344,12 @@ function ShelfCountModalInner({
                         variant={rowVariant}
                         showColumnLabels={false}
                         draggable={canDragReorder}
+                        canRemove={canRemoveRow}
+                        removing={removingId === row.id}
+                        onRemoveFromCount={() => {
+                          if (isReadOnly || !canRemoveRow) return;
+                          setRemoveTarget({ id: row.id, name: row.name });
+                        }}
                         onDragStart={() => setDragProductId(row.id)}
                         onWorkerQtyChange={(workerId, v) => {
                           if (!isReadOnly) setWorkerQty(row.id, workerId, v);
@@ -994,36 +1390,78 @@ function ShelfCountModalInner({
           )}
         </div>
 
-        <footer className="sticky bottom-0 z-10 flex shrink-0 items-center justify-between gap-2 border-t border-[#e7ecf5]/80 bg-white/95 px-3 py-3 backdrop-blur-md sm:px-5">
+        {/* סרגל פעולות תחתון — במובייל בלבד, מלווה את המסך לאורך כל הספירה */}
+        <footer className="sticky bottom-0 z-10 shrink-0 border-t border-[#e7ecf5]/80 bg-white/95 px-3 py-2.5 pb-[max(0.625rem,env(safe-area-inset-bottom))] backdrop-blur-md md:hidden">
+          <div className="flex items-stretch gap-1.5">
+            {!isReadOnly ? saveButton("h-12 flex-1 whitespace-nowrap px-2 text-xs") : null}
+            {canViewSummaries ? (
+              <>
+                <MobileBarButton
+                  label={t("openSummaries")}
+                  icon={<BarChart3 className="h-5 w-5" aria-hidden />}
+                  onClick={() => setSummariesOpen(true)}
+                />
+                <MobileBarButton
+                  label={t("sendSummaryEmail")}
+                  icon={<Mail className="h-5 w-5" aria-hidden />}
+                  onClick={() => setSummaryEmailOpen(true)}
+                />
+              </>
+            ) : null}
+            <MobileBarButton
+              label={t("exportPdf")}
+              icon={
+                exporting === "pdf" ? (
+                  <Loader2 className="h-5 w-5 animate-spin" aria-hidden />
+                ) : (
+                  <FileText className="h-5 w-5" aria-hidden />
+                )
+              }
+              disabled={!activeSessionId || exporting !== null}
+              onClick={() => void exportSession("pdf")}
+            />
+            <MobileBarButton
+              label={t("exportExcel")}
+              icon={
+                exporting === "xlsx" ? (
+                  <Loader2 className="h-5 w-5 animate-spin" aria-hidden />
+                ) : (
+                  <FileSpreadsheet className="h-5 w-5" aria-hidden />
+                )
+              }
+              disabled={!activeSessionId || exporting !== null}
+              onClick={() => void exportSession("xlsx")}
+            />
+            {!isReadOnly ? (
+              <MobileBarButton
+                label={t("editWorkers")}
+                icon={<Settings2 className="h-5 w-5" aria-hidden />}
+                disabled={!locationId}
+                onClick={() => setWorkersOpen(true)}
+              />
+            ) : null}
+          </div>
+        </footer>
+
+        <footer className="sticky bottom-0 z-10 hidden shrink-0 items-center justify-between gap-2 border-t border-[#e7ecf5]/80 bg-white/95 px-3 py-3 backdrop-blur-md md:flex md:px-5">
           <button
             type="button"
             onClick={requestClose}
             disabled={savingAll}
             className="min-h-12 rounded-2xl border border-slate-200 bg-white px-4 text-sm font-black text-slate-600 transition hover:bg-slate-50 disabled:opacity-50"
           >
-            {isReadOnly ? t("cancel") : t("cancel")}
+            {t("cancel")}
           </button>
-          {!isReadOnly ? (
-            <button
-              type="button"
-              onClick={() => void saveCount()}
-              disabled={savingAll || !hasDirtyChanges || hasInvalidChanges}
-              className="inline-flex min-h-12 flex-1 items-center justify-center gap-2 rounded-2xl bg-emerald-600 px-5 text-sm font-black text-white shadow-md shadow-emerald-600/20 transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50 sm:flex-none"
-            >
-              {savingAll ? (
-                <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-              ) : (
-                <Save className="h-4 w-4" aria-hidden />
-              )}
-              {t("saveCount")}
-            </button>
-          ) : null}
+          {!isReadOnly ? saveButton("min-h-12 px-5 text-sm") : null}
         </footer>
       </div>
 
       {confirmCloseOpen ? (
-        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/50 p-4">
-          <div className="w-full max-w-md rounded-[24px] bg-white p-5 text-end shadow-2xl" dir="rtl">
+        <div className="fixed inset-0 z-[205] flex items-center justify-center bg-slate-950/50 p-4">
+          <div
+          className="max-h-[92dvh] w-full max-w-md overflow-y-auto rounded-[24px] bg-white p-5 text-end shadow-2xl"
+          dir="rtl"
+        >
             <div className="flex items-start gap-3">
               <div className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-amber-50 text-amber-600">
                 <AlertTriangle className="h-5 w-5" aria-hidden />
@@ -1033,7 +1471,7 @@ function ShelfCountModalInner({
                 <p className="mt-1 text-sm font-semibold text-slate-600">{t("unsavedBody")}</p>
               </div>
             </div>
-            <div className="mt-5 grid gap-2 sm:grid-cols-3">
+            <div className="mt-5 grid gap-2 md:grid-cols-3">
               <button
                 type="button"
                 onClick={() => void saveCount({ closeAfterSave: true })}
@@ -1062,6 +1500,29 @@ function ShelfCountModalInner({
           </div>
         </div>
       ) : null}
+
+      {/* סיכומי ספירות — חוצה מיקומים וטווחי תאריכים, אינו נוגע בסבב הנוכחי */}
+      <CountSummaryModal open={summariesOpen} onClose={() => setSummariesOpen(false)} />
+      <CountSummaryEmailModal
+        open={summaryEmailOpen}
+        onClose={() => setSummaryEmailOpen(false)}
+      />
+
+      <CountRowRemoveConfirmModal
+        open={removeTarget !== null}
+        productName={removeTarget?.name ?? ""}
+        busy={removingId !== null}
+        onCancel={() => {
+          if (removingId !== null) return;
+          setRemoveTarget(null);
+        }}
+        onConfirm={() => {
+          const target = removeTarget;
+          if (!target) return;
+          setRemoveTarget(null);
+          void removeRowFromCount(target.id);
+        }}
+      />
 
       <LocationWorkersModal
         open={workersOpen}

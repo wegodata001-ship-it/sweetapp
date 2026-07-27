@@ -5,10 +5,12 @@ import {
   AlertTriangle,
   GripVertical,
   Loader2,
+  MapPin,
   Minus,
   Package,
   Pencil,
   Plus,
+  Trash2,
 } from "lucide-react";
 import {
   countStatusLabel,
@@ -26,6 +28,8 @@ export type ShelfCountLineRowProps = {
   id: string;
   name: string;
   unit: string | null;
+  /** מיקום האחסון — מוצג בכרטיס המובייל בלבד */
+  locationName?: string | null;
   /** ספירה אחרונה במיקום — לבסיס diff / bump */
   systemQty: number;
   /** إجمالي المخزون — סה״כ בכל המיקומים */
@@ -42,11 +46,15 @@ export type ShelfCountLineRowProps = {
   showColumnLabels?: boolean;
   /** Drag & Drop — האירועים על העטיפה במודל; כאן רק הידית */
   draggable?: boolean;
+  /** הסרת השורה מהספירה — מנהל / בעל העסק בלבד */
+  canRemove?: boolean;
+  removing?: boolean;
   onDragStart?: () => void;
   onWorkerQtyChange: (workerId: string, value: string) => void;
   onActualChange: (value: string) => void;
   onBump: (delta: number) => void;
   onEditProduct: () => void;
+  onRemoveFromCount?: () => void;
   t: (key: string) => string;
 };
 
@@ -170,13 +178,11 @@ function CountSiteSquare({
   value,
   onChange,
   readOnly,
-  large,
 }: {
   label: string;
   value: string;
   onChange: (v: string) => void;
   readOnly?: boolean;
-  large?: boolean;
 }) {
   return (
     <div className="flex w-full min-w-[4.75rem] max-w-[7.5rem] flex-col items-center sm:w-auto">
@@ -195,13 +201,80 @@ function CountSiteSquare({
         min={0}
         readOnly={readOnly}
         disabled={readOnly}
-        className={`w-full rounded-xl border-2 border-slate-300 bg-white text-center font-black tabular-nums text-slate-900 outline-none transition focus:border-[#6c4cff] focus:ring-2 focus:ring-[#6c4cff]/20 disabled:bg-slate-50 ${
-          large
-            ? "h-14 text-2xl sm:h-16 sm:text-3xl"
-            : "h-12 text-lg sm:h-[3.25rem] sm:text-xl"
-        }`}
+        className="h-12 w-full rounded-xl border-2 border-slate-300 bg-white text-center text-lg font-black tabular-nums text-slate-900 outline-none transition focus:border-[#6c4cff] focus:ring-2 focus:ring-[#6c4cff]/20 disabled:bg-slate-50 sm:h-[3.25rem] sm:text-xl"
         aria-label={label}
       />
+    </div>
+  );
+}
+
+/** שטח נגיעה 56px — עומד בדרישת ה־48px המינימלית גם עם כפפות */
+function StepperButton({
+  dir,
+  onClick,
+  label,
+}: {
+  dir: "inc" | "dec";
+  onClick: () => void;
+  label: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={label}
+      className="grid h-14 w-14 shrink-0 place-items-center rounded-2xl border-2 border-[#e7ecf5] bg-white text-slate-700 transition active:scale-95 active:bg-slate-100"
+    >
+      {dir === "inc" ? <Plus className="h-6 w-6" /> : <Minus className="h-6 w-6" />}
+    </button>
+  );
+}
+
+/** שורת כמות למובייל — ➖ [הזנה ידנית בלחיצה] ➕ */
+function MobileQtyRow({
+  label,
+  value,
+  onChange,
+  onStep,
+  readOnly,
+  tone = "slate",
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  onStep: (delta: number) => void;
+  readOnly?: boolean;
+  tone?: "slate" | "emerald";
+}) {
+  const inputTone =
+    tone === "emerald"
+      ? "border-emerald-300 focus:border-emerald-500 focus:ring-emerald-500/20"
+      : "border-slate-300 focus:border-[#6c4cff] focus:ring-[#6c4cff]/20";
+  return (
+    <div>
+      <span className="mb-1 block truncate text-[11px] font-black leading-tight text-slate-700">
+        {label}
+      </span>
+      <div className="flex items-center gap-2">
+        {!readOnly ? (
+          <StepperButton dir="dec" onClick={() => onStep(-1)} label={`${label} -1`} />
+        ) : null}
+        <input
+          type="number"
+          inputMode="decimal"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder="—"
+          min={0}
+          readOnly={readOnly}
+          disabled={readOnly}
+          aria-label={label}
+          className={`h-14 min-w-0 flex-1 rounded-2xl border-2 bg-white text-center text-2xl font-black tabular-nums text-slate-900 outline-none transition focus:ring-2 disabled:bg-slate-50 ${inputTone}`}
+        />
+        {!readOnly ? (
+          <StepperButton dir="inc" onClick={() => onStep(1)} label={`${label} +1`} />
+        ) : null}
+      </div>
     </div>
   );
 }
@@ -213,7 +286,6 @@ function CountSitesPanel({
   countedTotalLabel,
   countedSumLabel,
   readOnly,
-  stacked,
 }: {
   workers: LocationWorkerDto[];
   workerQtys: WorkerQtyMap;
@@ -221,18 +293,11 @@ function CountSitesPanel({
   countedTotalLabel: string;
   countedSumLabel: string;
   readOnly?: boolean;
-  stacked?: boolean;
 }) {
   if (workers.length === 0) return null;
   return (
     <div className="min-w-0 rounded-xl bg-slate-50/90 px-2 py-2 ring-1 ring-[#e7ecf5]">
-      <div
-        className={
-          stacked
-            ? "flex flex-col items-stretch gap-3"
-            : "flex flex-wrap items-end justify-center gap-2 sm:gap-3"
-        }
-      >
+      <div className="flex flex-wrap items-end justify-center gap-2 sm:gap-3">
         {workers.map((w) => (
           <CountSiteSquare
             key={w.id}
@@ -240,7 +305,6 @@ function CountSitesPanel({
             value={workerQtys[w.id] ?? ""}
             onChange={(v) => onWorkerQtyChange(w.id, v)}
             readOnly={readOnly}
-            large={stacked}
           />
         ))}
       </div>
@@ -393,9 +457,45 @@ function DragHandle({
   );
 }
 
+/** הסרת המוצר מהספירה הנוכחית — המוצר עצמו נשאר במערכת */
+function RemoveRowButton({
+  size,
+  removing,
+  onClick,
+  label,
+}: {
+  size: "sm" | "lg";
+  removing?: boolean;
+  onClick: () => void;
+  label: string;
+}) {
+  const box =
+    size === "lg"
+      ? "h-11 w-11 shrink-0 rounded-xl border border-rose-100 bg-white"
+      : "mt-0.5 h-7 w-7 shrink-0 rounded-lg";
+  const icon = size === "lg" ? "h-4 w-4" : "h-3.5 w-3.5";
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={removing}
+      className={`grid place-items-center text-rose-500 transition hover:bg-rose-50 hover:text-rose-700 disabled:opacity-50 ${box}`}
+      aria-label={label}
+      title={label}
+    >
+      {removing ? (
+        <Loader2 className={`${icon} animate-spin`} aria-hidden />
+      ) : (
+        <Trash2 className={icon} aria-hidden />
+      )}
+    </button>
+  );
+}
+
 function ShelfCountLineRowInner({
   name,
   unit,
+  locationName,
   systemQty,
   systemTotalQuantity,
   requiredQuantity,
@@ -407,13 +507,17 @@ function ShelfCountLineRowInner({
   readOnly = false,
   variant = "table",
   draggable = false,
+  canRemove = false,
+  removing = false,
   onDragStart,
   onWorkerQtyChange,
   onActualChange,
   onBump,
   onEditProduct,
+  onRemoveFromCount,
   t,
 }: ShelfCountLineRowProps) {
+  const showRemove = !readOnly && canRemove && !!onRemoveFromCount;
   const hasWorkers = workers.length > 0;
   const workerSum = hasWorkers ? sumWorkerQuantities(workers, workerQtys) : null;
   const countedTotal = hasWorkers
@@ -443,9 +547,17 @@ function ShelfCountLineRowInner({
           </div>
           <div className="min-w-0 flex-1 text-end">
             <p className="break-words text-base font-black leading-tight text-slate-900">{name}</p>
-            {unit ? (
-              <p className="mt-0.5 text-[11px] font-semibold text-slate-500">{unit}</p>
-            ) : null}
+            <div className="mt-1 flex flex-wrap items-center justify-end gap-1.5">
+              {unit ? (
+                <span className="text-[11px] font-semibold text-slate-500">{unit}</span>
+              ) : null}
+              {locationName ? (
+                <span className="inline-flex max-w-full items-center gap-1 rounded-full bg-white/80 px-2 py-0.5 text-[10px] font-black text-slate-600 ring-1 ring-[#e7ecf5]">
+                  <MapPin className="h-3 w-3 shrink-0" aria-hidden />
+                  <span className="truncate">{locationName}</span>
+                </span>
+              ) : null}
+            </div>
           </div>
           {!readOnly ? (
             <button
@@ -457,75 +569,72 @@ function ShelfCountLineRowInner({
               <Pencil className="h-4 w-4" />
             </button>
           ) : null}
+          {showRemove ? (
+            <RemoveRowButton
+              size="lg"
+              removing={removing}
+              onClick={() => onRemoveFromCount?.()}
+              label={t("removeRow")}
+            />
+          ) : null}
         </div>
 
         <div className="mt-3 grid grid-cols-2 gap-2">
           <StatBlock label={t("systemTotal")} value={systemTotalQuantity} />
+          <StatBlock label={t("locationTotal")} value={systemQty} />
           <StatBlock label={t("locationExpected")} value={requiredQuantity} />
+          <StatBlock
+            label={t("minimum")}
+            value={minimumQuantity}
+            className={minimumClasses}
+            valueClassName="text-inherit"
+          />
         </div>
 
         {hasWorkers ? (
-          <div className="mt-3">
-            <p className="mb-2 text-center text-[11px] font-black text-[#6c4cff]">
-              {t("countSites")}
+          <div className="mt-3 rounded-2xl bg-slate-50/90 px-2.5 py-2.5 ring-1 ring-[#e7ecf5]">
+            <p className="mb-2 text-[11px] font-black text-[#6c4cff]">{t("countSites")}</p>
+            <div className="space-y-3">
+              {workers.map((w) => {
+                const raw = workerQtys[w.id] ?? "";
+                return (
+                  <MobileQtyRow
+                    key={w.id}
+                    label={countSiteLabel(w)}
+                    value={raw}
+                    readOnly={readOnly}
+                    onChange={(v) => onWorkerQtyChange(w.id, v)}
+                    onStep={(delta) => {
+                      const base = raw === "" ? 0 : Number(raw);
+                      const next = Math.max(0, (Number.isNaN(base) ? 0 : base) + delta);
+                      onWorkerQtyChange(w.id, String(next));
+                    }}
+                  />
+                );
+              })}
+            </div>
+            <p className="mt-2.5 border-t border-[#e7ecf5] pt-2 text-center text-[11px] font-black text-emerald-800">
+              {t("countedTotal")}:{" "}
+              <span className="tabular-nums text-base">{totalLabel}</span>
             </p>
-            <CountSitesPanel
-              workers={workers}
-              workerQtys={workerQtys}
-              onWorkerQtyChange={onWorkerQtyChange}
-              countedTotalLabel={totalLabel}
-              countedSumLabel={t("countedTotal")}
-              readOnly={readOnly}
-              stacked
-            />
           </div>
         ) : (
-          <div className="mt-3 rounded-xl bg-emerald-50/80 px-2 py-2 text-center ring-1 ring-emerald-200">
-            <span className="block text-[10px] font-bold text-emerald-800">{t("countedTotal")}</span>
-            <WorkerQtyInput
+          <div className="mt-3 rounded-2xl bg-emerald-50/70 px-2.5 py-2.5 ring-1 ring-emerald-200">
+            <MobileQtyRow
+              label={t("countedTotal")}
               value={actualRaw}
-              onChange={onActualChange}
               readOnly={readOnly}
-              className="mt-0.5 h-14 w-full border-0 bg-transparent text-center text-2xl font-black tabular-nums text-slate-900 outline-none"
+              tone="emerald"
+              onChange={onActualChange}
+              onStep={onBump}
             />
           </div>
         )}
 
-        <div className="mt-3 grid grid-cols-2 gap-2">
-          <div className={`rounded-xl border px-2 py-2 text-center ${minimumClasses}`}>
-            <span className="block text-[10px] font-bold">{t("minimum")}</span>
-            <p className="mt-0.5 text-sm font-black tabular-nums">{minimumQuantity}</p>
-          </div>
-          <div className={`rounded-xl px-2 py-2 text-center ring-1 ${diffBox}`}>
-            <span className="block text-[10px] font-bold text-slate-500">{t("diff")}</span>
-            <p className={`mt-0.5 text-lg font-black tabular-nums ${diffTone}`}>{diffLabel}</p>
-          </div>
-        </div>
-
         <div className="mt-3 flex items-center justify-between gap-2 border-t border-[#e7ecf5]/80 pt-3">
-          <div className="flex items-center gap-2">
-            {!readOnly ? (
-              <>
-                <button
-                  type="button"
-                  onClick={() => onBump(-1)}
-                  className="grid h-12 w-12 place-items-center rounded-2xl border border-[#e7ecf5] bg-white text-slate-700 active:scale-95"
-                  aria-label="-1"
-                >
-                  <Minus className="h-5 w-5" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => onBump(1)}
-                  className="grid h-12 w-12 place-items-center rounded-2xl border border-[#e7ecf5] bg-white text-slate-700 active:scale-95"
-                  aria-label="+1"
-                >
-                  <Plus className="h-5 w-5" />
-                </button>
-              </>
-            ) : (
-              <span />
-            )}
+          <div className={`rounded-xl px-3 py-1.5 text-center ring-1 ${diffBox}`}>
+            <span className="text-[10px] font-bold text-slate-500">{t("diff")}</span>{" "}
+            <span className={`text-lg font-black tabular-nums ${diffTone}`}>{diffLabel}</span>
           </div>
           <div className="flex flex-wrap justify-end gap-1.5">
             {minimumStatus === "below" ? (
@@ -561,6 +670,14 @@ function ShelfCountLineRowInner({
 
       <div className="min-w-0 text-end">
         <div className="flex items-start justify-end gap-1">
+          {showRemove ? (
+            <RemoveRowButton
+              size="sm"
+              removing={removing}
+              onClick={() => onRemoveFromCount?.()}
+              label={t("removeRow")}
+            />
+          ) : null}
           {!readOnly ? (
             <button
               type="button"

@@ -66,6 +66,11 @@ export async function generateMetadata(): Promise<Metadata> {
 
 export const viewport: Viewport = {
   themeColor: "#071826",
+  /**
+   * מקלדת אנדרואיד מכווצת את ה־layout viewport במקום לרחף מעליו,
+   * כך שסרגלי פעולה sticky (למשל שמירת ספירה) נשארים נגישים.
+   */
+  interactiveWidget: "resizes-content",
 };
 
 export default async function RootLayout({

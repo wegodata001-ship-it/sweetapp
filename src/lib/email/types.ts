@@ -11,7 +11,14 @@ export type SystemEmailTemplate =
   | "check-deposit"
   | "future-order"
   | "new-update"
-  | "system-alert";
+  | "system-alert"
+  | "inventory-daily-report";
+
+/** קובץ מצורף למייל (PDF / Excel). התוכן לא נשמר ביומן — רק שם הקובץ וגודלו. */
+export type SystemEmailAttachment = {
+  filename: string;
+  content: Buffer | Uint8Array;
+};
 
 export type EmailSendResult = {
   ok: boolean;
@@ -32,6 +39,15 @@ export type SendSystemEmailInput = {
   type?: string;
   /** שליחה מחדש מממשק ניהול — ללא dedupe */
   skipDedupe?: boolean;
+  /**
+   * מפתח ייחודיות מפורש. כשהוא קיים, אותו מפתח לא יישלח שוב לאותו נמען בתוך
+   * dedupeWindowHours. משמש להתראות שאינן קשורות לשורת Notification אחת
+   * (למשל אותו אירוע שנוצר עבור כמה מנהלים) — לא משנה את ה־dedupe הקיים.
+   */
+  dedupeKey?: string;
+  /** חלון הייחודיות ל־dedupeKey. ברירת מחדל 12 שעות. */
+  dedupeWindowHours?: number;
+  attachments?: SystemEmailAttachment[];
 };
 
 export type BaseEmailProps = {

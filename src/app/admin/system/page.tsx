@@ -3,6 +3,7 @@
 import { AlertTriangle, CheckCircle2, Loader2, Mail, RefreshCw, Settings } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
+import { SystemNotificationRecipientsPanel } from "@/components/admin/system-notification-recipients-panel";
 import type { EmailDiagnostics } from "@/lib/email/diagnostics";
 
 type DiagnosticsResponse = {
@@ -226,6 +227,8 @@ export default function AdminSystemPage() {
           </Link>
         </div>
       </section>
+
+      <SystemNotificationRecipientsPanel />
     </div>
   );
 }

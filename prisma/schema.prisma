@@ -483,6 +483,7 @@ model InventoryLocation {
   counts             InventoryCount[]             @relation("InventoryCountLocation")
   workers            InventoryLocationWorker[]
   countSessions      InventoryCountSession[]
+  countExclusions    InventoryCountExclusion[]
 
   @@index([locationType])
   @@index([isActive])
@@ -544,6 +545,7 @@ model InventoryProduct {
   counts            InventoryCount[]
   inventoryLocation InventoryLocation?           @relation("InventoryProductPrimaryLocation", fields: [locationId], references: [id])
   placements        InventoryProductOnLocation[]
+  countExclusions   InventoryCountExclusion[]
 
   @@index([locationId])
   @@index([category])
@@ -575,6 +577,9 @@ model InventoryCountSession {
   /// Snapshot שם מיקום בעת הספירה
   locationName    String             @default("")
   countDate       DateTime
+  /// שעת פתיחת הספירה מהלקוח (אופציונלי). null בסשנים שנשמרו לפני התוספת —
+  /// משך הספירה מחושב מול createdAt רק כשהערך קיים
+  startedAt       DateTime?
   createdAt       DateTime           @default(now())
   countedByUserId String?
   productCount    Int                @default(0)
@@ -644,6 +649,45 @@ model InventoryCountWorker {
   @@unique([inventoryCountId, inventoryLocationWorkerId], map: "InventoryCountWorker_inventoryCountId_inventoryLocationWorkerId")
   @@index([inventoryCountId])
   @@index([inventoryLocationWorkerId])
+}
+
+/// הסרת מוצר מסבב ספירה — Soft Delete בלבד.
+/// המוצר נשאר בקטלוג, במדפים, במלאי, בדוחות ובספירות ההיסטוריות;
+/// הוא רק לא מוצג בסבב הספירה של אותו מיקום באותו יום.
+/// אין שורות InventoryCount בזמן ספירה פעילה (הן נוצרות רק בשמירה),
+/// ולכן ההחרגה נשמרת בטבלה נפרדת ולא כשדה על שורת ספירה.
+model InventoryCountExclusion {
+  id                 String             @id @default(cuid())
+  /// מפתח הסבב — locationId, או "name:<שם מדף>" למדפי טקסט ללא InventoryLocation
+  locationKey        String
+  locationId         String?
+  /// Snapshot שם המדף בעת ההסרה
+  locationName       String             @default("")
+  inventoryProductId String
+  /// יום הספירה כ־YYYY-MM-DD — מפתח חסין לאזורי זמן. בסבב הבא המוצר חוזר מעצמו
+  countDay           String
+  /// false = ההסרה בוטלה (שוחזר לספירה)
+  isRemoved          Boolean            @default(true)
+  /// Snapshot שם המוצר בעת ההסרה — לביקורת גם אם השם ישונה אחר כך
+  productName        String             @default("")
+  reason             String?
+  removedAt          DateTime           @default(now())
+  removedById        String?
+  restoredAt         DateTime?
+  restoredById       String?
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @default(now()) @updatedAt
+  inventoryProduct   InventoryProduct   @relation(fields: [inventoryProductId], references: [id], onDelete: Cascade)
+  location           InventoryLocation? @relation(fields: [locationId], references: [id], onDelete: SetNull)
+  removedBy          User?              @relation("InventoryCountExclusionRemovedBy", fields: [removedById], references: [id])
+  restoredBy         User?              @relation("InventoryCountExclusionRestoredBy", fields: [restoredById], references: [id])
+
+  @@unique([locationKey, inventoryProductId, countDay], map: "InventoryCountExclusion_locationKey_productId_countDay")
+  @@index([locationKey, countDay, isRemoved])
+  @@index([inventoryProductId])
+  @@index([locationId])
+  @@index([removedById])
+  @@index([removedAt])
 }
 
 /// תנועות מלאי יומיות — מעדכנות currentStock במוצר
@@ -1208,6 +1252,10 @@ model User {
   generatedReports             GeneratedReport[]       @relation("GeneratedReportCreatedBy")
   inventoryCountsRecorded      InventoryCount[]        @relation("InventoryCountCountedBy")
   inventoryCountSessions       InventoryCountSession[] @relation("InventoryCountSessionCountedBy")
+
+  inventoryCountRowsRemoved  InventoryCountExclusion[] @relation("InventoryCountExclusionRemovedBy")
+  inventoryCountRowsRestored InventoryCountExclusion[] @relation("InventoryCountExclusionRestoredBy")
+  systemNotificationRecipientsAdded SystemNotificationRecipient[] @relation("SystemNotificationRecipientCreatedBy")
   inventoryMovements           InventoryMovement[]
   loginAudits                  LoginAudit[]
   notificationsReceived        Notification[]          @relation("NotificationRecipient")
@@ -1423,6 +1471,55 @@ model EmailLog {
   @@index([createdAt(sort: Desc)])
   @@index([notificationId])
   @@index([recipient, type, createdAt(sort: Desc)])
+}
+
+/// נמעני התראות מערכת — כתובות מייל קבועות שמקבלות התראות בנוסף למשתמשי המערכת.
+/// הרשימה נשמרת ב־DB ולא בקוד, ומנוהלת ממסך הגדרות המערכת.
+model SystemNotificationRecipient {
+  id            String    @id @default(cuid())
+  /// מנורמל ל־lowercase לפני שמירה
+  email         String    @unique
+  /// שם לתצוגה (רו״ח, בעל העסק וכו׳)
+  label         String    @default("")
+  isActive      Boolean   @default(true)
+  /// true = כל סוגי ההתראות. אחרת נשלחות רק הקטגוריות ב־categories
+  allCategories Boolean   @default(true)
+  /// קטגוריות התראה (SystemAlertCategory). מתעלמים ממנו כש־allCategories=true
+  categories    String[]  @default([])
+  notes         String?
+  /// עדכון best-effort אחרי שליחה מוצלחת — לתצוגת "נשלח לאחרונה"
+  lastSentAt    DateTime?
+  createdById   String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @default(now()) @updatedAt
+  createdBy     User?     @relation("SystemNotificationRecipientCreatedBy", fields: [createdById], references: [id])
+
+  @@index([isActive])
+  @@index([createdById])
+}
+
+/// ריצת דוח ספירות יומי — מפתח ייחודי ליום, כדי שהרצת cron כפולה לא תשלח פעמיים,
+/// וכדי שריצה שנכשלה תנוסה שוב בריצה הבאה.
+model InventoryDailyReportRun {
+  id             String    @id @default(cuid())
+  /// YYYY-MM-DD (זמן מקומי) — יום העבודה שהדוח מסכם
+  reportDay      String    @unique
+  /// PENDING | SENT | PARTIAL | FAILED | NO_SESSIONS | NO_RECIPIENTS
+  status         String    @default("PENDING")
+  sessionCount   Int       @default(0)
+  recipientCount Int       @default(0)
+  sentCount      Int       @default(0)
+  failedCount    Int       @default(0)
+  /// מספר הריצות שבוצעו ליום הזה (כולל ניסיונות חוזרים)
+  attempts       Int       @default(0)
+  error          String?
+  startedAt      DateTime  @default(now())
+  finishedAt     DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @default(now()) @updatedAt
+
+  @@index([status])
+  @@index([createdAt(sort: Desc)])
 }
 
 model UserPermission {

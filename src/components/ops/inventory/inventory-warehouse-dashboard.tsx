@@ -7,6 +7,7 @@ import {
   CheckCircle2,
   ClipboardList,
   Layers,
+  Mail,
   PackageCheck,
   Plus,
   TrendingUp,
@@ -18,6 +19,9 @@ import { useI18n } from "@/components/i18n-provider";
 import { useToast } from "@/components/toast-provider";
 import type { ShelfSummary } from "@/components/ops/inventory-count/types";
 import { localYmd } from "@/components/ops/inventory-count/utils";
+import { canRemoveCountRow, canViewCountSummary } from "@/lib/inventory/count-access";
+import { CountSummaryModal } from "./count-summary-modal";
+import { CountSummaryEmailModal } from "./count-summary-email-modal";
 import { LocationFormModal, type LocationFormValues } from "./location-form-modal";
 import { ShelfAddProductsModal } from "./shelf-add-products-modal";
 import { ShelfCountModal } from "./shelf-count-modal";
@@ -96,6 +100,10 @@ export function InventoryWarehouseDashboard() {
   const locale = bcp47 === "ar" ? "ar-IL" : bcp47 === "en" ? "en-GB" : "he-IL";
 
   const canManage = canManageInventory(user);
+  /** הסרת שורה מהספירה — מנהל מערכת / בעל העסק בלבד (מחמיר מ־canManage) */
+  const canRemoveRows = canRemoveCountRow(user?.role);
+  /** סיכומי ספירות ושליחתם במייל — מנהל מערכת / בעל העסק בלבד */
+  const canSeeSummaries = canViewCountSummary(user?.role);
 
   const [shelfSummaries, setShelfSummaries] = useState<ShelfSummary[]>([]);
   const [modalShelf, setModalShelf] = useState<string | null>(null);
@@ -117,6 +125,8 @@ export function InventoryWarehouseDashboard() {
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [transferOpen, setTransferOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [summariesOpen, setSummariesOpen] = useState(false);
+  const [summaryEmailOpen, setSummaryEmailOpen] = useState(false);
   const [viewSessionId, setViewSessionId] = useState<string | null>(null);
   const [viewSessionShelf, setViewSessionShelf] = useState<{
     name: string;
@@ -464,7 +474,10 @@ export function InventoryWarehouseDashboard() {
   };
 
   const filterSelectClass =
-    "h-10 rounded-2xl border border-[#e7ecf5] bg-white px-3 text-sm font-semibold outline-none focus:border-[#6c4cff]";
+    "h-12 rounded-2xl border border-[#e7ecf5] bg-white px-3 text-sm font-semibold outline-none focus:border-[#6c4cff] sm:h-10";
+  /** שטח נגיעה 48px במובייל, גובה דסקטופ נשמר */
+  const headerActionClass =
+    "inline-flex min-h-12 items-center justify-center gap-2 rounded-2xl border border-[#e7ecf5] bg-white px-4 text-sm font-black text-slate-800 shadow-sm transition hover:bg-slate-50 sm:min-h-0 sm:h-10";
 
   return (
     <div className="space-y-5" dir={dir}>
@@ -480,13 +493,30 @@ export function InventoryWarehouseDashboard() {
           <h1 className="text-2xl font-black text-slate-900">{t("ops.inventory.title")}</h1>
           <p className="mt-1 text-sm font-semibold text-slate-500">{tW("pageHint")}</p>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <Link
-            href="/ops/inventory/analytics"
-            className="inline-flex h-10 items-center gap-2 rounded-2xl border border-[#e7ecf5] bg-white px-4 text-sm font-black text-slate-800 shadow-sm transition hover:bg-slate-50"
-          >
-            <BarChart3 className="h-4 w-4 text-[#6c4cff]" />
-            {t("ops.inventory.analyticsDashboard")}
+        <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto sm:flex-wrap">
+          {canSeeSummaries ? (
+            <>
+              <button
+                type="button"
+                onClick={() => setSummariesOpen(true)}
+                className={headerActionClass}
+              >
+                <BarChart3 className="h-4 w-4 shrink-0 text-[#6c4cff]" />
+                <span className="truncate">{tW("openSummaries")}</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setSummaryEmailOpen(true)}
+                className={headerActionClass}
+              >
+                <Mail className="h-4 w-4 shrink-0 text-[#6c4cff]" />
+                <span className="truncate">{tW("sendSummaryEmail")}</span>
+              </button>
+            </>
+          ) : null}
+          <Link href="/ops/inventory/analytics" className={headerActionClass}>
+            <BarChart3 className="h-4 w-4 shrink-0 text-[#6c4cff]" />
+            <span className="truncate">{t("ops.inventory.analyticsDashboard")}</span>
           </Link>
           <button
             type="button"
@@ -495,11 +525,11 @@ export function InventoryWarehouseDashboard() {
               setFormInitial(null);
               setFormOpen(true);
             }}
-            className="inline-flex h-10 items-center gap-2 rounded-2xl px-4 text-sm font-black text-white shadow-md transition hover:brightness-110"
+            className="inline-flex min-h-12 items-center justify-center gap-2 rounded-2xl px-4 text-sm font-black text-white shadow-md transition hover:brightness-110 sm:h-10 sm:min-h-0"
             style={{ background: "#6c4cff" }}
           >
-            <Plus className="h-4 w-4" />
-            {t("ops.inventory.addStorageLocation")}
+            <Plus className="h-4 w-4 shrink-0" />
+            <span className="truncate">{t("ops.inventory.addStorageLocation")}</span>
           </button>
         </div>
       </header>
@@ -584,7 +614,7 @@ export function InventoryWarehouseDashboard() {
           </Link>
         </div>
       ) : (
-        <div className="grid gap-4 lg:grid-cols-2">
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
           {shelves.map((shelf) => {
             const session = countSessions[shelf.name];
             const isCounting = modalShelf === shelf.name;
@@ -626,7 +656,7 @@ export function InventoryWarehouseDashboard() {
 
       {detailShelf ? (
         <div
-          className="fixed inset-0 z-[100] flex items-end justify-center bg-slate-900/40 p-3 backdrop-blur-sm sm:items-center"
+          className="fixed inset-0 z-[200] flex items-end justify-center bg-slate-900/40 p-3 backdrop-blur-sm sm:items-center"
           onClick={() => setDetailShelf(null)}
         >
           <div
@@ -687,6 +717,9 @@ export function InventoryWarehouseDashboard() {
         shelfName={modalShelf ?? ""}
         locationId={modalShelfId}
         countDate={countDate}
+        startedAt={modalShelf ? countSessions[modalShelf]?.startedAt ?? null : null}
+        canRemoveRows={canRemoveRows}
+        canViewSummaries={canSeeSummaries}
         onClose={closeShelfCount}
         onShelfStatsChange={loadShelves}
         t={tModal}
@@ -699,11 +732,18 @@ export function InventoryWarehouseDashboard() {
         countDate={countDate}
         sessionId={viewSessionId}
         readOnly
+        canViewSummaries={canSeeSummaries}
         onClose={() => {
           setViewSessionId(null);
           setViewSessionShelf(null);
         }}
         t={tModal}
+      />
+
+      <CountSummaryModal open={summariesOpen} onClose={() => setSummariesOpen(false)} />
+      <CountSummaryEmailModal
+        open={summaryEmailOpen}
+        onClose={() => setSummaryEmailOpen(false)}
       />
 
       <ShelfAddProductsModal

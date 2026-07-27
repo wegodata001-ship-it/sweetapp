@@ -117,7 +117,7 @@ export function ShelfHistoryModal({
   };
 
   return (
-    <div className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-900/40 p-4 backdrop-blur-sm">
+    <div className="fixed inset-0 z-[200] flex items-center justify-center bg-slate-900/40 p-4 backdrop-blur-sm">
       <div
         className="flex max-h-[90vh] w-full max-w-3xl flex-col rounded-[20px] border border-[#e7ecf5] bg-white shadow-2xl"
         dir="rtl"

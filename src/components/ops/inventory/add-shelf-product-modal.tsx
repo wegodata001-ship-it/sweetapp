@@ -122,7 +122,7 @@ export function AddShelfProductModal({
   };
 
   return (
-    <div className="fixed inset-0 z-[95] flex items-end justify-center bg-slate-900/40 p-0 backdrop-blur-sm sm:items-center sm:p-4">
+    <div className="fixed inset-0 z-[200] flex items-end justify-center bg-slate-900/40 p-0 backdrop-blur-sm sm:items-center sm:p-4">
       <div
         className="max-h-[92dvh] w-full max-w-lg overflow-y-auto rounded-t-[24px] border border-[#e7ecf5] bg-white p-5 shadow-2xl sm:rounded-[24px]"
         dir="rtl"

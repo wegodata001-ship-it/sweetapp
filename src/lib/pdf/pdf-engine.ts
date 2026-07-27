@@ -29,12 +29,13 @@ export type PdfDocumentType =
   | "deliveryNote"
   | "inventoryCount"
   | "inventoryReport"
+  | "inventoryDailyReport"
+  | "inventoryCountSummary"
   | "salesReport"
   | "profitLoss"
   | "financialReport"
   | "employeeReport"
   | "cashflow"
-  | "reconciliation"
   | "payment"
   | "generic";
 
@@ -49,12 +50,13 @@ const TITLE_KEYS: Record<PdfDocumentType, PdfStringKey> = {
   deliveryNote: "doc.deliveryNote",
   inventoryCount: "doc.inventoryCount",
   inventoryReport: "doc.inventoryReport",
+  inventoryDailyReport: "doc.inventoryDailyReport",
+  inventoryCountSummary: "doc.inventoryCountSummary",
   salesReport: "doc.salesReport",
   profitLoss: "doc.profitLoss",
   financialReport: "doc.financialReport",
   employeeReport: "doc.employeeReport",
   cashflow: "doc.cashflow",
-  reconciliation: "doc.reconciliation",
   payment: "doc.payment",
   generic: "doc.generic",
 };

@@ -1,23 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireDb } from "@/lib/api-route";
+import { authorizeCron } from "@/lib/cron/authorize";
 import { runSmartNotifications } from "@/lib/notifications/run-smart-notifications";
+import { reportSystemFailureAsync } from "@/lib/notifications/system-alert-dispatch";
 
 export const dynamic = "force-dynamic";
 
-function authorize(req: NextRequest): boolean {
-  const secret = process.env.CRON_SECRET?.trim();
-  if (!secret) return true;
-  const headerToken =
-    req.headers.get("x-cron-secret")?.trim() ||
-    req.headers.get("authorization")?.replace(/^Bearer\s+/i, "").trim() ||
-    "";
-  if (headerToken && headerToken === secret) return true;
-  const queryToken = req.nextUrl.searchParams.get("key")?.trim() ?? "";
-  return Boolean(queryToken) && queryToken === secret;
-}
-
 async function handle(req: NextRequest) {
-  if (!authorize(req)) {
+  if (!authorizeCron(req)) {
     return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
   }
   const block = await requireDb();
@@ -26,10 +16,13 @@ async function handle(req: NextRequest) {
     const result = await runSmartNotifications();
     return NextResponse.json({ ok: true, ranAt: new Date().toISOString(), ...result });
   } catch (e) {
-    return NextResponse.json(
-      { ok: false, error: e instanceof Error ? e.message : "internal error" },
-      { status: 500 },
-    );
+    const message = e instanceof Error ? e.message : "internal error";
+    reportSystemFailureAsync({
+      category: "cronFailure",
+      title: "cron התראות חכמות נכשל",
+      message,
+    });
+    return NextResponse.json({ ok: false, error: message }, { status: 500 });
   }
 }
 

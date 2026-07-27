@@ -8,6 +8,10 @@ import { CheckDepositEmail, type CheckDepositEmailData } from "@/lib/email/templ
 import { FutureOrderEmail, type FutureOrderEmailData } from "@/lib/email/templates/future-order";
 import { NewUpdateEmail, type NewUpdateEmailData } from "@/lib/email/templates/new-update";
 import { SystemAlertEmail, type SystemAlertEmailData } from "@/lib/email/templates/system-alert";
+import {
+  InventoryDailyReportEmail,
+  type InventoryDailyReportEmailData,
+} from "@/lib/email/templates/inventory-daily-report";
 import { TestSimpleEmail, type TestSimpleEmailData } from "@/lib/email/templates/test-simple";
 
 export async function renderSystemEmail(
@@ -34,6 +38,12 @@ export async function renderSystemEmail(
       return render(<NewUpdateEmail data={base as unknown as NewUpdateEmailData} />);
     case "system-alert":
       return render(<SystemAlertEmail data={base as unknown as SystemAlertEmailData} />);
+    case "inventory-daily-report":
+      return render(
+        <InventoryDailyReportEmail
+          data={base as unknown as InventoryDailyReportEmailData}
+        />,
+      );
     default:
       return render(
         <SystemAlertEmail

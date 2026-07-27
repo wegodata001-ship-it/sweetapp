@@ -75,38 +75,42 @@ export function LocationWorkersModal({ open, locationId, onClose, onSaved, t }: 
   };
 
   return (
-    <div className="fixed inset-0 z-[95] flex items-end justify-center bg-slate-950/50 p-0 sm:items-center sm:p-4">
+    <div className="fixed inset-0 z-[210] flex items-stretch justify-center bg-slate-950/50 p-0 sm:items-center sm:p-4">
+      {/* מסך מלא במובייל — הכותרת והשמירה קבועות מעל המקלדת */}
       <div
-        className="max-h-[92vh] w-full max-w-lg overflow-y-auto rounded-t-[24px] bg-white p-5 shadow-2xl sm:rounded-[24px]"
+        className="flex h-[100dvh] w-full flex-col overflow-hidden rounded-none bg-white shadow-2xl sm:h-auto sm:max-h-[92vh] sm:max-w-lg sm:rounded-[24px]"
         dir="rtl"
         role="dialog"
         aria-modal="true"
       >
-        <div className="flex items-center justify-between gap-3">
-          <h3 className="text-lg font-black text-slate-900">{t("editWorkersTitle")}</h3>
-          <button
-            type="button"
-            onClick={onClose}
-            className="grid h-11 w-11 place-items-center rounded-xl hover:bg-slate-100"
-          >
-            <X className="h-5 w-5" />
-          </button>
+        <div className="shrink-0 border-b border-[#e7ecf5] px-4 py-3 sm:px-5">
+          <div className="flex items-center justify-between gap-3">
+            <h3 className="text-lg font-black text-slate-900">{t("editWorkersTitle")}</h3>
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label={t("cancel")}
+              className="grid h-11 w-11 place-items-center rounded-xl hover:bg-slate-100"
+            >
+              <X className="h-5 w-5" />
+            </button>
+          </div>
+          <p className="mt-1 text-xs font-semibold text-slate-500">{t("editWorkersHint")}</p>
         </div>
-        <p className="mt-1 text-xs font-semibold text-slate-500">{t("editWorkersHint")}</p>
 
-        {loading ? (
-          <div className="flex justify-center py-12">
-            <Loader2 className="h-7 w-7 animate-spin text-[#6c4cff]" />
-          </div>
-        ) : (
-          <div className="mt-4">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4 sm:px-5">
+          {loading ? (
+            <div className="flex justify-center py-12">
+              <Loader2 className="h-7 w-7 animate-spin text-[#6c4cff]" />
+            </div>
+          ) : (
             <LocationWorkersEditor workers={workers} onChange={setWorkers} t={t} />
-          </div>
-        )}
+          )}
 
-        {error ? <p className="mt-3 text-sm font-bold text-rose-600">{error}</p> : null}
+          {error ? <p className="mt-3 text-sm font-bold text-rose-600">{error}</p> : null}
+        </div>
 
-        <div className="mt-5 grid grid-cols-2 gap-2">
+        <div className="grid shrink-0 grid-cols-2 gap-2 border-t border-[#e7ecf5] px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-5">
           <button
             type="button"
             onClick={onClose}
