@@ -1365,10 +1365,6 @@ function ShelfCountModalInner({
                           setEditProduct({
                             id: row.id,
                             nameHe: row.nameHe ?? row.name,
-                            nameAr: row.nameAr ?? "",
-                            nameEn: row.nameEn ?? "",
-                            barcode: row.barcode ?? "",
-                            sku: row.sku ?? "",
                             unit: row.unit ?? "",
                             minimumQuantity: row.minimumQuantity,
                             maximumQuantity: row.maximumQuantity ?? null,
@@ -1558,14 +1554,11 @@ function ShelfCountModalInner({
               const systemTotal = row.systemTotalQuantity ?? row.previousQuantity;
               const systemShortage =
                 minimumQuantity > 0 ? Math.max(0, minimumQuantity - systemTotal) : 0;
+              /** nameAr/nameEn/barcode/sku נשמרים מ-row — הטופס אינו עורך אותם */
               return {
                 ...row,
                 name: p.name,
                 nameHe: p.nameHe,
-                nameAr: p.nameAr || null,
-                nameEn: p.nameEn || null,
-                barcode: p.barcode || null,
-                sku: p.sku || null,
                 unit: p.unit || null,
                 minimumQuantity,
                 maximumQuantity: p.maximumQuantity,

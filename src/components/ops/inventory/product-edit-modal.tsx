@@ -6,10 +6,6 @@ import { X } from "lucide-react";
 export type ProductEditValues = {
   id: string;
   nameHe: string;
-  nameAr: string;
-  nameEn: string;
-  barcode: string;
-  sku: string;
   unit: string;
   minimumQuantity: number;
   maximumQuantity: number | null;
@@ -62,12 +58,10 @@ export function ProductEditModal({ open, initial, onClose, onSaved, t }: Props) 
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         credentials: "same-origin",
+        /** nameAr/nameEn/barcode/sku נשמטים בכוונה — ה-PATCH מעדכן רק שדות שנשלחו,
+         *  כך שהערכים הקיימים נשמרים והסריקה לפי ברקוד/מק"ט ממשיכה לעבוד. */
         body: JSON.stringify({
           nameHe,
-          nameAr: form.nameAr.trim() || null,
-          nameEn: form.nameEn.trim() || null,
-          barcode: form.barcode.trim() || null,
-          sku: form.sku.trim() || null,
           unit: form.unit.trim() || null,
           minimumQuantity: min,
           maximumQuantity: max,
@@ -82,10 +76,6 @@ export function ProductEditModal({ open, initial, onClose, onSaved, t }: Props) 
         ...form,
         nameHe,
         name: nameHe,
-        nameAr: form.nameAr.trim(),
-        nameEn: form.nameEn.trim(),
-        barcode: form.barcode.trim(),
-        sku: form.sku.trim(),
         unit: form.unit.trim(),
         minimumQuantity: min,
         maximumQuantity: max,
@@ -102,10 +92,10 @@ export function ProductEditModal({ open, initial, onClose, onSaved, t }: Props) 
     "mt-1 h-12 w-full rounded-xl border border-[#e7ecf5] px-3 text-sm font-semibold outline-none focus:border-[#6c4cff]";
 
   return (
-    <div className="fixed inset-0 z-[215] flex items-stretch justify-center bg-slate-950/50 p-0 sm:items-center sm:p-4">
-      {/* מסך מלא במובייל — הכותרת והשמירה קבועות מעל המקלדת */}
+    <div className="fixed inset-0 z-[215] flex items-end justify-center bg-slate-950/50 p-0 sm:items-center sm:p-4">
+      {/* גיליון תחתון שנצמד לגובה התוכן — הכותרת והשמירה קבועות מעל המקלדת */}
       <div
-        className="flex h-[100dvh] w-full flex-col overflow-hidden rounded-none bg-white shadow-2xl sm:h-auto sm:max-h-[92vh] sm:max-w-md sm:rounded-[24px]"
+        className="flex max-h-[92dvh] w-full flex-col overflow-hidden rounded-t-[24px] bg-white shadow-2xl sm:h-auto sm:max-h-[92vh] sm:max-w-md sm:rounded-[24px]"
         dir="rtl"
         role="dialog"
         aria-modal="true"
@@ -130,42 +120,6 @@ export function ProductEditModal({ open, initial, onClose, onSaved, t }: Props) 
               onChange={(e) => setForm((f) => (f ? { ...f, nameHe: e.target.value } : f))}
               className={inputClass}
               dir="rtl"
-            />
-          </label>
-          <label className="block">
-            <span className="text-xs font-bold text-slate-600">{t("nameAr")}</span>
-            <input
-              value={form.nameAr}
-              onChange={(e) => setForm((f) => (f ? { ...f, nameAr: e.target.value } : f))}
-              className={inputClass}
-              dir="rtl"
-            />
-          </label>
-          <label className="block">
-            <span className="text-xs font-bold text-slate-600">{t("nameEn")}</span>
-            <input
-              value={form.nameEn}
-              onChange={(e) => setForm((f) => (f ? { ...f, nameEn: e.target.value } : f))}
-              className={inputClass}
-              dir="ltr"
-            />
-          </label>
-          <label className="block">
-            <span className="text-xs font-bold text-slate-600">{t("barcode")}</span>
-            <input
-              value={form.barcode}
-              onChange={(e) => setForm((f) => (f ? { ...f, barcode: e.target.value } : f))}
-              className={inputClass}
-              dir="ltr"
-            />
-          </label>
-          <label className="block">
-            <span className="text-xs font-bold text-slate-600">{t("sku")}</span>
-            <input
-              value={form.sku}
-              onChange={(e) => setForm((f) => (f ? { ...f, sku: e.target.value } : f))}
-              className={inputClass}
-              dir="ltr"
             />
           </label>
           <label className="block">

@@ -2950,10 +2950,6 @@
           "editProduct": "עריכת שם מוצר",
           "editProductTitle": "עריכת מוצר",
           "nameHe": "שם המוצר בעברית",
-          "nameAr": "اسم المنتج بالعربية",
-          "nameEn": "Product Name (English)",
-          "barcode": "ברקוד",
-          "sku": "קוד מוצר (SKU / صنف)",
           "unit": "יחידה",
           "nameRequired": "חסר שם",
           "invalidMinimum": "מינימום לא תקין",
@@ -3049,10 +3045,6 @@
           "sectionGeneral": "מידע כללי",
           "sectionStock": "מלאי",
           "nameHe": "שם המוצר בעברית",
-          "nameAr": "اسم المنتج بالعربية",
-          "nameEn": "Product Name (English)",
-          "barcode": "ברקוד",
-          "sku": "קוד מוצר (SKU / صنف)",
           "newName": "שם מוצר",
           "newNamePlaceholder": "לדוגמה: קולה 330",
           "newNameRequired": "חסר שם מוצר",
@@ -3083,13 +3075,7 @@
           "existsTitle": "מוצר קיים במיקום האחסון",
           "existsBody": "«{{name}}» כבר קיים במיקום האחסון — להגדיל כמות?",
           "existsYes": "כן, הגדל",
-          "existsNo": "לא",
-          "sectionNames": "שמות המוצר",
-          "sectionCodes": "ברקוד וקוד מוצר",
-          "nameArPlaceholder": "مثال: كولا 330",
-          "nameEnPlaceholder": "e.g. Cola 330",
-          "barcodePlaceholder": "Barcode",
-          "skuPlaceholder": "SKU / صنف"
+          "existsNo": "לא"
         }
       },
       "count": {

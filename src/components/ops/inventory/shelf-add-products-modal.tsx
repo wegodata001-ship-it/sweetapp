@@ -49,10 +49,6 @@ export function ShelfAddProductsModal({
   const [searching, setSearching] = useState(false);
   const [productId, setProductId] = useState("");
   const [newNameHe, setNewNameHe] = useState("");
-  const [newNameAr, setNewNameAr] = useState("");
-  const [newNameEn, setNewNameEn] = useState("");
-  const [newBarcode, setNewBarcode] = useState("");
-  const [newSku, setNewSku] = useState("");
   const [newUnit, setNewUnit] = useState("");
   const [newMinimum, setNewMinimum] = useState("0");
   const [newMaximum, setNewMaximum] = useState("");
@@ -77,10 +73,6 @@ export function ShelfAddProductsModal({
     setResults([]);
     setProductId("");
     setNewNameHe("");
-    setNewNameAr("");
-    setNewNameEn("");
-    setNewBarcode("");
-    setNewSku("");
     setNewUnit("");
     setNewMinimum("0");
     setNewMaximum("");
@@ -179,10 +171,6 @@ export function ShelfAddProductsModal({
         /** name + nameHe — תאימות לאחור ללקוחות ישנים */
         name: trimmed,
         nameHe: trimmed,
-        nameAr: newNameAr.trim() || null,
-        nameEn: newNameEn.trim() || null,
-        barcode: newBarcode.trim() || null,
-        sku: newSku.trim() || null,
         locationId: locationId ?? undefined,
         location: locationId ? undefined : shelfName,
         unit: newUnit.trim() || null,
@@ -242,10 +230,6 @@ export function ShelfAddProductsModal({
         if (summary) onShelfUpdated(summary);
         showToast({ tone: "success", title: tM("created"), durationMs: 2000 });
         setNewNameHe("");
-        setNewNameAr("");
-        setNewNameEn("");
-        setNewBarcode("");
-        setNewSku("");
         setNewUnit("");
         setNewMinimum("0");
         setNewMaximum("");
@@ -297,10 +281,6 @@ export function ShelfAddProductsModal({
       setExistsPrompt(null);
       setProductId("");
       setNewNameHe("");
-      setNewNameAr("");
-      setNewNameEn("");
-      setNewBarcode("");
-      setNewSku("");
       setNewUnit("");
       setNewMinimum("0");
       setNewMaximum("");
@@ -438,7 +418,6 @@ export function ShelfAddProductsModal({
               </>
             ) : (
               <>
-                <p className="text-xs font-black text-slate-700">{tM("sectionNames")}</p>
                 <label className="block">
                   <span className="text-xs font-bold text-slate-600">{tM("nameHe")}</span>
                   <input
@@ -448,49 +427,6 @@ export function ShelfAddProductsModal({
                     placeholder={tM("newNamePlaceholder")}
                     autoFocus
                     dir="rtl"
-                  />
-                </label>
-                <label className="block">
-                  <span className="text-xs font-bold text-slate-600">{tM("nameAr")}</span>
-                  <input
-                    value={newNameAr}
-                    onChange={(e) => setNewNameAr(e.target.value)}
-                    className="mt-1 h-12 w-full rounded-2xl border border-[#e7ecf5] bg-[#f6f8fc] px-3 text-sm font-semibold outline-none focus:border-[#6c4cff] focus:ring-2 focus:ring-[#6c4cff]/15"
-                    dir="rtl"
-                    placeholder={tM("nameArPlaceholder")}
-                  />
-                </label>
-                <label className="block">
-                  <span className="text-xs font-bold text-slate-600">{tM("nameEn")}</span>
-                  <input
-                    value={newNameEn}
-                    onChange={(e) => setNewNameEn(e.target.value)}
-                    className="mt-1 h-12 w-full rounded-2xl border border-[#e7ecf5] bg-[#f6f8fc] px-3 text-sm font-semibold outline-none focus:border-[#6c4cff] focus:ring-2 focus:ring-[#6c4cff]/15"
-                    dir="ltr"
-                    placeholder={tM("nameEnPlaceholder")}
-                  />
-                </label>
-
-                <p className="pt-1 text-xs font-black text-slate-700">{tM("sectionCodes")}</p>
-                <label className="block">
-                  <span className="text-xs font-bold text-slate-600">{tM("barcode")}</span>
-                  <input
-                    value={newBarcode}
-                    onChange={(e) => setNewBarcode(e.target.value)}
-                    className="mt-1 h-12 w-full rounded-2xl border border-[#e7ecf5] bg-[#f6f8fc] px-3 text-sm font-semibold outline-none focus:border-[#6c4cff] focus:ring-2 focus:ring-[#6c4cff]/15"
-                    dir="ltr"
-                    inputMode="numeric"
-                    placeholder={tM("barcodePlaceholder")}
-                  />
-                </label>
-                <label className="block">
-                  <span className="text-xs font-bold text-slate-600">{tM("sku")}</span>
-                  <input
-                    value={newSku}
-                    onChange={(e) => setNewSku(e.target.value)}
-                    className="mt-1 h-12 w-full rounded-2xl border border-[#e7ecf5] bg-[#f6f8fc] px-3 text-sm font-semibold outline-none focus:border-[#6c4cff] focus:ring-2 focus:ring-[#6c4cff]/15"
-                    dir="ltr"
-                    placeholder={tM("skuPlaceholder")}
                   />
                 </label>
 
