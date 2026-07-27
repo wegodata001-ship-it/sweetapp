@@ -8,6 +8,7 @@ import {
   summarizeShelf,
 } from "@/lib/inventory/shelf-service";
 import { LATEST_COUNT_ORDER_BY } from "@/lib/inventory/count-latest";
+import { ACTIVE_COUNT_LINE_WHERE } from "@/lib/inventory/count-session-status";
 
 /** POST — הוספת מוצר למדף (שיוך N:M + כמות אופציונלית) — לא מסיר ממיקומים אחרים */
 export async function POST(
@@ -60,6 +61,7 @@ export async function POST(
         location: true,
         placements: { select: { locationId: true } },
         counts: {
+          where: ACTIVE_COUNT_LINE_WHERE,
           orderBy: LATEST_COUNT_ORDER_BY,
           take: 20,
           select: { currentQuantity: true, locationId: true },

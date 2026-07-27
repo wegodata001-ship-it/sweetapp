@@ -19,7 +19,11 @@ import { useI18n } from "@/components/i18n-provider";
 import { useToast } from "@/components/toast-provider";
 import type { ShelfSummary } from "@/components/ops/inventory-count/types";
 import { localYmd } from "@/components/ops/inventory-count/utils";
-import { canRemoveCountRow, canViewCountSummary } from "@/lib/inventory/count-access";
+import {
+  canRemoveCountRow,
+  canViewCountSummary,
+  canVoidCountSession,
+} from "@/lib/inventory/count-access";
 import { CountSummaryModal } from "./count-summary-modal";
 import { CountSummaryEmailModal } from "./count-summary-email-modal";
 import { LocationFormModal, type LocationFormValues } from "./location-form-modal";
@@ -104,6 +108,8 @@ export function InventoryWarehouseDashboard() {
   const canRemoveRows = canRemoveCountRow(user?.role);
   /** סיכומי ספירות ושליחתם במייל — מנהל מערכת / בעל העסק בלבד */
   const canSeeSummaries = canViewCountSummary(user?.role);
+  /** ביטול סבב ספירה שגוי — מנהל מערכת / בעל העסק בלבד */
+  const canVoidSessions = canVoidCountSession(user?.role);
 
   const [shelfSummaries, setShelfSummaries] = useState<ShelfSummary[]>([]);
   const [modalShelf, setModalShelf] = useState<string | null>(null);
@@ -720,6 +726,7 @@ export function InventoryWarehouseDashboard() {
         startedAt={modalShelf ? countSessions[modalShelf]?.startedAt ?? null : null}
         canRemoveRows={canRemoveRows}
         canViewSummaries={canSeeSummaries}
+        locale={locale}
         onClose={closeShelfCount}
         onShelfStatsChange={loadShelves}
         t={tModal}
@@ -789,6 +796,8 @@ export function InventoryWarehouseDashboard() {
         open={historyOpen && actionShelf !== null}
         shelfName={actionShelf?.name ?? ""}
         locationId={actionShelf?.locationId ?? null}
+        canVoid={canVoidSessions}
+        onVoidChanged={() => void loadShelves()}
         onClose={() => {
           setHistoryOpen(false);
           setActionShelf(null);

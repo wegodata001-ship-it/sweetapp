@@ -155,6 +155,14 @@ function MobileBarButton({
   );
 }
 
+/** ספירות שכבר נשמרו היום לאותו מיקום — מגיע מ־meta של /api/inventory/monthly-count */
+type ExistingCountToday = {
+  sessionCount: number;
+  lastSessionNumber: number | null;
+  lastSavedAt: string | null;
+  lastCountedByName: string | null;
+};
+
 type Props = {
   open: boolean;
   shelfName: string;
@@ -169,6 +177,8 @@ type Props = {
   canRemoveRows?: boolean;
   /** צפייה בסיכומי ספירות ושליחתם במייל — מנהל מערכת / בעל העסק בלבד */
   canViewSummaries?: boolean;
+  /** BCP-47 לעיצוב שעות באזהרת ספירה כפולה */
+  locale?: string;
   onClose: () => void;
   onShelfStatsChange?: () => void;
   t: (key: string, vars?: Record<string, string | number>) => string;
@@ -213,6 +223,7 @@ function ShelfCountModalInner({
   readOnly = false,
   canRemoveRows = false,
   canViewSummaries = false,
+  locale = "he-IL",
   onClose,
   onShelfStatsChange,
   t,
@@ -238,6 +249,9 @@ function ShelfCountModalInner({
   /** רק מוצרים שהמשתמש שינה — prefill לא נחשב dirty */
   const [touchedIds, setTouchedIds] = useState<Set<string>>(new Set());
   const [confirmCloseOpen, setConfirmCloseOpen] = useState(false);
+  /** ספירות שכבר נשמרו היום למיקום — בסיס לאזהרת ספירה כפולה */
+  const [existingCountToday, setExistingCountToday] = useState<ExistingCountToday | null>(null);
+  const [duplicateNoticeDismissed, setDuplicateNoticeDismissed] = useState(false);
   const [summariesOpen, setSummariesOpen] = useState(false);
   const [summaryEmailOpen, setSummaryEmailOpen] = useState(false);
   /** הסרת שורה מהספירה — יעד האישור, מזהה בתהליך, ואחרונה שהוסרה (לשחזור) */
@@ -414,6 +428,7 @@ function ShelfCountModalInner({
             hasMore?: boolean;
             page?: number;
             pageSize?: number;
+            existingCountToday?: ExistingCountToday;
           };
           ok?: boolean;
           error?: string;
@@ -425,6 +440,7 @@ function ShelfCountModalInner({
           setWorkers([]);
           setActualById({});
           setWorkerQtyByProduct({});
+          setExistingCountToday(null);
           return;
         }
         const rows = j.data ?? [];
@@ -435,6 +451,7 @@ function ShelfCountModalInner({
         setActualById(prefill.actual);
         setWorkerQtyByProduct(prefill.workerQty);
         setTouchedIds(new Set());
+        setExistingCountToday(j.meta?.existingCountToday ?? null);
         setListTotal(j.meta?.total ?? rows.length);
         setHasMore(Boolean(j.meta?.hasMore));
         setNextPage(2);
@@ -1064,6 +1081,20 @@ function ShelfCountModalInner({
   const canRemoveRow = canRemoveRows && !isReadOnly;
   const saveDisabled = savingAll || !hasDirtyChanges || hasInvalidChanges;
   const dirtyCount = dirtyProductIds.size;
+  /**
+   * שמירה נוספת יוצרת סבב ספירה חדש ולא מעדכנת את הקיים. האזהרה מתריעה בלבד —
+   * ספירה חוזרת מכוונת נשארת אפשרית.
+   */
+  const showDuplicateNotice =
+    !isReadOnly &&
+    !duplicateNoticeDismissed &&
+    (existingCountToday?.sessionCount ?? 0) > 0;
+  const lastCountTodayTime = existingCountToday?.lastSavedAt
+    ? new Date(existingCountToday.lastSavedAt).toLocaleTimeString(locale, {
+        hour: "2-digit",
+        minute: "2-digit",
+      })
+    : "—";
 
   const saveButton = (extraClass: string) => (
     <button
@@ -1219,6 +1250,32 @@ function ShelfCountModalInner({
               <AlertTriangle className="h-4 w-4" aria-hidden />
               {error}
             </p>
+          ) : null}
+          {showDuplicateNotice ? (
+            <div className="mt-2 flex flex-wrap items-start justify-between gap-2 rounded-2xl bg-amber-50 px-3 py-2 ring-1 ring-amber-200">
+              <div className="flex min-w-0 items-start gap-2">
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" aria-hidden />
+                <div className="min-w-0">
+                  <p className="text-xs font-black text-amber-900">
+                    {t("duplicateCountTitle", { count: existingCountToday!.sessionCount })}
+                  </p>
+                  <p className="mt-0.5 text-[11px] font-semibold leading-relaxed text-amber-800">
+                    {t("duplicateCountBody", {
+                      number: existingCountToday!.lastSessionNumber ?? "—",
+                      time: lastCountTodayTime,
+                      name: existingCountToday!.lastCountedByName ?? "—",
+                    })}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setDuplicateNoticeDismissed(true)}
+                className="shrink-0 rounded-xl border border-amber-300 bg-white px-3 py-1.5 text-xs font-black text-amber-800 transition hover:bg-amber-50"
+              >
+                {t("duplicateCountDismiss")}
+              </button>
+            </div>
           ) : null}
           {lastRemoved && canRemoveRow ? (
             <div className="mt-2 flex flex-wrap items-center justify-between gap-2 rounded-2xl bg-slate-50 px-3 py-2 ring-1 ring-slate-200">

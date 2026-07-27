@@ -3,6 +3,7 @@ import { prismaAny } from "@/lib/prisma";
 import { requireDb } from "@/lib/api-route";
 import { classifyStockTier } from "@/lib/inventory/product-filters";
 import { LATEST_COUNT_ORDER_BY } from "@/lib/inventory/count-latest";
+import { ACTIVE_COUNT_LINE_WHERE } from "@/lib/inventory/count-session-status";
 
 function startOfToday(): Date {
   const d = new Date();
@@ -24,6 +25,7 @@ export async function GET() {
       include: {
         inventoryLocation: { select: { id: true, name: true } },
         counts: {
+          where: ACTIVE_COUNT_LINE_WHERE,
           orderBy: LATEST_COUNT_ORDER_BY,
           take: 1,
           select: { currentQuantity: true },

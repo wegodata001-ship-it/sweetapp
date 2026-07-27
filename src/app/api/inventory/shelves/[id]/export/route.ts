@@ -4,6 +4,7 @@ import { requireDb } from "@/lib/api-route";
 import { getSessionFromCookie } from "@/lib/auth/get-session";
 import { productsOnShelfWhere, resolveShelf } from "@/lib/inventory/shelf-service";
 import { LATEST_COUNT_ORDER_BY } from "@/lib/inventory/count-latest";
+import { ACTIVE_COUNT_LINE_WHERE } from "@/lib/inventory/count-session-status";
 
 /** GET — ייצוא CSV של ספירה אחרונה למיקום */
 export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
@@ -31,6 +32,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
         unit: true,
         minimumQuantity: true,
         counts: {
+          where: ACTIVE_COUNT_LINE_WHERE,
           orderBy: LATEST_COUNT_ORDER_BY,
           take: 1,
           select: {

@@ -2,22 +2,29 @@
 
 import { useCallback, useEffect, useState } from "react";
 import {
+  Ban,
   Download,
   Eye,
   FileSpreadsheet,
   FileText,
   History,
   Loader2,
+  RotateCcw,
   X,
 } from "lucide-react";
 import type { CountSessionListItem } from "@/lib/inventory/count-session-service";
+import { COUNT_SESSION_VOID } from "@/lib/inventory/count-session-status";
 
 type Props = {
   open: boolean;
   shelfName: string;
   locationId?: string | null;
+  /** ביטול/שחזור סבב ספירה — SUPER_ADMIN ו־ADMIN בלבד */
+  canVoid?: boolean;
   onClose: () => void;
   onOpenSession: (sessionId: string) => void;
+  /** נקרא אחרי ביטול או שחזור, כדי לרענן KPI ומסכים שנשענים על הספירה האחרונה */
+  onVoidChanged?: () => void;
   t: (key: string, vars?: Record<string, string | number>) => string;
   locale: string;
 };
@@ -47,8 +54,10 @@ export function ShelfHistoryModal({
   open,
   shelfName,
   locationId,
+  canVoid = false,
   onClose,
   onOpenSession,
+  onVoidChanged,
   t,
   locale,
 }: Props) {
@@ -56,6 +65,8 @@ export function ShelfHistoryModal({
   const [loading, setLoading] = useState(false);
   const [exportingId, setExportingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [voidingId, setVoidingId] = useState<string | null>(null);
+  const [confirmVoid, setConfirmVoid] = useState<CountSessionListItem | null>(null);
 
   const load = useCallback(async () => {
     if (!shelfName && !locationId) return;
@@ -101,6 +112,7 @@ export function ShelfHistoryModal({
     new Date(iso).toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" });
 
   const statusLabel = (status: string) => {
+    if (status === COUNT_SESSION_VOID) return t("statusVoid");
     if (status === "COMPLETED") return t("statusCompleted");
     return status;
   };
@@ -113,6 +125,35 @@ export function ShelfHistoryModal({
       setError(t("exportFailed"));
     } finally {
       setExportingId(null);
+    }
+  };
+
+  const toggleVoid = async (row: CountSessionListItem) => {
+    const isVoided = row.status === COUNT_SESSION_VOID;
+    setVoidingId(row.id);
+    setError(null);
+    try {
+      const res = await fetch(
+        `/api/inventory/count-sessions/${encodeURIComponent(row.id)}/void`,
+        {
+          method: isVoided ? "DELETE" : "POST",
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json" },
+          body: isVoided ? undefined : JSON.stringify({}),
+        },
+      );
+      const j = (await res.json()) as { ok?: boolean; error?: string };
+      if (!res.ok || !j.ok) {
+        setError(j.error ?? t("voidFailed"));
+        return;
+      }
+      await load();
+      onVoidChanged?.();
+    } catch {
+      setError(t("voidFailed"));
+    } finally {
+      setVoidingId(null);
+      setConfirmVoid(null);
     }
   };
 
@@ -165,19 +206,42 @@ export function ShelfHistoryModal({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {rows.map((r) => (
-                    <tr key={r.id} className="text-xs font-semibold text-slate-800">
-                      <td className="px-2 py-2.5 font-black text-[#6c4cff]">#{r.sessionNumber}</td>
+                  {rows.map((r) => {
+                    const isVoided = r.status === COUNT_SESSION_VOID;
+                    return (
+                    <tr
+                      key={r.id}
+                      className={`text-xs font-semibold ${isVoided ? "text-slate-400" : "text-slate-800"}`}
+                    >
+                      <td
+                        className={`px-2 py-2.5 font-black ${isVoided ? "text-slate-400 line-through" : "text-[#6c4cff]"}`}
+                      >
+                        #{r.sessionNumber}
+                      </td>
                       <td className="px-2 py-2.5">{fmtDate(r.createdAt)}</td>
                       <td className="px-2 py-2.5">{fmtTime(r.createdAt)}</td>
                       <td className="max-w-[8rem] truncate px-2 py-2.5">
                         {r.countedByName ?? "—"}
                       </td>
                       <td className="px-2 py-2.5 tabular-nums">{r.productCount}</td>
-                      <td className="px-2 py-2.5 tabular-nums text-rose-600">{r.shortageCount}</td>
-                      <td className="px-2 py-2.5 tabular-nums text-amber-600">{r.surplusCount}</td>
+                      <td
+                        className={`px-2 py-2.5 tabular-nums ${isVoided ? "" : "text-rose-600"}`}
+                      >
+                        {r.shortageCount}
+                      </td>
+                      <td
+                        className={`px-2 py-2.5 tabular-nums ${isVoided ? "" : "text-amber-600"}`}
+                      >
+                        {r.surplusCount}
+                      </td>
                       <td className="px-2 py-2.5">
-                        <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-black text-emerald-700 ring-1 ring-emerald-200">
+                        <span
+                          className={`rounded-full px-2 py-0.5 text-[10px] font-black ring-1 ${
+                            isVoided
+                              ? "bg-slate-100 text-slate-600 ring-slate-300"
+                              : "bg-emerald-50 text-emerald-700 ring-emerald-200"
+                          }`}
+                        >
                           {statusLabel(r.status)}
                         </span>
                       </td>
@@ -218,10 +282,34 @@ export function ShelfHistoryModal({
                               <FileSpreadsheet className="h-3.5 w-3.5" />
                             )}
                           </button>
+                          {canVoid ? (
+                            <button
+                              type="button"
+                              disabled={voidingId === r.id}
+                              onClick={() =>
+                                isVoided ? void toggleVoid(r) : setConfirmVoid(r)
+                              }
+                              className={`grid h-9 w-9 place-items-center rounded-xl border bg-white disabled:opacity-50 ${
+                                isVoided
+                                  ? "border-[#e7ecf5] text-slate-600 hover:bg-slate-50"
+                                  : "border-rose-200 text-rose-600 hover:bg-rose-50"
+                              }`}
+                              title={isVoided ? t("restore") : t("void")}
+                            >
+                              {voidingId === r.id ? (
+                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              ) : isVoided ? (
+                                <RotateCcw className="h-3.5 w-3.5" />
+                              ) : (
+                                <Ban className="h-3.5 w-3.5" />
+                              )}
+                            </button>
+                          ) : null}
                         </div>
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -242,6 +330,46 @@ export function ShelfHistoryModal({
           </button>
         </div>
       </div>
+
+      {confirmVoid ? (
+        <div className="fixed inset-0 z-[205] flex items-center justify-center bg-slate-900/50 p-4">
+          <div
+            className="w-full max-w-md rounded-[20px] border border-[#e7ecf5] bg-white p-5 shadow-2xl"
+            dir="rtl"
+          >
+            <h4 className="text-base font-black text-slate-900">{t("voidConfirmTitle")}</h4>
+            <p className="mt-1 text-sm font-black text-[#6c4cff]">
+              #{confirmVoid.sessionNumber} · {fmtDate(confirmVoid.createdAt)}{" "}
+              {fmtTime(confirmVoid.createdAt)}
+            </p>
+            <p className="mt-2 text-sm font-semibold leading-relaxed text-slate-600">
+              {t("voidConfirmBody")}
+            </p>
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setConfirmVoid(null)}
+                className="min-h-11 rounded-xl border border-slate-200 px-4 text-sm font-black text-slate-700 hover:bg-slate-50"
+              >
+                {t("voidCancel")}
+              </button>
+              <button
+                type="button"
+                disabled={voidingId === confirmVoid.id}
+                onClick={() => void toggleVoid(confirmVoid)}
+                className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-rose-600 px-4 text-sm font-black text-white hover:bg-rose-700 disabled:opacity-60"
+              >
+                {voidingId === confirmVoid.id ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Ban className="h-4 w-4" />
+                )}
+                {t("voidConfirmCta")}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

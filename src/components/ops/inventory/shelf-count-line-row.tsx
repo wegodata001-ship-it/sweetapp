@@ -18,6 +18,7 @@ import {
   resolveCountLineStatus,
 } from "@/components/ops/inventory-count/count-product-status";
 import type { LocationWorkerDto } from "@/components/ops/inventory-count/types";
+import { selectQtyOnFocus } from "@/components/ops/inventory-count/utils";
 
 export type CountRowVariant = "table" | "card";
 
@@ -197,6 +198,7 @@ function CountSiteSquare({
         inputMode="decimal"
         value={value}
         onChange={(e) => onChange(e.target.value)}
+        onFocus={selectQtyOnFocus}
         placeholder="—"
         min={0}
         readOnly={readOnly}
@@ -264,6 +266,7 @@ function MobileQtyRow({
           inputMode="decimal"
           value={value}
           onChange={(e) => onChange(e.target.value)}
+          onFocus={selectQtyOnFocus}
           placeholder="—"
           min={0}
           readOnly={readOnly}
@@ -421,6 +424,7 @@ function WorkerQtyInput({
       inputMode="decimal"
       value={value}
       onChange={(e) => onChange(e.target.value)}
+      onFocus={selectQtyOnFocus}
       className={className}
       placeholder="—"
       min={0}

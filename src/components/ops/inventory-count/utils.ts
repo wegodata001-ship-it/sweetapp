@@ -1,6 +1,19 @@
-import type { CSSProperties } from "react";
+import type { CSSProperties, FocusEvent } from "react";
 import type { TranslateFn } from "@/lib/i18n/translator";
 import type { ShelfStatusKind, ShelfSummary } from "./types";
+
+/**
+ * שדות הכמות בספירה נטענים מראש עם הספירה האחרונה שנשמרה. בלי בחירת הערך
+ * הקיים, הקלדה על תא שמציג "4" מייצרת "14" במקום "1" — מקור לספירות שגויות.
+ */
+export function selectQtyOnFocus(event: FocusEvent<HTMLInputElement>) {
+  const input = event.currentTarget;
+  input.select();
+  // ב־iOS הבחירה הסינכרונית נמחקת כשהמקלדת נפתחת
+  requestAnimationFrame(() => {
+    if (document.activeElement === input) input.select();
+  });
+}
 
 export function localYmd(d: Date) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;

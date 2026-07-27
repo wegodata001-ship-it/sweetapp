@@ -11,6 +11,7 @@ import {
 } from "@/lib/inventory/daily-count-report";
 import { inventoryCountSummaryFileName } from "@/lib/inventory/daily-count-report-pdf";
 import { resolveSummaryRange } from "@/lib/inventory/count-summary-range";
+import { ACTIVE_SESSION_WHERE } from "@/lib/inventory/count-session-status";
 import {
   buildReportAttachments,
   buildReportEmailData,
@@ -120,7 +121,7 @@ export async function POST(req: NextRequest) {
   try {
     const span = daySpanRange(range.from, range.to);
     sessionsInRange = (await prismaAny.inventoryCountSession.count({
-      where: { createdAt: { gte: span.start, lt: span.end } },
+      where: { createdAt: { gte: span.start, lt: span.end }, ...ACTIVE_SESSION_WHERE },
     })) as number;
   } catch (e) {
     return NextResponse.json(

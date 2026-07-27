@@ -24,3 +24,11 @@ export function canRemoveCountRow(role: string | null | undefined): boolean {
 export function canViewCountSummary(role: string | null | undefined): boolean {
   return isInventoryManager(role);
 }
+
+/**
+ * ביטול סבב ספירה שגוי. הביטול מוציא את הסשן מהדוחות, מה־KPI ומבסיס ההשוואה
+ * של הספירה הבאה, ולכן שמור לאותם תפקידים בלבד.
+ */
+export function canVoidCountSession(role: string | null | undefined): boolean {
+  return isInventoryManager(role);
+}

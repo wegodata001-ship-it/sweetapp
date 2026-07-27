@@ -10,6 +10,7 @@ import {
   type StockFilterTier,
 } from "@/lib/inventory/product-filters";
 import { LATEST_COUNT_ORDER_BY } from "@/lib/inventory/count-latest";
+import { ACTIVE_COUNT_LINE_WHERE } from "@/lib/inventory/count-session-status";
 
 function inventoryStatus(
   current: number | null,
@@ -70,6 +71,7 @@ export async function GET(req: NextRequest) {
       include: {
         inventoryLocation: { select: { id: true, name: true } },
         counts: {
+          where: ACTIVE_COUNT_LINE_WHERE,
           orderBy: LATEST_COUNT_ORDER_BY,
           take: 1,
           include: {

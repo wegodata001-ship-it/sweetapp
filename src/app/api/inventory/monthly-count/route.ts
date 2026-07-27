@@ -24,6 +24,8 @@ import {
   loadExcludedProductIds,
   resolveCountRoundScope,
 } from "@/lib/inventory/count-exclusions";
+import { ACTIVE_COUNT_LINE_WHERE } from "@/lib/inventory/count-session-status";
+import { loadExistingCountToday } from "@/lib/inventory/count-round-guard";
 import { scheduleCountSessionCompletedAlert } from "@/lib/inventory/count-session-alert";
 
 /**
@@ -94,7 +96,7 @@ async function loadLatestCountsForProducts(productIds: string[]): Promise<Map<st
   const countsByProduct = new Map<string, CountQtyRow[]>();
   if (productIds.length === 0) return countsByProduct;
   const latestCounts = (await prismaAny.inventoryCount.findMany({
-    where: { inventoryProductId: { in: productIds } },
+    where: { inventoryProductId: { in: productIds }, ...ACTIVE_COUNT_LINE_WHERE },
     orderBy: LATEST_COUNT_ORDER_BY,
     distinct: ["inventoryProductId", "locationId"],
     select: {
@@ -205,7 +207,10 @@ export async function GET(req: NextRequest) {
      * וה־infinite scroll יישארו נכונים גם אחרי רענון הדף.
      */
     const roundScope = resolveCountRoundScope(shelf, searchParams.get("countDate"));
-    const excludedProductIds = await loadExcludedProductIds(roundScope);
+    const [excludedProductIds, existingCountToday] = await Promise.all([
+      loadExcludedProductIds(roundScope),
+      loadExistingCountToday(roundScope),
+    ]);
 
     const where: Record<string, unknown> = {
       AND: [
@@ -256,6 +261,7 @@ export async function GET(req: NextRequest) {
           hasMore: start + pageSize < total,
           countDay: roundScope.countDay,
           removedCount: excludedProductIds.length,
+          existingCountToday,
         },
       });
     }
@@ -294,6 +300,7 @@ export async function GET(req: NextRequest) {
         hasMore: page * pageSize < total,
         countDay: roundScope.countDay,
         removedCount: excludedProductIds.length,
+        existingCountToday,
       },
     });
   } catch (e) {
@@ -408,7 +415,7 @@ export async function POST(req: NextRequest) {
       rawPids.length === 0
         ? Promise.resolve([] as CountQtyRow[])
         : (prismaAny.inventoryCount.findMany({
-            where: { inventoryProductId: { in: rawPids } },
+            where: { inventoryProductId: { in: rawPids }, ...ACTIVE_COUNT_LINE_WHERE },
             orderBy: LATEST_COUNT_ORDER_BY,
             distinct: ["inventoryProductId", "locationId"],
             select: {

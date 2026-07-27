@@ -29,7 +29,7 @@ import {
   useInventoryCountAutosave,
   type CountSaveState,
 } from "./use-inventory-count-autosave";
-import { countDiffMeta } from "./utils";
+import { countDiffMeta, selectQtyOnFocus } from "./utils";
 
 export type WorkspaceProduct = InventoryCountProductRow & {
   actual: number | null;
@@ -481,6 +481,7 @@ export function InventoryCountWorkspace({
                     onChange={(e) =>
                       onQtyInput(selected.id, e.target.value, selected.previousQuantity)
                     }
+                    onFocus={selectQtyOnFocus}
                     className="h-20 w-32 rounded-3xl border-4 border-sky-400/80 bg-white text-center text-4xl font-black tabular-nums text-slate-900 shadow-inner outline-none focus:border-sky-500 focus:ring-4 focus:ring-sky-200/60 md:h-24 md:w-40 md:text-5xl"
                   />
                   <button

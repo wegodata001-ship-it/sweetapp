@@ -8,6 +8,7 @@ import {
   resolveCountLineStatus,
 } from "@/components/ops/inventory-count/count-product-status";
 import type { InventoryCountProductRow } from "@/components/ops/inventory-count/types";
+import { selectQtyOnFocus } from "@/components/ops/inventory-count/utils";
 
 type LastCount = {
   createdAt: string;
@@ -70,6 +71,7 @@ function ShelfProductCardInner({ row, actualRaw, onActualChange, t, onFetchLastC
                 inputMode="decimal"
                 value={actualRaw}
                 onChange={(e) => onActualChange(e.target.value)}
+                onFocus={selectQtyOnFocus}
                 className="mt-0.5 w-full border-0 bg-transparent text-center text-lg font-black tabular-nums text-slate-900 outline-none focus:ring-0"
                 placeholder="—"
               />

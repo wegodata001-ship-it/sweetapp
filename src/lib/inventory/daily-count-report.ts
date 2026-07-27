@@ -6,6 +6,7 @@
  * ללא מסד נתונים.
  */
 import { prismaAny } from "@/lib/prisma";
+import { ACTIVE_SESSION_WHERE } from "./count-session-status";
 
 /** YYYY-MM-DD לפי זמן מקומי — כמו שאר מודול הספירה */
 export function localDay(d: Date = new Date()): string {
@@ -430,7 +431,7 @@ export async function loadInventoryReportRange(
 
   const [sessions, exclusions, newPlacements] = await Promise.all([
     prismaAny.inventoryCountSession.findMany({
-      where: { createdAt: { gte: start, lt: end } },
+      where: { createdAt: { gte: start, lt: end }, ...ACTIVE_SESSION_WHERE },
       orderBy: { createdAt: "asc" },
       select: {
         id: true,

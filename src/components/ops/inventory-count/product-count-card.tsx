@@ -3,7 +3,7 @@
 import { Minus, Package, Plus } from "lucide-react";
 import { useI18n } from "@/components/i18n-provider";
 import type { MonthlyCountRow } from "./types";
-import { countDiffMeta } from "./utils";
+import { countDiffMeta, selectQtyOnFocus } from "./utils";
 
 type Props = {
   row: MonthlyCountRow;
@@ -74,6 +74,7 @@ export function ProductCountCard({ row, displayQty, onQtyChange, onBump, countin
                 className="min-w-0 flex-1 border-0 bg-transparent text-center text-lg font-black tabular-nums outline-none"
                 value={displayQty}
                 onChange={(e) => onQtyChange(e.target.value)}
+                onFocus={selectQtyOnFocus}
               />
               <button
                 type="button"
