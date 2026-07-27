@@ -24,6 +24,8 @@
 tmp/ocr-debug/
 # locally generated PDF/PNG samples for reviewing document output
 tmp-pdf-samples/
+# database backups taken before destructive operations — contain real customer data
+backups/
 .DS_Store
 *.pem
 
