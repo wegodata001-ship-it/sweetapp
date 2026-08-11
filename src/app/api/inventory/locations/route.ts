@@ -10,6 +10,10 @@ import {
   type LocationWorkerInput,
 } from "@/lib/inventory/location-workers";
 import { LOCATION_ORDER_BY } from "@/lib/inventory/count-latest";
+import {
+  ensureLocationSchemaColumns,
+  isMissingColumnError,
+} from "@/lib/inventory/ensure-location-schema";
 
 const LOCATION_SELECT = {
   id: true,
@@ -87,11 +91,25 @@ export async function GET(req: NextRequest) {
   const includeInactive = searchParams.get("all") === "1";
 
   try {
-    const rows = await prismaAny.inventoryLocation.findMany({
-      where: includeInactive ? {} : { isActive: true },
-      orderBy: LOCATION_ORDER_BY,
-      select: LOCATION_SELECT,
-    });
+    await ensureLocationSchemaColumns();
+    let rows;
+    try {
+      rows = await prismaAny.inventoryLocation.findMany({
+        where: includeInactive ? {} : { isActive: true },
+        orderBy: LOCATION_ORDER_BY,
+        select: LOCATION_SELECT,
+      });
+    } catch (e) {
+      if (!isMissingColumnError(e)) throw e;
+      const { displayOrder: _d, ...legacySelect } = LOCATION_SELECT;
+      void _d;
+      rows = await prismaAny.inventoryLocation.findMany({
+        where: includeInactive ? {} : { isActive: true },
+        orderBy: { name: "asc" },
+        select: legacySelect,
+      });
+      rows = rows.map((r: Record<string, unknown>) => ({ ...r, displayOrder: 0 }));
+    }
     return NextResponse.json({
       ok: true,
       data: rows.map((r: { createdAt: Date; [k: string]: unknown }) => serializeLocation(r)),
@@ -113,6 +131,7 @@ export async function POST(req: NextRequest) {
   }
 
   try {
+    await ensureLocationSchemaColumns();
     const body = (await req.json()) as {
       name?: string;
       code?: string | null;

@@ -10,6 +10,10 @@ import {
   pickLatestCountForLocation,
 } from "@/lib/inventory/count-latest";
 import { ACTIVE_COUNT_LINE_WHERE } from "@/lib/inventory/count-session-status";
+import {
+  ensureLocationSchemaColumns,
+  isMissingColumnError,
+} from "@/lib/inventory/ensure-location-schema";
 
 export type ResolvedShelf = {
   id: string | null;
@@ -368,27 +372,56 @@ function toShelfSummaryStats(
   };
 }
 
+const LOCATION_SUMMARY_SELECT = {
+  id: true,
+  name: true,
+  code: true,
+  description: true,
+  locationType: true,
+  targetProductCount: true,
+  color: true,
+  isActive: true,
+  createdAt: true,
+  displayOrder: true,
+} as const;
+
+const LOCATION_SUMMARY_SELECT_LEGACY = {
+  id: true,
+  name: true,
+  code: true,
+  description: true,
+  locationType: true,
+  targetProductCount: true,
+  color: true,
+  isActive: true,
+  createdAt: true,
+} as const;
+
+/** טעינת מיקומים — עם fallback אם עמודת displayOrder עדיין לא קיימת ב־DB */
+async function loadLocationsForSummaries() {
+  await ensureLocationSchemaColumns();
+  try {
+    return await prismaAny.inventoryLocation.findMany({
+      orderBy: LOCATION_ORDER_BY,
+      select: LOCATION_SUMMARY_SELECT,
+    });
+  } catch (e) {
+    if (!isMissingColumnError(e)) throw e;
+    const rows = await prismaAny.inventoryLocation.findMany({
+      orderBy: { name: "asc" },
+      select: LOCATION_SUMMARY_SELECT_LEGACY,
+    });
+    return rows.map((r: Record<string, unknown>) => ({ ...r, displayOrder: 0 }));
+  }
+}
+
 /**
  * סיכומי כל המדפים — חברות לפי placements (SSOT) + legacy רק למוצרים ללא placements.
  * סטטוס ספירה לפי ספירות של אותו locationId בלבד.
  */
 export async function listShelfSummaries(): Promise<ShelfSummaryStats[]> {
   const [locations, products, placements] = await Promise.all([
-    prismaAny.inventoryLocation.findMany({
-      orderBy: LOCATION_ORDER_BY,
-      select: {
-        id: true,
-        name: true,
-        code: true,
-        description: true,
-        locationType: true,
-        targetProductCount: true,
-        color: true,
-        isActive: true,
-        createdAt: true,
-        displayOrder: true,
-      },
-    }),
+    loadLocationsForSummaries(),
     prismaAny.inventoryProduct.findMany({
       where: {
         OR: [

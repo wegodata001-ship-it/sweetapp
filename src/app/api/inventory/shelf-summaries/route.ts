@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { requireDb } from "@/lib/api-route";
 import { listShelfSummaries, type ShelfSummaryStats } from "@/lib/inventory/shelf-service";
 import type { CountLifecycleStatus } from "@/lib/inventory/location-types";
+import { ensureLocationSchemaColumns } from "@/lib/inventory/ensure-location-schema";
 
 export type ShelfSummaryDto = {
   name: string;
@@ -13,6 +14,7 @@ export type ShelfSummaryDto = {
   color: string | null;
   isActive: boolean;
   createdAt: string | null;
+  displayOrder: number;
   productCount: number;
   shortageCount: number;
   surplusCount: number;
@@ -35,6 +37,7 @@ function toDto(s: ShelfSummaryStats): ShelfSummaryDto {
     color: s.color,
     isActive: s.isActive,
     createdAt: s.createdAt,
+    displayOrder: s.displayOrder ?? 0,
     productCount: s.productCount,
     shortageCount: s.shortageCount,
     surplusCount: s.surplusCount,
@@ -52,6 +55,7 @@ export async function GET() {
   const block = await requireDb();
   if (block) return block;
   try {
+    await ensureLocationSchemaColumns();
     const data = (await listShelfSummaries()).map(toDto);
     return NextResponse.json({ ok: true, data });
   } catch (e) {

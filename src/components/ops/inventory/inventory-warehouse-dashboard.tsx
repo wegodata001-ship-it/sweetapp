@@ -147,9 +147,19 @@ export function InventoryWarehouseDashboard() {
   const [, setTick] = useState(0);
 
   const loadShelves = useCallback(async () => {
-    const res = await fetch("/api/inventory/shelf-summaries", { credentials: "same-origin" });
-    const j = (await res.json()) as { data?: ShelfSummary[] };
-    setShelfSummaries(j.data ?? []);
+    try {
+      const res = await fetch("/api/inventory/shelf-summaries", { credentials: "same-origin" });
+      const j = (await res.json()) as { ok?: boolean; data?: ShelfSummary[]; error?: string };
+      if (!res.ok || j.ok === false) {
+        console.error("[shelf-summaries]", j.error ?? res.status);
+        setShelfSummaries([]);
+        return;
+      }
+      setShelfSummaries(j.data ?? []);
+    } catch (e) {
+      console.error("[shelf-summaries]", e);
+      setShelfSummaries([]);
+    }
   }, []);
 
   useEffect(() => {
