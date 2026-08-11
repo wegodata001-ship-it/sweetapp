@@ -4,7 +4,11 @@ import {
   WORKER_SELECT,
   type LocationWorkerRow,
 } from "@/lib/inventory/location-workers";
-import { LATEST_COUNT_ORDER_BY } from "@/lib/inventory/count-latest";
+import {
+  LATEST_COUNT_ORDER_BY,
+  LOCATION_ORDER_BY,
+  pickLatestCountForLocation,
+} from "@/lib/inventory/count-latest";
 import { ACTIVE_COUNT_LINE_WHERE } from "@/lib/inventory/count-session-status";
 
 export type ResolvedShelf = {
@@ -81,20 +85,37 @@ export async function resolveShelfWithWorkers(
   return null;
 }
 
-/** מוצרים על מדף — כולל שיוך N:M + תאימות ל־locationId / טקסט ישן */
+/**
+ * מוצרים על מדף — Source of Truth = placements (N:M).
+ * legacy (locationId / טקסט) רק למוצרים שעדיין אין להם אף placement,
+ * כדי שלא ידלוף מוצר ממחסן אחר בגלל טקסט/primary ישן.
+ */
 export function productsOnShelfWhere(shelf: ResolvedShelf) {
   if (shelf.id) {
     return {
       OR: [
         { placements: { some: { locationId: shelf.id } } },
-        { locationId: shelf.id },
-        { location: { equals: shelf.name, mode: "insensitive" as const } },
+        {
+          AND: [{ locationId: shelf.id }, { placements: { none: {} } }],
+        },
+        {
+          AND: [
+            { location: { equals: shelf.name, mode: "insensitive" as const } },
+            { locationId: null },
+            { placements: { none: {} } },
+          ],
+        },
       ],
     };
   }
   return {
     OR: [
-      { location: { equals: shelf.name, mode: "insensitive" as const } },
+      {
+        AND: [
+          { location: { equals: shelf.name, mode: "insensitive" as const } },
+          { placements: { none: {} } },
+        ],
+      },
       {
         placements: {
           some: { location: { name: { equals: shelf.name, mode: "insensitive" as const } } },
@@ -108,7 +129,21 @@ export async function ensureProductOnShelf(
   tx: typeof prismaAny,
   productId: string,
   locationId: string,
+  opts?: { seedMinimumFromProduct?: boolean },
 ): Promise<void> {
+  const maxOrder = await tx.inventoryProductOnLocation.aggregate({
+    where: { locationId },
+    _max: { displayOrder: true },
+  });
+  const nextOrder = Number(maxOrder._max?.displayOrder ?? 0) + 1;
+  let seedMin = 0;
+  if (opts?.seedMinimumFromProduct !== false) {
+    const product = await tx.inventoryProduct.findUnique({
+      where: { id: productId },
+      select: { minimumQuantity: true },
+    });
+    seedMin = Math.max(0, Number(product?.minimumQuantity ?? 0) || 0);
+  }
   await tx.inventoryProductOnLocation.upsert({
     where: {
       inventoryProductId_locationId: {
@@ -116,9 +151,115 @@ export async function ensureProductOnShelf(
         locationId,
       },
     },
-    create: { inventoryProductId: productId, locationId },
+    create: {
+      inventoryProductId: productId,
+      locationId,
+      displayOrder: nextOrder,
+      minimumQuantity: seedMin,
+    },
     update: {},
   });
+}
+
+/**
+ * עדכון מינימום למוצר בתוך מקום אחסון בלבד.
+ * לא נוגע ב־InventoryCount / כמות מלאי / מיקומים אחרים.
+ */
+export async function setProductMinimumOnShelf(
+  tx: typeof prismaAny,
+  productId: string,
+  locationId: string,
+  minimumQuantity: number,
+): Promise<{ minimumQuantity: number }> {
+  const min = Math.max(0, Number(minimumQuantity) || 0);
+  await ensureProductOnShelf(tx, productId, locationId, { seedMinimumFromProduct: false });
+  await tx.inventoryProductOnLocation.update({
+    where: {
+      inventoryProductId_locationId: {
+        inventoryProductId: productId,
+        locationId,
+      },
+    },
+    data: { minimumQuantity: min },
+  });
+  return { minimumQuantity: min };
+}
+
+/**
+ * הסרת מוצר ממקום אחסון — מוחק רק שיוך N:M / מנקה primary ישן.
+ * לא מוחק Product, לא מוחק InventoryCount / היסטוריה.
+ */
+export async function removeProductFromShelf(
+  tx: typeof prismaAny,
+  productId: string,
+  locationId: string,
+): Promise<{ removed: boolean }> {
+  const existing = await tx.inventoryProductOnLocation.findUnique({
+    where: {
+      inventoryProductId_locationId: {
+        inventoryProductId: productId,
+        locationId,
+      },
+    },
+    select: { id: true },
+  });
+  if (existing) {
+    await tx.inventoryProductOnLocation.delete({ where: { id: existing.id } });
+  }
+
+  const product = await tx.inventoryProduct.findUnique({
+    where: { id: productId },
+    select: {
+      locationId: true,
+      placements: {
+        select: { locationId: true, location: { select: { name: true } } },
+        orderBy: [{ displayOrder: "asc" }, { createdAt: "asc" }],
+        take: 1,
+      },
+    },
+  });
+  if (!product) return { removed: Boolean(existing) };
+
+  const wasPrimary = product.locationId === locationId;
+  if (wasPrimary) {
+    const next = product.placements[0] ?? null;
+    await tx.inventoryProduct.update({
+      where: { id: productId },
+      data: {
+        locationId: next?.locationId ?? null,
+        location: next?.location?.name ?? "",
+      },
+    });
+  }
+
+  return { removed: Boolean(existing) || wasPrimary };
+}
+
+/** מזהי מוצרים על מדף בסדר התצוגה של המקום (placement.displayOrder) */
+export async function orderedProductIdsOnShelf(shelf: ResolvedShelf): Promise<string[]> {
+  if (shelf.id) {
+    const placements = (await prismaAny.inventoryProductOnLocation.findMany({
+      where: { locationId: shelf.id },
+      orderBy: [{ displayOrder: "asc" }, { createdAt: "asc" }],
+      select: { inventoryProductId: true },
+    })) as { inventoryProductId: string }[];
+    const ordered = placements.map((p) => p.inventoryProductId);
+    const placed = new Set(ordered);
+    const legacy = (await prismaAny.inventoryProduct.findMany({
+      where: {
+        AND: [productsOnShelfWhere(shelf), { id: { notIn: [...placed] } }],
+      },
+      orderBy: [{ displayOrder: "asc" }, { name: "asc" }],
+      select: { id: true },
+    })) as { id: string }[];
+    return [...ordered, ...legacy.map((p) => p.id)];
+  }
+  const rows = (await prismaAny.inventoryProduct.findMany({
+    where: productsOnShelfWhere(shelf),
+    orderBy: [{ displayOrder: "asc" }, { name: "asc" }],
+    select: { id: true },
+  })) as { id: string }[];
+  return rows.map((r) => r.id);
 }
 
 export async function uniqueShelfCopyName(baseName: string): Promise<string> {
@@ -147,6 +288,7 @@ export type ShelfSummaryStats = {
   color: string | null;
   isActive: boolean;
   createdAt: string | null;
+  displayOrder: number;
   productCount: number;
   shortageCount: number;
   surplusCount: number;
@@ -166,16 +308,6 @@ type CountDiffRow = {
   countedBy: { fullName: string } | null;
 };
 
-function pickLatestCountForShelf(
-  counts: CountDiffRow[],
-  shelfId: string | null,
-): CountDiffRow | null {
-  if (shelfId) {
-    return counts.find((c) => c.locationId === shelfId) ?? counts.find((c) => !c.locationId) ?? null;
-  }
-  return counts[0] ?? null;
-}
-
 function toShelfSummaryStats(
   seed: {
     name: string;
@@ -187,6 +319,7 @@ function toShelfSummaryStats(
     color: string | null;
     isActive: boolean;
     createdAt: string | null;
+    displayOrder?: number;
   },
   productIds: string[],
   countsByProduct: Map<string, CountDiffRow[]>,
@@ -199,7 +332,10 @@ function toShelfSummaryStats(
   let lastCountedByName: string | null = null;
 
   for (const pid of productIds) {
-    const latest = pickLatestCountForShelf(countsByProduct.get(pid) ?? [], seed.locationId);
+    const latest = pickLatestCountForLocation(
+      countsByProduct.get(pid) ?? [],
+      seed.locationId,
+    );
     if (!latest) continue;
     countedProductCount += 1;
     if (latest.difference < 0) shortageCount += 1;
@@ -214,6 +350,7 @@ function toShelfSummaryStats(
   const productCount = productIds.length;
   return {
     ...seed,
+    displayOrder: seed.displayOrder ?? 0,
     productCount,
     shortageCount,
     surplusCount,
@@ -232,13 +369,13 @@ function toShelfSummaryStats(
 }
 
 /**
- * סיכומי כל המדפים — אותה חברות מוצר כמו productsOnShelfWhere / מסך הספירה
- * (placements N:M ∪ locationId ∪ טקסט location).
+ * סיכומי כל המדפים — חברות לפי placements (SSOT) + legacy רק למוצרים ללא placements.
+ * סטטוס ספירה לפי ספירות של אותו locationId בלבד.
  */
 export async function listShelfSummaries(): Promise<ShelfSummaryStats[]> {
   const [locations, products, placements] = await Promise.all([
     prismaAny.inventoryLocation.findMany({
-      orderBy: { name: "asc" },
+      orderBy: LOCATION_ORDER_BY,
       select: {
         id: true,
         name: true,
@@ -249,6 +386,7 @@ export async function listShelfSummaries(): Promise<ShelfSummaryStats[]> {
         color: true,
         isActive: true,
         createdAt: true,
+        displayOrder: true,
       },
     }),
     prismaAny.inventoryProduct.findMany({
@@ -259,7 +397,12 @@ export async function listShelfSummaries(): Promise<ShelfSummaryStats[]> {
           { placements: { some: {} } },
         ],
       },
-      select: { id: true, location: true, locationId: true },
+      select: {
+        id: true,
+        location: true,
+        locationId: true,
+        _count: { select: { placements: true } },
+      },
     }),
     prismaAny.inventoryProductOnLocation.findMany({
       select: { inventoryProductId: true, locationId: true },
@@ -276,6 +419,7 @@ export async function listShelfSummaries(): Promise<ShelfSummaryStats[]> {
     color: string | null;
     isActive: boolean;
     createdAt: Date;
+    displayOrder: number;
   };
 
   const locs = locations as LocRow[];
@@ -298,6 +442,7 @@ export async function listShelfSummaries(): Promise<ShelfSummaryStats[]> {
       color: string | null;
       isActive: boolean;
       createdAt: string | null;
+      displayOrder: number;
     }
   >();
 
@@ -313,6 +458,7 @@ export async function listShelfSummaries(): Promise<ShelfSummaryStats[]> {
       color?: string | null;
       isActive?: boolean;
       createdAt?: string | null;
+      displayOrder?: number;
     },
   ) => {
     if (!members.has(key)) members.set(key, new Set());
@@ -327,6 +473,7 @@ export async function listShelfSummaries(): Promise<ShelfSummaryStats[]> {
         color: seed.color ?? null,
         isActive: seed.isActive ?? true,
         createdAt: seed.createdAt ?? null,
+        displayOrder: seed.displayOrder ?? 0,
       });
     }
   };
@@ -342,6 +489,7 @@ export async function listShelfSummaries(): Promise<ShelfSummaryStats[]> {
       color: loc.color,
       isActive: loc.isActive,
       createdAt: loc.createdAt.toISOString(),
+      displayOrder: loc.displayOrder ?? 0,
     });
   }
 
@@ -350,10 +498,19 @@ export async function listShelfSummaries(): Promise<ShelfSummaryStats[]> {
     members.get(pl.locationId)!.add(pl.inventoryProductId);
   }
 
-  for (const p of products as Array<{ id: string; location: string; locationId: string | null }>) {
+  // legacy: רק מוצרים ללא placements — לא מדליפים ממחסן אחר
+  for (const p of products as Array<{
+    id: string;
+    location: string;
+    locationId: string | null;
+    _count: { placements: number };
+  }>) {
+    if (p._count.placements > 0) continue;
+
     const locId = p.locationId?.trim() || null;
     if (locId && members.has(locId)) {
       members.get(locId)!.add(p.id);
+      continue;
     }
 
     const textName = (p.location ?? "").trim();
@@ -363,10 +520,9 @@ export async function listShelfSummaries(): Promise<ShelfSummaryStats[]> {
       members.get(byName.id)!.add(p.id);
       continue;
     }
-    // מדף טקסט יתום (אין InventoryLocation) — תאימות לאחור
     if (!locId) {
       const key = `name:${textName}`;
-      ensureShelf(key, { name: textName, locationId: null });
+      ensureShelf(key, { name: textName, locationId: null, displayOrder: 999999 });
       members.get(key)!.add(p.id);
     }
   }
@@ -401,7 +557,10 @@ export async function listShelfSummaries(): Promise<ShelfSummaryStats[]> {
       return toShelfSummaryStats(seed, [...set], countsByProduct);
     })
     .filter((s) => s.isActive || s.productCount > 0)
-    .sort((a, b) => a.name.localeCompare(b.name, "he", { sensitivity: "base" }));
+    .sort((a, b) => {
+      if (a.displayOrder !== b.displayOrder) return a.displayOrder - b.displayOrder;
+      return a.name.localeCompare(b.name, "he", { sensitivity: "base" });
+    });
 }
 
 export async function summarizeShelf(shelf: ResolvedShelf): Promise<ShelfSummaryStats> {
@@ -420,6 +579,7 @@ export async function summarizeShelf(shelf: ResolvedShelf): Promise<ShelfSummary
             color: true,
             isActive: true,
             createdAt: true,
+            displayOrder: true,
           },
         })
       : prismaAny.inventoryLocation.findFirst({
@@ -434,6 +594,7 @@ export async function summarizeShelf(shelf: ResolvedShelf): Promise<ShelfSummary
             color: true,
             isActive: true,
             createdAt: true,
+            displayOrder: true,
           },
         }),
     prismaAny.inventoryProduct.findMany({
@@ -478,6 +639,7 @@ export async function summarizeShelf(shelf: ResolvedShelf): Promise<ShelfSummary
       color: loc?.color ?? null,
       isActive: loc?.isActive ?? true,
       createdAt: loc?.createdAt ? loc.createdAt.toISOString() : null,
+      displayOrder: loc?.displayOrder ?? 0,
     },
     productIds,
     countsByProduct,

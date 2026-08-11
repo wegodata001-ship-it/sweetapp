@@ -52,7 +52,7 @@ import {
   type ShelfGridModel,
 } from "./shelf-grid-card";
 
-type SortKey = "name" | "createdAt" | "productCount" | "matchPct" | "lastCountAt";
+type SortKey = "displayOrder" | "name" | "createdAt" | "productCount" | "matchPct" | "lastCountAt";
 type CountFilter = "" | CountLifecycleStatus;
 
 function canManageInventory(user: { role: string; permissions: string[] } | null) {
@@ -80,6 +80,7 @@ function summaryToGrid(s: ShelfSummary): ShelfGridModel {
     color: s.color ?? null,
     isActive: s.isActive ?? true,
     createdAt: s.createdAt ?? null,
+    displayOrder: s.displayOrder ?? 0,
     lastCountAt: s.lastCountAt ?? null,
     lastCountedByName: s.lastCountedByName ?? null,
     countStatus: s.countStatus ?? "NOT_STARTED",
@@ -123,7 +124,7 @@ export function InventoryWarehouseDashboard() {
   const [filterCount, setFilterCount] = useState<CountFilter>("");
   const [filterMinProducts, setFilterMinProducts] = useState("");
   const [filterLastCountFrom, setFilterLastCountFrom] = useState("");
-  const [sortKey, setSortKey] = useState<SortKey>("name");
+  const [sortKey, setSortKey] = useState<SortKey>("displayOrder");
   const countDate = localYmd(new Date());
 
   const [actionShelf, setActionShelf] = useState<ShelfGridModel | null>(null);
@@ -211,6 +212,12 @@ export function InventoryWarehouseDashboard() {
 
     list.sort((a, b) => {
       switch (sortKey) {
+        case "displayOrder": {
+          const ao = a.displayOrder ?? 0;
+          const bo = b.displayOrder ?? 0;
+          if (ao !== bo) return ao - bo;
+          return a.name.localeCompare(b.name, "he");
+        }
         case "productCount":
           return b.productCount - a.productCount;
         case "matchPct":
@@ -601,6 +608,7 @@ export function InventoryWarehouseDashboard() {
           onChange={(e) => setSortKey(e.target.value as SortKey)}
           className={filterSelectClass}
         >
+          <option value="displayOrder">{tW("sortDisplayOrder")}</option>
           <option value="name">{tW("sortName")}</option>
           <option value="createdAt">{tW("sortCreated")}</option>
           <option value="productCount">{tW("sortProducts")}</option>

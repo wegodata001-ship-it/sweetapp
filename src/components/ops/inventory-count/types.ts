@@ -13,6 +13,7 @@ export type ShelfSummary = {
   color?: string | null;
   isActive?: boolean;
   createdAt?: string | null;
+  displayOrder?: number;
   countedProductCount?: number;
   lastCountAt?: string | null;
   lastCountedByName?: string | null;
@@ -46,9 +47,12 @@ export type InventoryCountProductRow = {
   locationId?: string | null;
   unit: string | null;
   previousQuantity: number;
-  /** סה״כ קיים בכל המערכת (כל המיקומים) */
+  /** מלאי במקום האחסון הנוכחי */
+  locationQuantity?: number;
+  /** במסך ספירה = מלאי המיקום; businessTotalQuantity לדוחות גלובליים */
   systemTotalQuantity?: number;
-  /** כמה חסר במערכת מול המינימום (= الكمية المطلوبة) */
+  businessTotalQuantity?: number;
+  /** כמה חסר למינימום לפי מלאי המיקום (= الكمية المطلوبة) */
   systemShortage?: number;
   requiredQuantity?: number;
   minimumQuantity: number;

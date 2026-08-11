@@ -10,14 +10,17 @@ import {
   type StockFilterTier,
 } from "@/lib/inventory/product-filters";
 import {
+  orderedProductIdsOnShelf,
   productsOnShelfWhere,
   resolveShelf,
   resolveShelfWithWorkers,
 } from "@/lib/inventory/shelf-service";
 import {
   LATEST_COUNT_ORDER_BY,
+  pickLatestCountForLocation,
   previousQtyFromCounts,
   requiredQtyToMinimum,
+  resolveLocationMinimum,
   systemTotalFromCounts,
 } from "@/lib/inventory/count-latest";
 import {
@@ -90,8 +93,6 @@ type CountQtyRow = {
   }[];
 };
 
-const PRODUCT_ORDER_BY = [{ displayOrder: "asc" as const }, { name: "asc" as const }];
-
 async function loadLatestCountsForProducts(productIds: string[]): Promise<Map<string, CountQtyRow[]>> {
   const countsByProduct = new Map<string, CountQtyRow[]>();
   if (productIds.length === 0) return countsByProduct;
@@ -122,21 +123,41 @@ async function loadLatestCountsForProducts(productIds: string[]): Promise<Map<st
   return countsByProduct;
 }
 
+async function loadPlacementMinimums(
+  locationId: string | null,
+  productIds: string[],
+): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  if (!locationId || productIds.length === 0) return out;
+  const rows = (await prismaAny.inventoryProductOnLocation.findMany({
+    where: { locationId, inventoryProductId: { in: productIds } },
+    select: { inventoryProductId: true, minimumQuantity: true },
+  })) as { inventoryProductId: string; minimumQuantity: number }[];
+  for (const r of rows) {
+    out.set(r.inventoryProductId, Number(r.minimumQuantity) || 0);
+  }
+  return out;
+}
+
 function mapProductRow(
   p: ProductRow,
   shelf: { id: string | null; name: string },
   countsByProduct: Map<string, CountQtyRow[]>,
+  placementMinimums: Map<string, number>,
 ) {
   const counts = countsByProduct.get(p.id) ?? [];
   const locationName = shelf.name || p.inventoryLocation?.name || p.location || "";
-  const latestForShelf =
-    (shelf.id ? counts.find((c) => c.locationId === shelf.id) : null) ??
-    counts.find((c) => !c.locationId) ??
-    null;
-  const locationQty = latestForShelf?.currentQuantity ?? 0;
-  const systemTotal = systemTotalFromCounts(counts);
-  const systemShortage = requiredQtyToMinimum(systemTotal, p.minimumQuantity);
-  const tier = classifyStockTier(locationQty, p.minimumQuantity);
+  const latestForShelf = pickLatestCountForLocation(counts, shelf.id);
+  const locationQty = previousQtyFromCounts(counts, shelf.id);
+  /** SUM גלובלי — לדוחות בלבד; לא מוצג כמלאי במסך ספירת Location */
+  const businessTotal = systemTotalFromCounts(counts);
+  const hasPlacementMin = placementMinimums.has(p.id);
+  const locationMin = resolveLocationMinimum(
+    hasPlacementMin ? placementMinimums.get(p.id) : null,
+    p.minimumQuantity,
+  );
+  const locationRequired = requiredQtyToMinimum(locationQty, locationMin);
+  const tier = classifyStockTier(locationQty, locationMin);
   const lastWorkerQtys =
     latestForShelf?.workerLines?.map((w) => ({
       inventoryLocationWorkerId: w.inventoryLocationWorkerId,
@@ -154,11 +175,16 @@ function mapProductRow(
     locationId: shelf.id,
     unit: p.unit,
     previousQuantity: locationQty,
-    systemTotalQuantity: systemTotal,
-    systemShortage,
-    /** الكمية المطلوبة = כמה חסר למינימום (לא כמות במיקום) */
-    requiredQuantity: systemShortage,
-    minimumQuantity: p.minimumQuantity,
+    /** מלאי במקום האחסון הנוכחי (לא SUM בין מחסנים) */
+    locationQuantity: locationQty,
+    systemTotalQuantity: locationQty,
+    businessTotalQuantity: businessTotal,
+    systemShortage: locationRequired,
+    /** الكمية المطلوبة = חסר למינימום לפי מלאי המיקום */
+    requiredQuantity: locationRequired,
+    /** מינימום לפי מקום (placement); fallback למינימום מוצר ישן */
+    minimumQuantity: locationMin,
+    productMinimumQuantity: p.minimumQuantity,
     maximumQuantity: p.maximumQuantity,
     displayOrder: p.displayOrder ?? 0,
     lastCountedAt: latestForShelf?.countDate
@@ -234,15 +260,39 @@ export async function GET(req: NextRequest) {
       ],
     };
 
+    // סדר לפי placement.displayOrder של המקום — לא גלובלי בין מחסנים
+    let orderedIds = await orderedProductIdsOnShelf(shelf);
+    if (excludedProductIds.length > 0) {
+      const excluded = new Set(excludedProductIds);
+      orderedIds = orderedIds.filter((id) => !excluded.has(id));
+    }
+    if (q || category) {
+      const matched = (await prismaAny.inventoryProduct.findMany({
+        where,
+        select: { id: true },
+      })) as { id: string }[];
+      const matchSet = new Set(matched.map((m) => m.id));
+      orderedIds = orderedIds.filter((id) => matchSet.has(id));
+    }
+
     // סינון מלאי דורש כמויות — נתיב איטי יותר (תואם לאחור). מסך הספירה משתמש ב־stock=all.
     if (stock !== "all") {
       const products = (await prismaAny.inventoryProduct.findMany({
-        where,
-        orderBy: PRODUCT_ORDER_BY,
+        where: { id: { in: orderedIds } },
         select: PRODUCT_SELECT,
       })) as ProductRow[];
-      const countsByProduct = await loadLatestCountsForProducts(products.map((p) => p.id));
-      const mapped = products.map((p) => mapProductRow(p, shelf, countsByProduct));
+      const byId = new Map(products.map((p) => [p.id, p]));
+      const orderedProducts = orderedIds
+        .map((id) => byId.get(id))
+        .filter((p): p is ProductRow => !!p);
+      const productIds = orderedProducts.map((p) => p.id);
+      const [countsByProduct, placementMinimums] = await Promise.all([
+        loadLatestCountsForProducts(productIds),
+        loadPlacementMinimums(shelf.id, productIds),
+      ]);
+      const mapped = orderedProducts.map((p) =>
+        mapProductRow(p, shelf, countsByProduct, placementMinimums),
+      );
       const filtered = mapped.filter((m) => matchesStockFilter(m.stockTier, stock));
       const total = filtered.length;
       const start = (page - 1) * pageSize;
@@ -266,23 +316,27 @@ export async function GET(req: NextRequest) {
       });
     }
 
-    // נתיב מהיר: count + skip/take ב־DB, counts רק לעמוד הנוכחי
-    const [total, products] = await Promise.all([
-      prismaAny.inventoryProduct.count({ where }),
-      prismaAny.inventoryProduct.findMany({
-        where,
-        orderBy: PRODUCT_ORDER_BY,
-        skip: (page - 1) * pageSize,
-        take: pageSize,
-        select: PRODUCT_SELECT,
-      }),
-    ]);
+    const total = orderedIds.length;
+    const pageIds = orderedIds.slice((page - 1) * pageSize, page * pageSize);
+    const products = (await prismaAny.inventoryProduct.findMany({
+      where: { id: { in: pageIds } },
+      select: PRODUCT_SELECT,
+    })) as ProductRow[];
+    const byId = new Map(products.map((p) => [p.id, p]));
+    const orderedPage = pageIds.map((id) => byId.get(id)).filter((p): p is ProductRow => !!p);
 
-    const countsByProduct = await loadLatestCountsForProducts(
-      (products as ProductRow[]).map((p) => p.id),
-    );
-    const paged = (products as ProductRow[]).map((p) => {
-      const { stockTier: _s, ...rest } = mapProductRow(p, shelf, countsByProduct);
+    const pageProductIds = orderedPage.map((p) => p.id);
+    const [countsByProduct, placementMinimums] = await Promise.all([
+      loadLatestCountsForProducts(pageProductIds),
+      loadPlacementMinimums(shelf.id, pageProductIds),
+    ]);
+    const paged = orderedPage.map((p) => {
+      const { stockTier: _s, ...rest } = mapProductRow(
+        p,
+        shelf,
+        countsByProduct,
+        placementMinimums,
+      );
       return rest;
     });
 
@@ -410,7 +464,19 @@ export async function POST(req: NextRequest) {
     const [existingProducts, prevCounts, workers] = await Promise.all([
       prismaAny.inventoryProduct.findMany({
         where: { id: { in: rawPids } },
-        select: { id: true, minimumQuantity: true },
+        select: {
+          id: true,
+          minimumQuantity: true,
+          ...(locationId
+            ? {
+                placements: {
+                  where: { locationId },
+                  select: { minimumQuantity: true },
+                  take: 1,
+                },
+              }
+            : {}),
+        },
       }),
       rawPids.length === 0
         ? Promise.resolve([] as CountQtyRow[])
@@ -445,10 +511,22 @@ export async function POST(req: NextRequest) {
     ]);
 
     const productMeta = new Map(
-      (existingProducts as { id: string; minimumQuantity: number }[]).map((p) => [
-        p.id,
-        p.minimumQuantity,
-      ]),
+      (
+        existingProducts as {
+          id: string;
+          minimumQuantity: number;
+          placements?: { minimumQuantity: number }[];
+        }[]
+      ).map((p) => {
+        const placementMin = p.placements?.[0]?.minimumQuantity;
+        return [
+          p.id,
+          resolveLocationMinimum(
+            placementMin != null ? placementMin : null,
+            p.minimumQuantity,
+          ),
+        ] as const;
+      }),
     );
     const countsByProduct = new Map<string, CountQtyRow[]>();
     for (const c of prevCounts) {
@@ -608,9 +686,9 @@ export async function POST(req: NextRequest) {
             .filter((c) => c.locationId !== locationId)
             .map((c) => ({ locationId: c.locationId, currentQuantity: c.currentQuantity }));
           nextCounts.push({ locationId, currentQuantity: p.currentQuantity });
-          const systemTotal = systemTotalFromCounts(nextCounts);
+          const businessTotal = systemTotalFromCounts(nextCounts);
           const minQty = productMeta.get(p.inventoryProductId) ?? 0;
-          const required = requiredQtyToMinimum(systemTotal, minQty);
+          const required = requiredQtyToMinimum(p.currentQuantity, minQty);
           return {
             id: countIdByProduct.get(p.inventoryProductId) ?? "",
             inventoryProductId: p.inventoryProductId,
@@ -618,7 +696,9 @@ export async function POST(req: NextRequest) {
             currentQuantity: p.currentQuantity,
             difference: p.difference,
             locationId,
-            systemTotalQuantity: systemTotal,
+            locationQuantity: p.currentQuantity,
+            systemTotalQuantity: p.currentQuantity,
+            businessTotalQuantity: businessTotal,
             systemShortage: required,
             requiredQuantity: required,
             workers: p.workers,

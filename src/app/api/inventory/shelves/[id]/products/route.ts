@@ -4,11 +4,127 @@ import { requireDb } from "@/lib/api-route";
 import { getSessionFromCookie } from "@/lib/auth/get-session";
 import {
   ensureProductOnShelf,
+  removeProductFromShelf,
   resolveShelf,
+  setProductMinimumOnShelf,
   summarizeShelf,
 } from "@/lib/inventory/shelf-service";
 import { LATEST_COUNT_ORDER_BY } from "@/lib/inventory/count-latest";
 import { ACTIVE_COUNT_LINE_WHERE } from "@/lib/inventory/count-session-status";
+
+/**
+ * PATCH — עדכון מינימום למוצר בתוך מקום האחסון בלבד.
+ * התראה בלבד — לא משנה כמות / ספירות / מחסנים אחרים.
+ */
+export async function PATCH(
+  req: NextRequest,
+  ctx: { params: Promise<{ id: string }> },
+) {
+  const block = await requireDb();
+  if (block) return block;
+  const session = await getSessionFromCookie();
+  if (!session?.sub) {
+    return NextResponse.json({ ok: false, error: "נדרשת התחברות" }, { status: 401 });
+  }
+
+  const { id: paramId } = await ctx.params;
+  try {
+    const body = (await req.json()) as {
+      productId?: string;
+      shelfName?: string;
+      minimumQuantity?: number;
+    };
+    const productId = body.productId?.trim();
+    if (!productId) {
+      return NextResponse.json({ ok: false, error: "חסר מוצר" }, { status: 400 });
+    }
+    const min = Number(body.minimumQuantity);
+    if (!Number.isFinite(min) || min < 0) {
+      return NextResponse.json({ ok: false, error: "מינימום לא תקין" }, { status: 400 });
+    }
+
+    const shelf = await resolveShelf(
+      paramId === "by-name" ? null : paramId,
+      body.shelfName?.trim(),
+    );
+    if (!shelf?.id) {
+      return NextResponse.json({ ok: false, error: "מדף לא נמצא" }, { status: 404 });
+    }
+
+    const product = await prismaAny.inventoryProduct.findUnique({
+      where: { id: productId },
+      select: { id: true },
+    });
+    if (!product) {
+      return NextResponse.json({ ok: false, error: "מוצר לא נמצא" }, { status: 404 });
+    }
+
+    const result = await prismaAny.$transaction(async (tx: typeof prismaAny) => {
+      return setProductMinimumOnShelf(tx, productId, shelf.id!, min);
+    });
+
+    return NextResponse.json({
+      ok: true,
+      data: {
+        productId,
+        locationId: shelf.id,
+        minimumQuantity: result.minimumQuantity,
+      },
+    });
+  } catch (e) {
+    return NextResponse.json(
+      { ok: false, error: e instanceof Error ? e.message : "שגיאה" },
+      { status: 500 },
+    );
+  }
+}
+
+/** DELETE — הסרת מוצר ממקום אחסון בלבד (לא מוחק Product / ספירות) */
+export async function DELETE(
+  req: NextRequest,
+  ctx: { params: Promise<{ id: string }> },
+) {
+  const block = await requireDb();
+  if (block) return block;
+  const session = await getSessionFromCookie();
+  if (!session?.sub) {
+    return NextResponse.json({ ok: false, error: "נדרשת התחברות" }, { status: 401 });
+  }
+
+  const { id: paramId } = await ctx.params;
+  const productId = req.nextUrl.searchParams.get("productId")?.trim();
+  const shelfName = req.nextUrl.searchParams.get("name")?.trim() || undefined;
+
+  if (!productId) {
+    return NextResponse.json({ ok: false, error: "חסר מוצר" }, { status: 400 });
+  }
+
+  try {
+    const shelf = await resolveShelf(paramId === "by-name" ? null : paramId, shelfName);
+    if (!shelf?.id) {
+      return NextResponse.json({ ok: false, error: "מדף לא נמצא" }, { status: 404 });
+    }
+
+    const result = await prismaAny.$transaction(async (tx: typeof prismaAny) => {
+      return removeProductFromShelf(tx, productId, shelf.id!);
+    });
+
+    if (!result.removed) {
+      return NextResponse.json({ ok: false, error: "המוצר לא משויך למדף" }, { status: 404 });
+    }
+
+    const summary = await summarizeShelf(shelf);
+    return NextResponse.json({
+      ok: true,
+      data: { productId, locationId: shelf.id, shelf: summary },
+    });
+  } catch (e) {
+    return NextResponse.json(
+      { ok: false, error: e instanceof Error ? e.message : "שגיאה" },
+      { status: 500 },
+    );
+  }
+}
 
 /** POST — הוספת מוצר למדף (שיוך N:M + כמות אופציונלית) — לא מסיר ממיקומים אחרים */
 export async function POST(
@@ -97,14 +213,16 @@ export async function POST(
 
       await ensureProductOnShelf(tx, productId, locationId);
 
-      // שומרים גם locationId ראשי לתאימות לאחור — בלי להסיר ממיקומים אחרים
-      await tx.inventoryProduct.update({
-        where: { id: productId },
-        data: {
-          locationId,
-          location: resolvedShelf.name,
-        },
-      });
+      // primary ישן רק אם אין עדיין בית ראשי — לא דורסים שיוך למחסן אחר
+      if (!product.locationId) {
+        await tx.inventoryProduct.update({
+          where: { id: productId },
+          data: {
+            locationId,
+            location: resolvedShelf.name,
+          },
+        });
+      }
 
       const countDate = body.countDate?.trim() ? new Date(body.countDate) : new Date();
       if (Number.isNaN(countDate.getTime())) {

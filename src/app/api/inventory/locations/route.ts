@@ -9,6 +9,7 @@ import {
   WORKER_SELECT,
   type LocationWorkerInput,
 } from "@/lib/inventory/location-workers";
+import { LOCATION_ORDER_BY } from "@/lib/inventory/count-latest";
 
 const LOCATION_SELECT = {
   id: true,
@@ -19,6 +20,7 @@ const LOCATION_SELECT = {
   targetProductCount: true,
   color: true,
   icon: true,
+  displayOrder: true,
   isActive: true,
   createdAt: true,
   workers: {
@@ -87,7 +89,7 @@ export async function GET(req: NextRequest) {
   try {
     const rows = await prismaAny.inventoryLocation.findMany({
       where: includeInactive ? {} : { isActive: true },
-      orderBy: { name: "asc" },
+      orderBy: LOCATION_ORDER_BY,
       select: LOCATION_SELECT,
     });
     return NextResponse.json({
@@ -131,6 +133,9 @@ export async function POST(req: NextRequest) {
     }
 
     const row = await prismaAny.$transaction(async (tx: typeof prismaAny) => {
+      const maxOrder = await tx.inventoryLocation.aggregate({
+        _max: { displayOrder: true },
+      });
       const created = await tx.inventoryLocation.create({
         data: {
           name,
@@ -140,6 +145,7 @@ export async function POST(req: NextRequest) {
           targetProductCount: (parsed.data?.targetProductCount as number | null | undefined) ?? null,
           color: (parsed.data?.color as string | null | undefined) ?? null,
           icon: (parsed.data?.icon as string | null | undefined) ?? null,
+          displayOrder: Number(maxOrder._max?.displayOrder ?? 0) + 1,
           isActive: typeof body.isActive === "boolean" ? body.isActive : true,
         },
         select: { id: true },

@@ -19,6 +19,7 @@ const LOCATION_SELECT = {
   targetProductCount: true,
   color: true,
   icon: true,
+  displayOrder: true,
   isActive: true,
   createdAt: true,
   workers: {

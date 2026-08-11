@@ -1,8 +1,8 @@
 "use client";
 
-import { ArrowRight, MapPin, Plus } from "lucide-react";
+import { ArrowRight, GripVertical, MapPin, Plus } from "lucide-react";
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useI18n } from "@/components/i18n-provider";
 
 type Loc = {
@@ -11,7 +11,10 @@ type Loc = {
   description: string | null;
   isActive: boolean;
   createdAt: string;
+  displayOrder?: number;
 };
+
+const ORDER_SAVE_MS = 400;
 
 export default function InventoryLocationsPage() {
   const { t, bcp47 } = useI18n();
@@ -23,6 +26,8 @@ export default function InventoryLocationsPage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
   const [editDesc, setEditDesc] = useState("");
+  const [dragId, setDragId] = useState<string | null>(null);
+  const orderTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const load = useCallback(async () => {
     const res = await fetch("/api/inventory/locations?all=1", { credentials: "same-origin" });
@@ -33,6 +38,43 @@ export default function InventoryLocationsPage() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  const persistOrder = useCallback((ordered: Loc[]) => {
+    if (orderTimer.current) clearTimeout(orderTimer.current);
+    orderTimer.current = setTimeout(() => {
+      void (async () => {
+        try {
+          await fetch("/api/inventory/locations/order", {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            credentials: "same-origin",
+            body: JSON.stringify({ locationIds: ordered.map((r) => r.id) }),
+          });
+        } catch {
+          /* סדר לא חוסם ניהול */
+        }
+      })();
+    }, ORDER_SAVE_MS);
+  }, []);
+
+  const reorder = useCallback(
+    (fromId: string, toId: string) => {
+      if (!fromId || !toId || fromId === toId) return;
+      setRows((prev) => {
+        const fromIdx = prev.findIndex((r) => r.id === fromId);
+        const toIdx = prev.findIndex((r) => r.id === toId);
+        if (fromIdx < 0 || toIdx < 0) return prev;
+        const next = [...prev];
+        const [item] = next.splice(fromIdx, 1);
+        if (!item) return prev;
+        next.splice(toIdx, 0, item);
+        const withOrder = next.map((r, i) => ({ ...r, displayOrder: i + 1 }));
+        persistOrder(withOrder);
+        return withOrder;
+      });
+    },
+    [persistOrder],
+  );
 
   const createLoc = async () => {
     const name = newName.trim();
@@ -132,12 +174,20 @@ export default function InventoryLocationsPage() {
         method: "DELETE",
         credentials: "same-origin",
       });
-      const j = (await res.json()) as { ok?: boolean; data?: { deactivated?: boolean }; error?: string };
+      const j = (await res.json()) as {
+        ok?: boolean;
+        data?: { deactivated?: boolean };
+        error?: string;
+      };
       if (!res.ok) {
         setNotice(j.error ?? t("ops.locations.msgDeleteFailed"));
         return;
       }
-      setNotice(j.data?.deactivated ? t("ops.locations.msgDeactivatedLinked") : t("ops.locations.msgDeleted"));
+      setNotice(
+        j.data?.deactivated
+          ? t("ops.locations.msgDeactivatedLinked")
+          : t("ops.locations.msgDeleted"),
+      );
       await load();
     } catch {
       setNotice(t("ops.locations.msgDeleteFailed"));
@@ -165,8 +215,9 @@ export default function InventoryLocationsPage() {
             <MapPin className="h-7 w-7 text-luxury-gold" aria-hidden />
             {t("ops.locations.pageTitle")}
           </h1>
-          <p className="mt-1 text-sm text-slate-600">
-            {t("ops.locations.pageDescription")}
+          <p className="mt-1 text-sm text-slate-600">{t("ops.locations.pageDescription")}</p>
+          <p className="mt-1 text-xs font-semibold text-slate-500">
+            {t("ops.locations.dragHint")}
           </p>
         </div>
       </div>
@@ -182,11 +233,21 @@ export default function InventoryLocationsPage() {
         <div className="mt-4 grid gap-3 md:grid-cols-2">
           <label>
             <span className={labelClass}>{t("ops.locations.fieldNameRequired")}</span>
-            <input value={newName} onChange={(e) => setNewName(e.target.value)} className={inputClass} placeholder={t("ops.locations.fieldNamePlaceholder")} />
+            <input
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+              className={inputClass}
+              placeholder={t("ops.locations.fieldNamePlaceholder")}
+            />
           </label>
           <label>
             <span className={labelClass}>{t("ops.locations.fieldDescriptionOptional")}</span>
-            <input value={newDesc} onChange={(e) => setNewDesc(e.target.value)} className={inputClass} placeholder={t("ops.locations.fieldDescriptionPlaceholder")} />
+            <input
+              value={newDesc}
+              onChange={(e) => setNewDesc(e.target.value)}
+              className={inputClass}
+              placeholder={t("ops.locations.fieldDescriptionPlaceholder")}
+            />
           </label>
         </div>
         <button
@@ -206,24 +267,71 @@ export default function InventoryLocationsPage() {
         </div>
         <div className="divide-y divide-slate-100">
           {rows.length === 0 ? (
-            <p className="p-6 text-sm font-semibold text-slate-500">{t("ops.locations.noLocationsYet")}</p>
+            <p className="p-6 text-sm font-semibold text-slate-500">
+              {t("ops.locations.noLocationsYet")}
+            </p>
           ) : (
             rows.map((r) => (
-              <div key={r.id} className={`flex flex-col gap-3 p-4 md:flex-row md:items-center md:justify-between ${!r.isActive ? "bg-slate-50/80 opacity-80" : ""}`}>
-                {editingId === r.id ? (
-                  <div className="grid flex-1 gap-2 md:grid-cols-2">
-                    <input value={editName} onChange={(e) => setEditName(e.target.value)} className={inputClass} />
-                    <input value={editDesc} onChange={(e) => setEditDesc(e.target.value)} className={inputClass} placeholder={t("ops.locations.fieldDescription")} />
-                  </div>
-                ) : (
-                  <div>
-                    <p className="font-black text-slate-900">{r.name}</p>
-                    {r.description ? <p className="mt-0.5 text-xs text-slate-600">{r.description}</p> : null}
-                    <p className="mt-1 text-[11px] font-semibold text-slate-400">
-                      {r.isActive ? t("ops.locations.active") : t("ops.locations.inactive")} · {t("ops.locations.createdOn", { date: new Date(r.createdAt).toLocaleDateString(bcp47) })}
-                    </p>
-                  </div>
-                )}
+              <div
+                key={r.id}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  if (dragId) {
+                    reorder(dragId, r.id);
+                    setDragId(null);
+                  }
+                }}
+                className={`flex flex-col gap-3 p-4 md:flex-row md:items-center md:justify-between ${
+                  !r.isActive ? "bg-slate-50/80 opacity-80" : ""
+                } ${dragId === r.id ? "ring-2 ring-[#6c4cff]/30" : ""}`}
+              >
+                <div className="flex min-w-0 flex-1 items-start gap-2">
+                  <button
+                    type="button"
+                    draggable
+                    onDragStart={(e) => {
+                      e.dataTransfer.effectAllowed = "move";
+                      setDragId(r.id);
+                    }}
+                    onDragEnd={() => setDragId(null)}
+                    className="mt-0.5 grid h-11 w-11 shrink-0 touch-none place-items-center rounded-xl border border-slate-200 bg-white text-slate-400 active:cursor-grabbing hover:text-slate-700"
+                    aria-label={t("ops.locations.dragHandle")}
+                    title={t("ops.locations.dragHandle")}
+                  >
+                    <GripVertical className="h-5 w-5" aria-hidden />
+                  </button>
+                  {editingId === r.id ? (
+                    <div className="grid flex-1 gap-2 md:grid-cols-2">
+                      <input
+                        value={editName}
+                        onChange={(e) => setEditName(e.target.value)}
+                        className={inputClass}
+                      />
+                      <input
+                        value={editDesc}
+                        onChange={(e) => setEditDesc(e.target.value)}
+                        className={inputClass}
+                        placeholder={t("ops.locations.fieldDescription")}
+                      />
+                    </div>
+                  ) : (
+                    <div className="min-w-0">
+                      <p className="font-black text-slate-900">{r.name}</p>
+                      {r.description ? (
+                        <p className="mt-0.5 text-xs text-slate-600">{r.description}</p>
+                      ) : null}
+                      <p className="mt-1 text-[11px] font-semibold text-slate-400">
+                        {r.isActive ? t("ops.locations.active") : t("ops.locations.inactive")} ·{" "}
+                        {t("ops.locations.createdOn", {
+                          date: new Date(r.createdAt).toLocaleDateString(bcp47),
+                        })}
+                      </p>
+                    </div>
+                  )}
+                </div>
                 <div className="flex flex-wrap gap-2">
                   {editingId === r.id ? (
                     <>
@@ -259,7 +367,9 @@ export default function InventoryLocationsPage() {
                         onClick={() => void toggleActive(r)}
                         className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-2 text-xs font-black text-amber-900 hover:bg-amber-100 disabled:opacity-50"
                       >
-                        {r.isActive ? t("ops.locations.actionDisable") : t("ops.locations.actionEnable")}
+                        {r.isActive
+                          ? t("ops.locations.actionDisable")
+                          : t("ops.locations.actionEnable")}
                       </button>
                       <button
                         type="button"

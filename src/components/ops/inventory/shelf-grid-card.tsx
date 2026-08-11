@@ -26,6 +26,7 @@ export type ShelfGridModel = {
   color?: string | null;
   isActive?: boolean;
   createdAt?: string | null;
+  displayOrder?: number;
   lastCountAt?: string | null;
   lastCountedByName?: string | null;
   countStatus?: CountLifecycleStatus;

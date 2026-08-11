@@ -1,11 +1,11 @@
 "use client";
 
-import { memo, type ReactNode } from "react";
+import { memo, useEffect, useState, type ReactNode } from "react";
 import {
   AlertTriangle,
+  CheckCircle2,
   GripVertical,
   Loader2,
-  MapPin,
   Minus,
   Package,
   Pencil,
@@ -19,6 +19,10 @@ import {
 } from "@/components/ops/inventory-count/count-product-status";
 import type { LocationWorkerDto } from "@/components/ops/inventory-count/types";
 import { selectQtyOnFocus } from "@/components/ops/inventory-count/utils";
+import {
+  locationMinimumStatus,
+  requiredQtyToMinimum,
+} from "@/lib/inventory/count-latest";
 
 export type CountRowVariant = "table" | "card";
 
@@ -50,13 +54,24 @@ export type ShelfCountLineRowProps = {
   /** הסרת השורה מהספירה — מנהל / בעל העסק בלבד */
   canRemove?: boolean;
   removing?: boolean;
+  /** מובייל: האם המשתמש אישר/שינה בסבב הנוכחי (שונה מ־prefill) */
+  sessionCounted?: boolean;
+  /** מובייל: כרטיס בפוקוס */
+  focused?: boolean;
+  /** מובייל: מוצר אחרון ברשימה המסוננת — enterKeyHint=done */
+  isLastInList?: boolean;
+  qtyInputRef?: (el: HTMLInputElement | null) => void;
   onDragStart?: () => void;
   onWorkerQtyChange: (workerId: string, value: string) => void;
   onActualChange: (value: string) => void;
   onBump: (delta: number) => void;
+  /** שמירת מינימום למוצר+מקום בלבד — לא משנה מלאי */
+  onMinimumChange?: (value: number) => void;
+  onQtyFocus?: () => void;
+  onQtyEnterNext?: () => void;
   onEditProduct: () => void;
   onRemoveFromCount?: () => void;
-  t: (key: string) => string;
+  t: (key: string, vars?: Record<string, string | number>) => string;
 };
 
 /** סה״כ נספר = סכום כמויות מיקומי הספירה (workers) — ללא שינוי לוגיקה */
@@ -151,29 +166,6 @@ function MetricCell({
   );
 }
 
-function StatBlock({
-  label,
-  value,
-  valueClassName,
-  className,
-}: {
-  label: string;
-  value: ReactNode;
-  valueClassName?: string;
-  className?: string;
-}) {
-  return (
-    <div
-      className={`rounded-xl bg-white/90 px-2 py-2 text-center ring-1 ring-[#e7ecf5] ${className ?? ""}`}
-    >
-      <span className="block text-[10px] font-bold text-slate-500">{label}</span>
-      <div className={`mt-0.5 text-sm font-black tabular-nums text-slate-800 ${valueClassName ?? ""}`}>
-        {value}
-      </div>
-    </div>
-  );
-}
-
 function CountSiteSquare({
   label,
   value,
@@ -225,14 +217,14 @@ function StepperButton({
       type="button"
       onClick={onClick}
       aria-label={label}
-      className="grid h-14 w-14 shrink-0 place-items-center rounded-2xl border-2 border-[#e7ecf5] bg-white text-slate-700 transition active:scale-95 active:bg-slate-100"
+      className="grid h-[52px] w-[52px] shrink-0 touch-manipulation place-items-center rounded-2xl border-2 border-[#e7ecf5] bg-white text-slate-700 transition active:scale-95 active:bg-slate-100 sm:h-14 sm:w-14"
     >
-      {dir === "inc" ? <Plus className="h-6 w-6" /> : <Minus className="h-6 w-6" />}
+      {dir === "inc" ? <Plus className="h-7 w-7" /> : <Minus className="h-7 w-7" />}
     </button>
   );
 }
 
-/** שורת כמות למובייל — ➖ [הזנה ידנית בלחיצה] ➕ */
+/** שורת כמות למובייל — ➖ [הזנה ידנית] ➕ — שדה ראשי גדול */
 function MobileQtyRow({
   label,
   value,
@@ -240,6 +232,11 @@ function MobileQtyRow({
   onStep,
   readOnly,
   tone = "slate",
+  enterKeyHint,
+  inputRef,
+  onFocus,
+  onEnterNext,
+  placeholder,
 }: {
   label: string;
   value: string;
@@ -247,14 +244,19 @@ function MobileQtyRow({
   onStep: (delta: number) => void;
   readOnly?: boolean;
   tone?: "slate" | "emerald";
+  enterKeyHint?: "next" | "done";
+  inputRef?: (el: HTMLInputElement | null) => void;
+  onFocus?: () => void;
+  onEnterNext?: () => void;
+  placeholder?: string;
 }) {
   const inputTone =
     tone === "emerald"
-      ? "border-emerald-300 focus:border-emerald-500 focus:ring-emerald-500/20"
-      : "border-slate-300 focus:border-[#6c4cff] focus:ring-[#6c4cff]/20";
+      ? "border-emerald-300 focus:border-emerald-500 focus:ring-emerald-500/25"
+      : "border-slate-300 focus:border-[#6c4cff] focus:ring-[#6c4cff]/25";
   return (
     <div>
-      <span className="mb-1 block truncate text-[11px] font-black leading-tight text-slate-700">
+      <span className="mb-1.5 block text-center text-[12px] font-black leading-tight text-slate-700">
         {label}
       </span>
       <div className="flex items-center gap-2">
@@ -262,17 +264,32 @@ function MobileQtyRow({
           <StepperButton dir="dec" onClick={() => onStep(-1)} label={`${label} -1`} />
         ) : null}
         <input
-          type="number"
-          inputMode="decimal"
+          ref={inputRef}
+          type="text"
+          inputMode="numeric"
+          pattern="[0-9]*"
           value={value}
-          onChange={(e) => onChange(e.target.value)}
-          onFocus={selectQtyOnFocus}
-          placeholder="—"
+          onChange={(e) => {
+            const next = e.target.value.replace(/[^\d.]/g, "");
+            onChange(next);
+          }}
+          onFocus={(e) => {
+            selectQtyOnFocus(e);
+            onFocus?.();
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              onEnterNext?.();
+            }
+          }}
+          placeholder={placeholder ?? "—"}
           min={0}
           readOnly={readOnly}
           disabled={readOnly}
+          enterKeyHint={enterKeyHint}
           aria-label={label}
-          className={`h-14 min-w-0 flex-1 rounded-2xl border-2 bg-white text-center text-2xl font-black tabular-nums text-slate-900 outline-none transition focus:ring-2 disabled:bg-slate-50 ${inputTone}`}
+          className={`h-[56px] min-w-0 flex-1 touch-manipulation rounded-2xl border-2 bg-white text-center text-[28px] font-black leading-none tabular-nums text-slate-900 outline-none transition focus:ring-2 disabled:bg-slate-50 ${inputTone}`}
         />
         {!readOnly ? (
           <StepperButton dir="inc" onClick={() => onStep(1)} label={`${label} +1`} />
@@ -359,20 +376,17 @@ function useCountDerived(
     systemQty,
   );
   const st = countStatusStyles(status);
-  const minimumStatus =
-    minimumQuantity <= 0
-      ? "ok"
-      : systemTotalQuantity < minimumQuantity
-        ? "below"
-        : systemTotalQuantity <= minimumQuantity * 1.2
-          ? "near"
-          : "ok";
+  /** מינימום מול הכמות שנספרה; אם אין ספירה — מול מלאי המיקום */
+  const onHandForMin =
+    actual !== null && !Number.isNaN(actual) ? actual : systemTotalQuantity;
+  const minEval = locationMinimumStatus(onHandForMin, minimumQuantity);
+  const minimumStatus = minEval.status === "below" ? "below" : "ok";
+  const shortageToMin = minEval.shortage;
+  const requiredNow = requiredQtyToMinimum(onHandForMin, minimumQuantity);
   const minimumClasses =
     minimumStatus === "below"
       ? "border-rose-200 bg-rose-50 text-rose-700"
-      : minimumStatus === "near"
-        ? "border-amber-200 bg-amber-50 text-amber-700"
-        : "border-emerald-200 bg-emerald-50 text-emerald-700";
+      : "border-emerald-200 bg-emerald-50 text-emerald-700";
   const diffLabel =
     diff === null ? "—" : diff === 0 ? "0" : diff > 0 ? `+${diff}` : String(diff);
   const diffTone =
@@ -399,12 +413,64 @@ function useCountDerived(
     status,
     st,
     minimumStatus,
+    shortageToMin,
+    requiredNow,
     minimumClasses,
     diffLabel,
     diffTone,
     diffBox,
     totalLabel,
   };
+}
+
+function MinimumQtyInput({
+  value,
+  onCommit,
+  readOnly,
+  className,
+}: {
+  value: number;
+  onCommit?: (n: number) => void;
+  readOnly?: boolean;
+  className?: string;
+}) {
+  const [raw, setRaw] = useState(String(value));
+  useEffect(() => {
+    setRaw(String(value));
+  }, [value]);
+
+  const commit = () => {
+    const n = Number(raw);
+    if (!Number.isFinite(n) || n < 0) {
+      setRaw(String(value));
+      return;
+    }
+    const next = Math.max(0, n);
+    setRaw(String(next));
+    if (next !== value) onCommit?.(next);
+  };
+
+  return (
+    <input
+      type="number"
+      inputMode="decimal"
+      min={0}
+      value={raw}
+      readOnly={readOnly || !onCommit}
+      disabled={readOnly || !onCommit}
+      onChange={(e) => setRaw(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          (e.target as HTMLInputElement).blur();
+        }
+      }}
+      onFocus={selectQtyOnFocus}
+      className={className}
+      aria-label="minimum"
+    />
+  );
 }
 
 function WorkerQtyInput({
@@ -499,7 +565,7 @@ function RemoveRowButton({
 function ShelfCountLineRowInner({
   name,
   unit,
-  locationName,
+  locationName: _locationName,
   systemQty,
   systemTotalQuantity,
   requiredQuantity,
@@ -513,14 +579,22 @@ function ShelfCountLineRowInner({
   draggable = false,
   canRemove = false,
   removing = false,
+  sessionCounted = false,
+  focused = false,
+  isLastInList = false,
+  qtyInputRef,
   onDragStart,
   onWorkerQtyChange,
   onActualChange,
   onBump,
+  onMinimumChange,
+  onQtyFocus,
+  onQtyEnterNext,
   onEditProduct,
   onRemoveFromCount,
   t,
 }: ShelfCountLineRowProps) {
+  const [minEditOpen, setMinEditOpen] = useState(false);
   const showRemove = !readOnly && canRemove && !!onRemoveFromCount;
   const hasWorkers = workers.length > 0;
   const workerSum = hasWorkers ? sumWorkerQuantities(workers, workerQtys) : null;
@@ -534,45 +608,65 @@ function ShelfCountLineRowInner({
     status,
     st,
     minimumStatus,
+    shortageToMin,
+    requiredNow,
     minimumClasses,
     diffLabel,
     diffTone,
     diffBox,
     totalLabel,
   } = useCountDerived(countedTotal, systemQty, systemTotalQuantity, minimumQuantity);
+  const requiredDisplay = requiredNow > 0 ? requiredNow : requiredQuantity;
+  const enterHint = isLastInList ? ("done" as const) : ("next" as const);
+  const qtyPlaceholder = sessionCounted ? "0" : t("qtyPlaceholder");
 
   if (variant === "card") {
+    const cardRing = focused
+      ? "border-[#6c4cff] bg-[#f5f3ff] shadow-md ring-2 ring-[#6c4cff]/35"
+      : sessionCounted
+        ? "border-[#e7ecf5] bg-white"
+        : "border-dashed border-slate-200 bg-slate-50/60";
+
     return (
-      <div className={`rounded-2xl border px-3 py-3 ${st.row}`}>
+      <div
+        data-count-card
+        className={`overflow-hidden rounded-2xl border px-3 py-3 transition-shadow ${cardRing}`}
+      >
         <div className="flex items-start gap-2">
-          <DragHandle draggable={draggable && !readOnly} onDragStart={onDragStart} />
-          <div className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-white text-[#6c4cff] shadow-sm ring-1 ring-[#e7ecf5]">
-            <Package className="h-5 w-5" strokeWidth={1.5} aria-hidden />
-          </div>
           <div className="min-w-0 flex-1 text-end">
-            <p className="break-words text-base font-black leading-tight text-slate-900">{name}</p>
-            <div className="mt-1 flex flex-wrap items-center justify-end gap-1.5">
-              {unit ? (
-                <span className="text-[11px] font-semibold text-slate-500">{unit}</span>
-              ) : null}
-              {locationName ? (
-                <span className="inline-flex max-w-full items-center gap-1 rounded-full bg-white/80 px-2 py-0.5 text-[10px] font-black text-slate-600 ring-1 ring-[#e7ecf5]">
-                  <MapPin className="h-3 w-3 shrink-0" aria-hidden />
-                  <span className="truncate">{locationName}</span>
-                </span>
+            <p className="break-words text-lg font-black leading-tight text-slate-900">{name}</p>
+            {unit ? (
+              <p className="mt-0.5 text-[11px] font-semibold text-slate-500">{unit}</p>
+            ) : null}
+            <div className="mt-1.5 flex flex-wrap items-center justify-end gap-2">
+              <span className="text-[12px] font-bold text-slate-500">
+                {t("minimumLabel", { n: minimumQuantity })}
+              </span>
+              {!readOnly && onMinimumChange ? (
+                <button
+                  type="button"
+                  onClick={() => setMinEditOpen((v) => !v)}
+                  className="inline-flex h-11 min-w-[44px] touch-manipulation items-center gap-1 rounded-xl px-2 text-[11px] font-bold text-slate-500 transition hover:bg-white hover:text-slate-700"
+                  aria-label={t("editMinimum")}
+                >
+                  <Pencil className="h-3.5 w-3.5" aria-hidden />
+                  {t("editMinimum")}
+                </button>
               ) : null}
             </div>
+            {minEditOpen && !readOnly && onMinimumChange ? (
+              <div className="mt-2 flex items-center justify-end gap-2">
+                <MinimumQtyInput
+                  value={minimumQuantity}
+                  onCommit={(n) => {
+                    onMinimumChange(n);
+                    setMinEditOpen(false);
+                  }}
+                  className="h-11 w-24 rounded-xl border border-slate-200 bg-white text-center text-sm font-black tabular-nums text-slate-700 outline-none focus:border-[#6c4cff]"
+                />
+              </div>
+            ) : null}
           </div>
-          {!readOnly ? (
-            <button
-              type="button"
-              onClick={onEditProduct}
-              className="grid h-11 w-11 shrink-0 place-items-center rounded-xl border border-[#e7ecf5] bg-white text-slate-600"
-              aria-label={t("editProduct")}
-            >
-              <Pencil className="h-4 w-4" />
-            </button>
-          ) : null}
           {showRemove ? (
             <RemoveRowButton
               size="lg"
@@ -583,79 +677,97 @@ function ShelfCountLineRowInner({
           ) : null}
         </div>
 
-        <div className="mt-3 grid grid-cols-2 gap-2">
-          <StatBlock label={t("systemTotal")} value={systemTotalQuantity} />
-          <StatBlock label={t("locationTotal")} value={systemQty} />
-          <StatBlock label={t("locationExpected")} value={requiredQuantity} />
-          <StatBlock
-            label={t("minimum")}
-            value={minimumQuantity}
-            className={minimumClasses}
-            valueClassName="text-inherit"
-          />
-        </div>
-
         {hasWorkers ? (
-          <div className="mt-3 rounded-2xl bg-slate-50/90 px-2.5 py-2.5 ring-1 ring-[#e7ecf5]">
-            <p className="mb-2 text-[11px] font-black text-[#6c4cff]">{t("countSites")}</p>
-            <div className="space-y-3">
-              {workers.map((w) => {
-                const raw = workerQtys[w.id] ?? "";
-                return (
-                  <MobileQtyRow
-                    key={w.id}
-                    label={countSiteLabel(w)}
-                    value={raw}
-                    readOnly={readOnly}
-                    onChange={(v) => onWorkerQtyChange(w.id, v)}
-                    onStep={(delta) => {
-                      const base = raw === "" ? 0 : Number(raw);
-                      const next = Math.max(0, (Number.isNaN(base) ? 0 : base) + delta);
-                      onWorkerQtyChange(w.id, String(next));
-                    }}
-                  />
-                );
-              })}
-            </div>
-            <p className="mt-2.5 border-t border-[#e7ecf5] pt-2 text-center text-[11px] font-black text-emerald-800">
-              {t("countedTotal")}:{" "}
-              <span className="tabular-nums text-base">{totalLabel}</span>
-            </p>
+          <div className="mt-3 space-y-3">
+            {workers.map((w, idx) => {
+              const raw = workerQtys[w.id] ?? "";
+              const isLastWorker = idx === workers.length - 1;
+              return (
+                <MobileQtyRow
+                  key={w.id}
+                  label={countSiteLabel(w)}
+                  value={raw}
+                  readOnly={readOnly}
+                  enterKeyHint={isLastWorker ? (isLastInList ? "done" : "next") : "next"}
+                  placeholder={qtyPlaceholder}
+                  inputRef={idx === 0 ? qtyInputRef : undefined}
+                  onFocus={onQtyFocus}
+                  onEnterNext={() => {
+                    if (!isLastWorker) {
+                      const root = (document.activeElement as HTMLElement | null)?.closest(
+                        "[data-count-card]",
+                      );
+                      const inputs = root?.querySelectorAll<HTMLInputElement>(
+                        "input[inputmode='numeric']",
+                      );
+                      const nextInput = inputs?.[idx + 1];
+                      if (nextInput) {
+                        nextInput.focus();
+                        nextInput.select();
+                        return;
+                      }
+                    }
+                    onQtyEnterNext?.();
+                  }}
+                  onChange={(v) => onWorkerQtyChange(w.id, v)}
+                  onStep={(delta) => {
+                    const base = raw === "" ? 0 : Number(raw);
+                    const next = Math.max(0, (Number.isNaN(base) ? 0 : base) + delta);
+                    onWorkerQtyChange(w.id, String(next));
+                  }}
+                />
+              );
+            })}
+            {sessionCounted ? (
+              <p className="text-center text-[11px] font-black text-emerald-800">
+                {t("countedTotal")}:{" "}
+                <span className="tabular-nums text-base">{totalLabel}</span>
+              </p>
+            ) : null}
           </div>
         ) : (
-          <div className="mt-3 rounded-2xl bg-emerald-50/70 px-2.5 py-2.5 ring-1 ring-emerald-200">
+          <div className="mt-3">
             <MobileQtyRow
-              label={t("countedTotal")}
+              label={t("countedQtyLabel")}
               value={actualRaw}
               readOnly={readOnly}
               tone="emerald"
+              enterKeyHint={enterHint}
+              placeholder={qtyPlaceholder}
+              inputRef={qtyInputRef}
+              onFocus={onQtyFocus}
+              onEnterNext={onQtyEnterNext}
               onChange={onActualChange}
               onStep={onBump}
             />
           </div>
         )}
 
-        <div className="mt-3 flex items-center justify-between gap-2 border-t border-[#e7ecf5]/80 pt-3">
-          <div className={`rounded-xl px-3 py-1.5 text-center ring-1 ${diffBox}`}>
-            <span className="text-[10px] font-bold text-slate-500">{t("diff")}</span>{" "}
-            <span className={`text-lg font-black tabular-nums ${diffTone}`}>{diffLabel}</span>
-          </div>
-          <div className="flex flex-wrap justify-end gap-1.5">
-            {minimumStatus === "below" ? (
-              <span className="inline-flex items-center gap-1 rounded-full bg-rose-50 px-2.5 py-1 text-[11px] font-black text-rose-700 ring-1 ring-rose-200">
-                <AlertTriangle className="h-3.5 w-3.5" aria-hidden />
-                {t("minimumWarning")}
-              </span>
-            ) : null}
-            <span className="inline-flex items-center gap-1 rounded-full bg-white/80 px-2.5 py-1 text-[11px] font-black text-slate-700 ring-1 ring-[#e7ecf5]">
-              {saving ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
-              ) : (
-                <span className={`h-1.5 w-1.5 rounded-full ${st.dot}`} />
-              )}
-              {countStatusLabel(status, t)}
+        <div className="mt-3 flex flex-wrap items-center justify-center gap-2">
+          {!sessionCounted ? (
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-3 py-1.5 text-[12px] font-black text-slate-600 ring-1 ring-slate-200">
+              <span className="h-2 w-2 rounded-full bg-slate-400" aria-hidden />
+              {t("sessionUncounted")}
             </span>
-          </div>
+          ) : minimumQuantity > 0 && minimumStatus === "below" ? (
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-rose-50 px-3 py-1.5 text-[12px] font-black text-rose-700 ring-1 ring-rose-200">
+              <AlertTriangle className="h-3.5 w-3.5" aria-hidden />
+              {t("shortageUnits", { n: shortageToMin })}
+            </span>
+          ) : countedTotal !== null && !Number.isNaN(countedTotal) && countedTotal === 0 ? (
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-3 py-1.5 text-[12px] font-black text-slate-700 ring-1 ring-slate-200">
+              <CheckCircle2 className="h-3.5 w-3.5" aria-hidden />
+              {t("sessionCountedZero")}
+            </span>
+          ) : (
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1.5 text-[12px] font-black text-emerald-700 ring-1 ring-emerald-200">
+              <CheckCircle2 className="h-3.5 w-3.5" aria-hidden />
+              {t("minimumOk")}
+            </span>
+          )}
+          {saving ? (
+            <Loader2 className="h-4 w-4 animate-spin text-[#6c4cff]" aria-hidden />
+          ) : null}
         </div>
       </div>
     );
@@ -704,7 +816,7 @@ function ShelfCountLineRowInner({
       </div>
 
       <MetricCell value={systemTotalQuantity} />
-      <MetricCell value={requiredQuantity} />
+      <MetricCell value={requiredDisplay} />
 
       {hasWorkers ? (
         <CountSitesPanel
@@ -729,8 +841,13 @@ function ShelfCountLineRowInner({
         </div>
       )}
 
-      <div className={`min-w-0 rounded-xl border px-1.5 py-2 text-center ${minimumClasses}`}>
-        <p className="text-sm font-black tabular-nums">{minimumQuantity}</p>
+      <div className={`min-w-0 rounded-xl border px-1 py-1.5 text-center ${minimumClasses}`}>
+        <MinimumQtyInput
+          value={minimumQuantity}
+          onCommit={!readOnly ? onMinimumChange : undefined}
+          readOnly={readOnly}
+          className="h-10 w-full border-0 bg-transparent text-center text-sm font-black tabular-nums text-inherit outline-none"
+        />
       </div>
 
       <div className={`min-w-0 rounded-xl px-1.5 py-2 text-center ring-1 ${diffBox}`}>
@@ -758,11 +875,18 @@ function ShelfCountLineRowInner({
             </button>
           </>
         ) : null}
-        {minimumStatus === "below" ? (
-          <span className="inline-flex items-center gap-1 rounded-full bg-rose-50 px-2 py-0.5 text-[10px] font-black text-rose-700 ring-1 ring-rose-200">
-            <AlertTriangle className="h-3 w-3" aria-hidden />
-            {t("minimumWarning")}
-          </span>
+        {minimumQuantity > 0 ? (
+          minimumStatus === "below" ? (
+            <span className="inline-flex items-center gap-1 rounded-full bg-rose-50 px-2 py-0.5 text-[10px] font-black text-rose-700 ring-1 ring-rose-200">
+              <AlertTriangle className="h-3 w-3" aria-hidden />
+              {t("minimumBelowWithShortage", { n: shortageToMin })}
+            </span>
+          ) : (
+            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-black text-emerald-700 ring-1 ring-emerald-200">
+              <CheckCircle2 className="h-3 w-3" aria-hidden />
+              {t("minimumOk")}
+            </span>
+          )
         ) : null}
         <span className="inline-flex items-center gap-1 rounded-full bg-white/80 px-2 py-0.5 text-[10px] font-black text-slate-700 ring-1 ring-[#e7ecf5]">
           {saving ? (

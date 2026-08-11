@@ -474,6 +474,8 @@ model InventoryLocation {
   /// צבע/אייקון לתצוגה בכרטיס (אופציונלי)
   color              String?
   icon               String?
+  /// סדר תצוגה גלובלי (Drag & Drop) — Source of Truth לכל מסכי Locations
+  displayOrder       Int                          @default(0)
   isActive           Boolean                      @default(true)
   createdAt          DateTime                     @default(now())
   /// שיוך ישן (1:N) — נשמר לתאימות לאחור
@@ -487,6 +489,7 @@ model InventoryLocation {
 
   @@index([locationType])
   @@index([isActive])
+  @@index([displayOrder])
 }
 
 /// Source of Truth — עובדים דינמיים לפי מיקום אחסון (ללא הגבלה)
@@ -559,6 +562,10 @@ model InventoryProductOnLocation {
   id                 String            @id @default(cuid())
   inventoryProductId String
   locationId         String
+  /// סדר מוצר בתוך המקום (Drag & Drop) — לא גלובלי
+  displayOrder       Int               @default(0)
+  /// מינימום מלאי למוצר בתוך המקום בלבד (לא גלובלי). התראה בלבד — לא משנה כמות.
+  minimumQuantity    Float             @default(0)
   createdAt          DateTime          @default(now())
   product            InventoryProduct  @relation(fields: [inventoryProductId], references: [id], onDelete: Cascade)
   location           InventoryLocation @relation(fields: [locationId], references: [id], onDelete: Cascade)
@@ -566,6 +573,7 @@ model InventoryProductOnLocation {
   @@unique([inventoryProductId, locationId])
   @@index([locationId])
   @@index([inventoryProductId])
+  @@index([locationId, displayOrder])
 }
 
 /// סשן ספירה (קבוצת שורות) — היסטוריה / PDF / Excel. Additive; לא נוגע בספירות ישנות.

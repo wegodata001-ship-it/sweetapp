@@ -35,6 +35,7 @@ import {
   sumWorkerQuantities,
   type WorkerQtyMap,
 } from "./shelf-count-line-row";
+import { requiredQtyToMinimum } from "@/lib/inventory/count-latest";
 import { LocationWorkersModal } from "./location-workers-modal";
 import { ProductEditModal, type ProductEditValues } from "./product-edit-modal";
 import { CountRowRemoveConfirmModal } from "./count-row-remove-confirm-modal";
@@ -248,6 +249,14 @@ function ShelfCountModalInner({
   const [savingAll, setSavingAll] = useState(false);
   /** רק מוצרים שהמשתמש שינה — prefill לא נחשב dirty */
   const [touchedIds, setTouchedIds] = useState<Set<string>>(new Set());
+  /**
+   * מוצרים שאושרו/נערכו בסבב הנוכחי (כולל אחרי שמירה) —
+   * מבדיל «לא נספר» מ־«נספר: 0». prefill לבדו לא מסמן.
+   */
+  const [sessionCountedIds, setSessionCountedIds] = useState<Set<string>>(new Set());
+  /** מובייל: הכול | לא נספר | מתחת למינימום */
+  const [mobileFilter, setMobileFilter] = useState<"all" | "uncounted" | "belowMin">("all");
+  const [focusedProductId, setFocusedProductId] = useState<string | null>(null);
   const [confirmCloseOpen, setConfirmCloseOpen] = useState(false);
   /** ספירות שכבר נשמרו היום למיקום — בסיס לאזהרת ספירה כפולה */
   const [existingCountToday, setExistingCountToday] = useState<ExistingCountToday | null>(null);
@@ -262,6 +271,10 @@ function ShelfCountModalInner({
   const [editProduct, setEditProduct] = useState<ProductEditValues | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /** סיכום מוצרים מתחת למינימום אחרי שמירת ספירה */
+  const [belowMinReport, setBelowMinReport] = useState<
+    { id: string; name: string; counted: number; minimum: number; shortage: number }[] | null
+  >(null);
   const [scanQ, setScanQ] = useState("");
   const [scrollTop, setScrollTop] = useState(0);
   const [viewportH, setViewportH] = useState(480);
@@ -278,12 +291,19 @@ function ShelfCountModalInner({
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const orderTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const rowRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+  const qtyInputRefs = useRef<Map<string, HTMLInputElement>>(new Map());
   const loadingMoreRef = useRef(false);
   const tRef = useRef(t);
   tRef.current = t;
 
   const markTouched = useCallback((productId: string) => {
     setTouchedIds((prev) => {
+      if (prev.has(productId)) return prev;
+      const next = new Set(prev);
+      next.add(productId);
+      return next;
+    });
+    setSessionCountedIds((prev) => {
       if (prev.has(productId)) return prev;
       const next = new Set(prev);
       next.add(productId);
@@ -303,6 +323,9 @@ function ShelfCountModalInner({
 
     setSavingIds(new Set());
     setTouchedIds(new Set());
+    setSessionCountedIds(new Set());
+    setMobileFilter("all");
+    setFocusedProductId(null);
     setDragProductId(null);
     setConfirmCloseOpen(false);
     setWorkersOpen(false);
@@ -312,6 +335,7 @@ function ShelfCountModalInner({
     setLastRemoved(null);
     setNotice(null);
     setError(null);
+    setBelowMinReport(null);
     setScanQ("");
     setScrollTop(0);
     setExporting(null);
@@ -816,22 +840,72 @@ function ShelfCountModalInner({
     }
   }, [lastRemoved, roundParams, scheduleShelfRefresh, t, workers]);
 
-  const sortedProducts = useMemo(() => {
-    const q = scanQ.trim().toLowerCase();
-    if (!q) return products;
-    const hit = products.filter(
-      (p) =>
+  const hasWorkers = workers.length > 0;
+
+  const productMatchesSearch = useCallback(
+    (p: InventoryCountProductRow, q: string) => {
+      if (!q) return true;
+      return (
         p.id === q ||
         (p.barcode ?? "").toLowerCase() === q ||
         (p.sku ?? "").toLowerCase() === q ||
         p.name.toLowerCase().includes(q) ||
         (p.nameAr ?? "").toLowerCase().includes(q) ||
-        (p.nameEn ?? "").toLowerCase().includes(q),
-    );
-    if (hit.length === 0) return products;
-    const hitSet = new Set(hit.map((p) => p.id));
-    return [...hit, ...products.filter((p) => !hitSet.has(p.id))];
-  }, [products, scanQ]);
+        (p.nameEn ?? "").toLowerCase().includes(q)
+      );
+    },
+    [],
+  );
+
+  const getCountedQty = useCallback(
+    (productId: string): number | null => {
+      if (workers.length > 0) {
+        return sumWorkerQuantities(workers, workerQtyByProduct[productId] ?? {});
+      }
+      const raw = actualById[productId];
+      if (raw === "" || raw == null) return null;
+      const n = Number(raw);
+      return Number.isFinite(n) ? n : null;
+    },
+    [actualById, workerQtyByProduct, workers],
+  );
+
+  const sortedProducts = useMemo(() => {
+    const q = scanQ.trim().toLowerCase();
+    let list = products;
+    if (q) {
+      const hit = products.filter((p) => productMatchesSearch(p, q));
+      // מובייל: סינון אמיתי. דסקטופ: התאמות בראש (סריקה) בלי להסתיר את השאר.
+      if (isMobile) {
+        list = hit;
+      } else if (hit.length > 0) {
+        const hitSet = new Set(hit.map((p) => p.id));
+        list = [...hit, ...products.filter((p) => !hitSet.has(p.id))];
+      }
+    }
+    if (!isMobile || mobileFilter === "all") return list;
+    if (mobileFilter === "uncounted") {
+      return list.filter((p) => !sessionCountedIds.has(p.id));
+    }
+    // belowMin — לפי הכמות הנוכחית בשדה (כולל prefill) מול מינימום המיקום
+    return list.filter((p) => {
+      if (!(p.minimumQuantity > 0)) return false;
+      const counted = getCountedQty(p.id);
+      const onHand =
+        counted !== null && Number.isFinite(counted)
+          ? counted
+          : (p.systemTotalQuantity ?? p.previousQuantity);
+      return onHand < p.minimumQuantity;
+    });
+  }, [
+    getCountedQty,
+    isMobile,
+    mobileFilter,
+    productMatchesSearch,
+    products,
+    scanQ,
+    sessionCountedIds,
+  ]);
 
   /** הכרטיס שהסריקה הגיעה אליו — מודגש כל עוד יש טקסט חיפוש */
   const highlightId =
@@ -842,7 +916,39 @@ function ShelfCountModalInner({
     rowRefs.current.get(highlightId)?.scrollIntoView({ block: "nearest", behavior: "smooth" });
   }, [highlightId]);
 
-  const useVirtual = sortedProducts.length > 40;
+  const countedProgress = useMemo(() => {
+    const total = listTotal > 0 ? listTotal : products.length;
+    const done = sessionCountedIds.size;
+    const pct = total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 0;
+    return { done, total, pct };
+  }, [listTotal, products.length, sessionCountedIds]);
+
+  const focusNextProduct = useCallback(
+    (currentId: string) => {
+      markTouched(currentId);
+      const idx = sortedProducts.findIndex((p) => p.id === currentId);
+      if (idx < 0) return;
+      const next = sortedProducts[idx + 1];
+      if (!next) {
+        qtyInputRefs.current.get(currentId)?.blur();
+        setFocusedProductId(null);
+        return;
+      }
+      setFocusedProductId(next.id);
+      requestAnimationFrame(() => {
+        rowRefs.current.get(next.id)?.scrollIntoView({ block: "center", behavior: "smooth" });
+        const input = qtyInputRefs.current.get(next.id);
+        if (input) {
+          input.focus();
+          input.select();
+        }
+      });
+    },
+    [markTouched, sortedProducts],
+  );
+
+  /** במובייל — בלי virtual list כדי ש־Next/פוקוס יישארו יציבים */
+  const useVirtual = !isMobile && sortedProducts.length > 40;
   const totalH = sortedProducts.length * rowHeight;
   const startIdx = useVirtual ? Math.max(0, Math.floor(scrollTop / rowHeight) - 2) : 0;
   const endIdx = useVirtual
@@ -851,7 +957,6 @@ function ShelfCountModalInner({
   const visible = sortedProducts.slice(startIdx, endIdx);
   const padTop = startIdx * rowHeight;
   const padBottom = Math.max(0, (sortedProducts.length - endIdx) * rowHeight);
-  const hasWorkers = workers.length > 0;
   const dirtyProductIds = touchedIds;
   const hasDirtyChanges = dirtyProductIds.size > 0;
   const canDragReorder = !sessionId && !readOnly && !scanQ.trim();
@@ -874,8 +979,16 @@ function ShelfCountModalInner({
     let below = 0;
     for (const product of products) {
       if (product.minimumQuantity <= 0) continue;
-      const systemTotal = product.systemTotalQuantity ?? product.previousQuantity;
-      if (systemTotal < product.minimumQuantity) below += 1;
+      const counted = hasWorkers
+        ? sumWorkerQuantities(workers, workerQtyByProduct[product.id] ?? {})
+        : actualById[product.id] === "" || actualById[product.id] == null
+          ? null
+          : Number(actualById[product.id]);
+      const onHand =
+        counted !== null && Number.isFinite(counted)
+          ? counted
+          : (product.systemTotalQuantity ?? product.previousQuantity);
+      if (onHand < product.minimumQuantity) below += 1;
     }
     const total = listTotal > 0 ? listTotal : products.length;
     return {
@@ -884,7 +997,59 @@ function ShelfCountModalInner({
       ok: Math.max(0, products.length - below),
       loaded: products.length,
     };
-  }, [listTotal, products]);
+  }, [actualById, hasWorkers, listTotal, products, workerQtyByProduct, workers]);
+
+  const saveLocationMinimum = useCallback(
+    async (productId: string, minimumQuantity: number) => {
+      if (!locationId?.trim()) {
+        setError(t("minimumSaveNeedsLocation"));
+        return;
+      }
+      setError(null);
+      try {
+        const res = await fetch(
+          `/api/inventory/shelves/${encodeURIComponent(locationId.trim())}/products`,
+          {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            credentials: "same-origin",
+            body: JSON.stringify({
+              productId,
+              shelfName: shelfName.trim() || undefined,
+              minimumQuantity,
+            }),
+          },
+        );
+        const j = (await res.json()) as {
+          ok?: boolean;
+          error?: string;
+          data?: { minimumQuantity?: number };
+        };
+        if (!res.ok || !j.ok) {
+          setError(j.error ?? t("minimumSaveFailed"));
+          return;
+        }
+        const savedMin = Number(j.data?.minimumQuantity ?? minimumQuantity);
+        setProducts((prev) =>
+          prev.map((row) => {
+            if (row.id !== productId) return row;
+            const onHand = row.systemTotalQuantity ?? row.previousQuantity;
+            const required = requiredQtyToMinimum(onHand, savedMin);
+            return {
+              ...row,
+              minimumQuantity: savedMin,
+              systemShortage: required,
+              requiredQuantity: required,
+            };
+          }),
+        );
+        setNotice(t("minimumSaved"));
+      } catch {
+        setError(t("minimumSaveFailed"));
+      }
+    },
+    [locationId, shelfName, t],
+  );
 
   /**
    * עודפים — צבירה של אותו סטטוס שכל כרטיס כבר מציג (נספר > הספירה הקודמת במיקום).
@@ -990,6 +1155,13 @@ function ShelfCountModalInner({
         }
 
         const savedRows = j.data?.rows ?? [];
+        let report: {
+          id: string;
+          name: string;
+          counted: number;
+          minimum: number;
+          shortage: number;
+        }[] = [];
         setProducts((prev) => {
           const next = prev.map((product) => {
             const saved = savedRows.find((row) => row.inventoryProductId === product.id);
@@ -999,7 +1171,7 @@ function ShelfCountModalInner({
             const required =
               saved.requiredQuantity ??
               saved.systemShortage ??
-              Math.max(0, (product.minimumQuantity || 0) - systemTotal);
+              requiredQtyToMinimum(systemTotal, product.minimumQuantity || 0);
             return {
               ...product,
               previousQuantity: saved.currentQuantity,
@@ -1013,12 +1185,28 @@ function ShelfCountModalInner({
                 })) ?? product.lastWorkerQtys,
             };
           });
+          report = next
+            .map((product) => {
+              const counted = product.previousQuantity;
+              const minimum = product.minimumQuantity || 0;
+              const shortage = requiredQtyToMinimum(counted, minimum);
+              if (!(minimum > 0) || shortage <= 0) return null;
+              return {
+                id: product.id,
+                name: product.name,
+                counted,
+                minimum,
+                shortage,
+              };
+            })
+            .filter((r): r is NonNullable<typeof r> => !!r);
           // אחרי שמירה — ברירת המחדל = מה שנשמר (לא איפוס ל־0)
           const prefill = buildPrefillFromLastCount(next, workers);
           setActualById(prefill.actual);
           setWorkerQtyByProduct(prefill.workerQty);
           return next;
         });
+        setBelowMinReport(report);
         if (j.data?.sessionId) setActiveSessionId(j.data.sessionId);
         if (j.data?.sessionNumber != null) setSessionNumber(j.data.sessionNumber);
         setTouchedIds(new Set());
@@ -1142,21 +1330,42 @@ function ShelfCountModalInner({
               <X className="h-5 w-5" />
             </button>
             <div className="min-w-0 flex-1 text-end">
-              <p className="text-[10px] font-bold uppercase tracking-wide text-[#6c4cff]">
+              <p className="hidden text-[10px] font-bold uppercase tracking-wide text-[#6c4cff] sm:block">
                 {t("kicker")}
                 {isReadOnly ? ` · ${t("readOnlyBadge")}` : ""}
               </p>
-              <h2 className="truncate text-base font-black text-slate-900 sm:text-xl">
+              <h2 className="truncate text-lg font-black text-slate-900 sm:text-xl">
                 {shelfName}
               </h2>
-              {sessionNumber != null ? (
+              {isMobile ? (
+                <p className="mt-0.5 text-[12px] font-bold text-slate-600">
+                  {t("countProgressLabel", {
+                    done: countedProgress.done,
+                    total: countedProgress.total,
+                  })}
+                </p>
+              ) : sessionNumber != null ? (
                 <p className="truncate text-[11px] font-bold text-slate-500 sm:text-xs">
                   {t("sessionNumber", { n: sessionNumber })}
                 </p>
               ) : null}
             </div>
-            {!isReadOnly ? saveButton("h-12 shrink-0 px-4 text-sm") : null}
+            {!isReadOnly && !isMobile ? saveButton("h-12 shrink-0 px-4 text-sm") : null}
           </div>
+
+          {isMobile ? (
+            <div className="mt-2.5">
+              <div className="h-2.5 overflow-hidden rounded-full bg-slate-100 ring-1 ring-slate-200/80">
+                <div
+                  className="h-full rounded-full bg-[#6c4cff] transition-[width] duration-300"
+                  style={{ width: `${countedProgress.pct}%` }}
+                />
+              </div>
+              <p className="mt-1 text-center text-[11px] font-black tabular-nums text-slate-500">
+                {countedProgress.pct}%
+              </p>
+            </div>
+          ) : null}
 
           {/* פעולות משניות — במובייל הן יורדות לסרגל התחתון */}
           <div className="mt-3 hidden flex-wrap gap-2 md:flex">
@@ -1219,8 +1428,8 @@ function ShelfCountModalInner({
             ) : null}
           </div>
 
-          {/* KPI — שתי שורות מסודרות במובייל, שורה אחת מ־sm */}
-          <div className="mt-2.5 grid grid-cols-2 gap-2 text-center text-[11px] font-black sm:grid-cols-4">
+          {/* KPI — דסקטופ בלבד; במובייל progress + פילטרים */}
+          <div className="mt-2.5 hidden grid-cols-4 gap-2 text-center text-[11px] font-black md:grid">
             <div className="rounded-2xl bg-slate-50 px-2 py-1.5 text-slate-700 ring-1 ring-slate-200">
               <p className="truncate text-[10px] text-slate-500">{t("summaryTotal")}</p>
               <p className="text-base tabular-nums">{minimumSummary.total}</p>
@@ -1238,6 +1447,48 @@ function ShelfCountModalInner({
               <p className="text-base tabular-nums">{surplusCount}</p>
             </div>
           </div>
+
+          {belowMinReport && belowMinReport.length > 0 ? (
+            <div className="mt-2 rounded-2xl border border-rose-200 bg-rose-50/90 p-3 text-end">
+              <div className="flex items-start justify-between gap-2">
+                <button
+                  type="button"
+                  onClick={() => setBelowMinReport(null)}
+                  className="text-[11px] font-bold text-rose-700 underline"
+                >
+                  {t("dismissBelowMin")}
+                </button>
+                <div>
+                  <p className="text-xs font-black text-rose-800">{t("belowMinTitle")}</p>
+                  <p className="mt-0.5 text-[11px] font-bold text-rose-700">
+                    {t("belowMinKpi", { n: belowMinReport.length })}
+                  </p>
+                </div>
+              </div>
+              <div className="mt-2 overflow-x-auto">
+                <table className="w-full min-w-[16rem] text-[11px] font-bold text-rose-900">
+                  <thead>
+                    <tr className="text-rose-700">
+                      <th className="px-1 py-1 text-end">{t("productCol")}</th>
+                      <th className="px-1 py-1 text-center">{t("countedTotal")}</th>
+                      <th className="px-1 py-1 text-center">{t("minimum")}</th>
+                      <th className="px-1 py-1 text-center">{t("shortageCol")}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {belowMinReport.map((r) => (
+                      <tr key={r.id} className="border-t border-rose-200/70">
+                        <td className="px-1 py-1 text-end">{r.name}</td>
+                        <td className="px-1 py-1 text-center tabular-nums">{r.counted}</td>
+                        <td className="px-1 py-1 text-center tabular-nums">{r.minimum}</td>
+                        <td className="px-1 py-1 text-center tabular-nums">{r.shortage}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ) : null}
 
           {notice ? (
             <p className="mt-2 inline-flex items-center gap-1 rounded-full bg-emerald-50 px-3 py-1 text-xs font-black text-emerald-700 ring-1 ring-emerald-200">
@@ -1297,15 +1548,15 @@ function ShelfCountModalInner({
           <div className="relative mt-2.5">
             <ScanLine className="pointer-events-none absolute top-1/2 h-5 w-5 -translate-y-1/2 text-[#6c4cff] ltr:left-3 rtl:right-3" />
             <input
-              type="text"
+              type="search"
               value={scanQ}
               onChange={(e) => setScanQ(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === "Enter") e.preventDefault();
               }}
-              placeholder={t("scanPlaceholder")}
+              placeholder={isMobile ? t("mobileSearchPlaceholder") : t("scanPlaceholder")}
               enterKeyHint="search"
-              className="h-12 w-full rounded-2xl border border-[#e7ecf5] bg-[#f6f8fc] text-sm font-bold outline-none focus:border-[#6c4cff] focus:ring-2 focus:ring-[#6c4cff]/15 ltr:pl-11 ltr:pr-11 rtl:pl-11 rtl:pr-11"
+              className="h-12 w-full touch-manipulation rounded-2xl border border-[#e7ecf5] bg-[#f6f8fc] text-sm font-bold outline-none focus:border-[#6c4cff] focus:ring-2 focus:ring-[#6c4cff]/15 ltr:pl-11 ltr:pr-11 rtl:pl-11 rtl:pr-11"
               /* אין autoFocus במובייל — המקלדת הייתה נפתחת מיד ומכסה את המסך */
               autoFocus={!isMobile}
             />
@@ -1314,18 +1565,48 @@ function ShelfCountModalInner({
                 type="button"
                 onClick={() => setScanQ("")}
                 aria-label={t("clearSearch")}
-                className="absolute top-1/2 grid h-9 w-9 -translate-y-1/2 place-items-center rounded-xl text-slate-400 transition hover:bg-slate-100 hover:text-slate-600 ltr:right-1.5 rtl:left-1.5"
+                className="absolute top-1/2 grid h-11 w-11 -translate-y-1/2 place-items-center rounded-xl text-slate-400 transition hover:bg-slate-100 hover:text-slate-600 ltr:right-0.5 rtl:left-0.5"
               >
                 <X className="h-4 w-4" />
               </button>
             ) : null}
           </div>
+
+          {isMobile ? (
+            <div className="mt-2.5 flex gap-1.5" role="tablist" aria-label={t("mobileFiltersLabel")}>
+              {(
+                [
+                  ["all", t("filterAll")],
+                  ["uncounted", t("filterUncounted")],
+                  ["belowMin", t("filterBelowMin")],
+                ] as const
+              ).map(([key, label]) => {
+                const active = mobileFilter === key;
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    role="tab"
+                    aria-selected={active}
+                    onClick={() => setMobileFilter(key)}
+                    className={`h-11 min-w-0 flex-1 touch-manipulation truncate rounded-2xl px-2 text-[11px] font-black transition ${
+                      active
+                        ? "bg-[#6c4cff] text-white shadow-sm"
+                        : "bg-slate-50 text-slate-600 ring-1 ring-slate-200"
+                    }`}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+          ) : null}
         </header>
 
         <div
           ref={listRef}
           className={`min-h-0 flex-1 overflow-y-auto overscroll-contain p-3 sm:p-4 ${
-            isMobile ? "overflow-x-hidden" : "overflow-x-auto"
+            isMobile ? "overflow-x-hidden pb-28" : "overflow-x-auto"
           }`}
           onScroll={(e) => {
             const el = e.currentTarget;
@@ -1352,7 +1633,7 @@ function ShelfCountModalInner({
               ) : null}
               {useVirtual ? <div style={{ height: padTop }} aria-hidden /> : null}
               <div className={isMobile ? "space-y-3" : "space-y-2"}>
-                {visible.map((row) => {
+                {visible.map((row, visibleIdx) => {
                   const requiredQty =
                     row.requiredQuantity ??
                     row.systemShortage ??
@@ -1361,11 +1642,13 @@ function ShelfCountModalInner({
                       (row.minimumQuantity || 0) -
                         (row.systemTotalQuantity ?? row.previousQuantity),
                     );
+                  const listIdx = useVirtual ? startIdx + visibleIdx : visibleIdx;
+                  const isLastInList = listIdx === sortedProducts.length - 1;
                   return (
                     <div
                       key={row.id}
                       className={
-                        highlightId === row.id
+                        highlightId === row.id && !isMobile
                           ? "rounded-2xl ring-2 ring-[#6c4cff] ring-offset-2 transition-shadow"
                           : undefined
                       }
@@ -1400,9 +1683,16 @@ function ShelfCountModalInner({
                         readOnly={isReadOnly}
                         variant={rowVariant}
                         showColumnLabels={false}
-                        draggable={canDragReorder}
+                        draggable={canDragReorder && !isMobile}
                         canRemove={canRemoveRow}
                         removing={removingId === row.id}
+                        sessionCounted={sessionCountedIds.has(row.id)}
+                        focused={isMobile && focusedProductId === row.id}
+                        isLastInList={isLastInList}
+                        qtyInputRef={(el) => {
+                          if (el) qtyInputRefs.current.set(row.id, el);
+                          else qtyInputRefs.current.delete(row.id);
+                        }}
                         onRemoveFromCount={() => {
                           if (isReadOnly || !canRemoveRow) return;
                           setRemoveTarget({ id: row.id, name: row.name });
@@ -1417,6 +1707,11 @@ function ShelfCountModalInner({
                         onBump={(d) => {
                           if (!isReadOnly) bump(row.id, row.previousQuantity, d);
                         }}
+                        onMinimumChange={(min) => {
+                          if (!isReadOnly) void saveLocationMinimum(row.id, min);
+                        }}
+                        onQtyFocus={() => setFocusedProductId(row.id)}
+                        onQtyEnterNext={() => focusNextProduct(row.id)}
                         onEditProduct={() => {
                           if (isReadOnly) return;
                           setEditProduct({
@@ -1443,57 +1738,34 @@ function ShelfCountModalInner({
           )}
         </div>
 
-        {/* סרגל פעולות תחתון — במובייל בלבד, מלווה את המסך לאורך כל הספירה */}
-        <footer className="sticky bottom-0 z-10 shrink-0 border-t border-[#e7ecf5]/80 bg-white/95 px-3 py-2.5 pb-[max(0.625rem,env(safe-area-inset-bottom))] backdrop-blur-md md:hidden">
-          <div className="flex items-stretch gap-1.5">
-            {!isReadOnly ? saveButton("h-12 flex-1 whitespace-nowrap px-2 text-xs") : null}
-            {canViewSummaries ? (
-              <>
+        {/* Sticky save — מובייל: התקדמות + שמירה; פעולות משניות בשורה דקה */}
+        <footer className="sticky bottom-0 z-10 shrink-0 border-t border-[#e7ecf5]/80 bg-white/95 px-3 pt-2 pb-[max(0.625rem,env(safe-area-inset-bottom))] backdrop-blur-md md:hidden">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <p className="text-[12px] font-black tabular-nums text-slate-700">
+              {t("countProgressLabel", {
+                done: countedProgress.done,
+                total: countedProgress.total,
+              })}
+            </p>
+            <div className="flex items-center gap-1">
+              {canViewSummaries ? (
                 <MobileBarButton
                   label={t("openSummaries")}
                   icon={<BarChart3 className="h-5 w-5" aria-hidden />}
                   onClick={() => setSummariesOpen(true)}
                 />
+              ) : null}
+              {!isReadOnly ? (
                 <MobileBarButton
-                  label={t("sendSummaryEmail")}
-                  icon={<Mail className="h-5 w-5" aria-hidden />}
-                  onClick={() => setSummaryEmailOpen(true)}
+                  label={t("editWorkers")}
+                  icon={<Settings2 className="h-5 w-5" aria-hidden />}
+                  disabled={!locationId}
+                  onClick={() => setWorkersOpen(true)}
                 />
-              </>
-            ) : null}
-            <MobileBarButton
-              label={t("exportPdf")}
-              icon={
-                exporting === "pdf" ? (
-                  <Loader2 className="h-5 w-5 animate-spin" aria-hidden />
-                ) : (
-                  <FileText className="h-5 w-5" aria-hidden />
-                )
-              }
-              disabled={!activeSessionId || exporting !== null}
-              onClick={() => void exportSession("pdf")}
-            />
-            <MobileBarButton
-              label={t("exportExcel")}
-              icon={
-                exporting === "xlsx" ? (
-                  <Loader2 className="h-5 w-5 animate-spin" aria-hidden />
-                ) : (
-                  <FileSpreadsheet className="h-5 w-5" aria-hidden />
-                )
-              }
-              disabled={!activeSessionId || exporting !== null}
-              onClick={() => void exportSession("xlsx")}
-            />
-            {!isReadOnly ? (
-              <MobileBarButton
-                label={t("editWorkers")}
-                icon={<Settings2 className="h-5 w-5" aria-hidden />}
-                disabled={!locationId}
-                onClick={() => setWorkersOpen(true)}
-              />
-            ) : null}
+              ) : null}
+            </div>
           </div>
+          {!isReadOnly ? saveButton("h-14 w-full text-base") : null}
         </footer>
 
         <footer className="sticky bottom-0 z-10 hidden shrink-0 items-center justify-between gap-2 border-t border-[#e7ecf5]/80 bg-white/95 px-3 py-3 backdrop-blur-md md:flex md:px-5">
@@ -1607,24 +1879,22 @@ function ShelfCountModalInner({
           setProducts((prev) =>
             prev.map((row) => {
               if (row.id !== p.id) return row;
-              const minimumQuantity = p.minimumQuantity;
-              const systemTotal = row.systemTotalQuantity ?? row.previousQuantity;
-              const systemShortage =
-                minimumQuantity > 0 ? Math.max(0, minimumQuantity - systemTotal) : 0;
               /** nameAr/nameEn/barcode/sku נשמרים מ-row — הטופס אינו עורך אותם */
               return {
                 ...row,
                 name: p.name,
                 nameHe: p.nameHe,
                 unit: p.unit || null,
-                minimumQuantity,
                 maximumQuantity: p.maximumQuantity,
-                systemShortage,
-                requiredQuantity: systemShortage,
               };
             }),
           );
-          setNotice(t("productUpdated"));
+          // מינימום נשמר ל־product+location בלבד (לא משנה מלאי / מחסנים אחרים)
+          if (locationId?.trim()) {
+            void saveLocationMinimum(p.id, p.minimumQuantity);
+          } else {
+            setNotice(t("productUpdated"));
+          }
         }}
         t={t}
       />
