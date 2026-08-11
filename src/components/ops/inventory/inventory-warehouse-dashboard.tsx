@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
   BarChart3,
@@ -55,10 +55,23 @@ import {
 type SortKey = "displayOrder" | "name" | "createdAt" | "productCount" | "matchPct" | "lastCountAt";
 type CountFilter = "" | CountLifecycleStatus;
 
+const SHELF_ORDER_SAVE_MS = 400;
+
 function canManageInventory(user: { role: string; permissions: string[] } | null) {
   if (!user) return false;
   if (user.role === "SUPER_ADMIN" || user.role === "ADMIN") return true;
   return user.permissions.includes("inventory");
+}
+
+function shelfRowKey(s: { locationId?: string | null; name: string }) {
+  return s.locationId?.trim() || `name:${s.name}`;
+}
+
+function sortByDisplayOrder(a: ShelfSummary, b: ShelfSummary) {
+  const ao = a.displayOrder ?? 0;
+  const bo = b.displayOrder ?? 0;
+  if (ao !== bo) return ao - bo;
+  return a.name.localeCompare(b.name, "he", { sensitivity: "base" });
 }
 
 function summaryToGrid(s: ShelfSummary): ShelfGridModel {
@@ -145,6 +158,15 @@ export function InventoryWarehouseDashboard() {
   const [enteringNames, setEnteringNames] = useState<Set<string>>(new Set());
   const [countSessions, setCountSessions] = useState<Record<string, ShelfCountSession>>({});
   const [, setTick] = useState(0);
+  const [dragShelfKey, setDragShelfKey] = useState<string | null>(null);
+  const dragShelfKeyRef = useRef<string | null>(null);
+  const shelfOrderTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const setDragKey = useCallback((key: string | null) => {
+    dragShelfKeyRef.current = key;
+    setDragShelfKey(key);
+  }, []);
 
   const loadShelves = useCallback(async () => {
     try {
@@ -171,6 +193,52 @@ export function InventoryWarehouseDashboard() {
     const id = window.setInterval(() => setTick((n) => n + 1), 1000);
     return () => window.clearInterval(id);
   }, [modalShelf]);
+
+  const persistShelfOrder = useCallback((ordered: ShelfSummary[]) => {
+    const locationIds = ordered
+      .map((s) => s.locationId?.trim())
+      .filter((id): id is string => Boolean(id));
+    if (locationIds.length === 0) return;
+    if (shelfOrderTimer.current) clearTimeout(shelfOrderTimer.current);
+    shelfOrderTimer.current = setTimeout(() => {
+      void (async () => {
+        try {
+          const res = await fetch("/api/inventory/locations/order", {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            credentials: "same-origin",
+            body: JSON.stringify({ locationIds }),
+          });
+          if (!res.ok) {
+            showToast({ tone: "error", title: tW("reorderFailed"), durationMs: 3000 });
+          }
+        } catch {
+          showToast({ tone: "error", title: tW("reorderFailed"), durationMs: 3000 });
+        }
+      })();
+    }, SHELF_ORDER_SAVE_MS);
+  }, [showToast, tW]);
+
+  const reorderShelves = useCallback(
+    (fromKey: string, toKey: string) => {
+      if (!fromKey || !toKey || fromKey === toKey) return;
+      setSortKey("displayOrder");
+      setShelfSummaries((prev) => {
+        const ordered = [...prev].sort(sortByDisplayOrder);
+        const fromIdx = ordered.findIndex((s) => shelfRowKey(s) === fromKey);
+        const toIdx = ordered.findIndex((s) => shelfRowKey(s) === toKey);
+        if (fromIdx < 0 || toIdx < 0) return prev;
+        const next = [...ordered];
+        const [item] = next.splice(fromIdx, 1);
+        if (!item) return prev;
+        next.splice(toIdx, 0, item);
+        const withOrder = next.map((s, i) => ({ ...s, displayOrder: i + 1 }));
+        persistShelfOrder(withOrder);
+        return withOrder;
+      });
+    },
+    [persistShelfOrder],
+  );
 
   const openShelfCount = useCallback((shelf: ShelfGridModel) => {
     setCountSessions((prev) => ({
@@ -627,6 +695,10 @@ export function InventoryWarehouseDashboard() {
         </select>
       </div>
 
+      {canManage && sortKey === "displayOrder" && shelves.length > 0 ? (
+        <p className="text-xs font-bold text-slate-500">{tW("dragSquaresHint")}</p>
+      ) : null}
+
       {shelves.length === 0 ? (
         <div className="rounded-[24px] border border-dashed border-[#e7ecf5] bg-white p-10 text-center">
           <p className="text-sm font-semibold text-slate-600">{tW("noShelves")}</p>
@@ -638,7 +710,7 @@ export function InventoryWarehouseDashboard() {
           </Link>
         </div>
       ) : (
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <div className="grid grid-cols-2 gap-2 sm:gap-3 md:gap-4">
           {shelves.map((shelf) => {
             const session = countSessions[shelf.name];
             const isCounting = modalShelf === shelf.name;
@@ -646,33 +718,104 @@ export function InventoryWarehouseDashboard() {
               session && isCounting
                 ? formatCountElapsed(Date.now() - new Date(session.startedAt).getTime())
                 : "00:00";
+            const rowKey = shelfRowKey(shelf);
+            const canDrag =
+              canManage &&
+              sortKey === "displayOrder" &&
+              Boolean(shelf.locationId?.trim());
             return (
-              <ShelfGridCard
+              <div
                 key={shelf.locationId ?? shelf.name}
-                shelf={shelf}
-                t={tCard}
-                locale={locale}
-                locationTypeLabel={t(
-                  LOCATION_TYPE_I18N[(shelf.locationType as LocationType) || "WAREHOUSE"] ??
-                    LOCATION_TYPE_I18N.OTHER,
-                )}
-                onOpen={() => {
-                  if (isCounting) closeShelfCount();
-                  else openShelfCount(shelf);
+                data-shelf-key={rowKey}
+                onDragOver={(e) => {
+                  if (!canDrag || !dragShelfKey) return;
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = "move";
                 }}
-                onCardClick={() => setDetailShelf(shelf)}
-                onMenuAction={(action) => handleMenuAction(shelf, action)}
-                busy={busyShelfName === shelf.name}
-                entering={enteringNames.has(shelf.name)}
-                canManage={canManage}
-                noPermissionTitle={tCard("noPermission")}
-                isCounting={isCounting}
-                elapsedLabel={elapsed}
-                targetMinutes={
-                  session?.targetMinutes ?? shelfCountTargetMinutes(shelf.productCount)
-                }
-                countProgressPct={shelf.matchPct}
-              />
+                onDrop={(e) => {
+                  if (!canDrag || !dragShelfKey) return;
+                  e.preventDefault();
+                  reorderShelves(dragShelfKey, rowKey);
+                  setDragKey(null);
+                }}
+                onTouchStart={(e) => {
+                  if (!canDrag) return;
+                  const touch = e.touches[0];
+                  if (!touch) return;
+                  const startX = touch.clientX;
+                  const startY = touch.clientY;
+                  const el = e.currentTarget;
+                  if (longPressTimer.current) clearTimeout(longPressTimer.current);
+                  longPressTimer.current = setTimeout(() => {
+                    setDragKey(rowKey);
+                    if (typeof navigator !== "undefined" && "vibrate" in navigator) {
+                      try {
+                        navigator.vibrate(12);
+                      } catch {
+                        /* ignore */
+                      }
+                    }
+                  }, 380);
+                  const onMove = (ev: TouchEvent) => {
+                    const t0 = ev.touches[0];
+                    if (!t0) return;
+                    if (
+                      !dragShelfKeyRef.current &&
+                      (Math.abs(t0.clientX - startX) > 12 || Math.abs(t0.clientY - startY) > 12)
+                    ) {
+                      if (longPressTimer.current) clearTimeout(longPressTimer.current);
+                    }
+                  };
+                  const onEnd = (ev: TouchEvent) => {
+                    if (longPressTimer.current) clearTimeout(longPressTimer.current);
+                    el.removeEventListener("touchmove", onMove);
+                    el.removeEventListener("touchend", onEnd);
+                    el.removeEventListener("touchcancel", onEnd);
+                    const from = dragShelfKeyRef.current;
+                    const touchEnd = ev.changedTouches[0];
+                    if (from && touchEnd) {
+                      const elAt = document.elementFromPoint(touchEnd.clientX, touchEnd.clientY);
+                      const target = elAt?.closest("[data-shelf-key]") as HTMLElement | null;
+                      const toKey = target?.dataset.shelfKey;
+                      if (toKey) reorderShelves(from, toKey);
+                    }
+                    setDragKey(null);
+                  };
+                  el.addEventListener("touchmove", onMove, { passive: true });
+                  el.addEventListener("touchend", onEnd);
+                  el.addEventListener("touchcancel", onEnd);
+                }}
+              >
+                <ShelfGridCard
+                  shelf={shelf}
+                  t={tCard}
+                  locale={locale}
+                  locationTypeLabel={t(
+                    LOCATION_TYPE_I18N[(shelf.locationType as LocationType) || "WAREHOUSE"] ??
+                      LOCATION_TYPE_I18N.OTHER,
+                  )}
+                  onOpen={() => {
+                    if (isCounting) closeShelfCount();
+                    else openShelfCount(shelf);
+                  }}
+                  onCardClick={() => setDetailShelf(shelf)}
+                  onMenuAction={(action) => handleMenuAction(shelf, action)}
+                  busy={busyShelfName === shelf.name}
+                  entering={enteringNames.has(shelf.name)}
+                  canManage={canManage}
+                  noPermissionTitle={tCard("noPermission")}
+                  isCounting={isCounting}
+                  elapsedLabel={elapsed}
+                  targetMinutes={
+                    session?.targetMinutes ?? shelfCountTargetMinutes(shelf.productCount)
+                  }
+                  countProgressPct={shelf.matchPct}
+                  canDragReorder={canDrag}
+                  dragging={dragShelfKey === rowKey}
+                  onDragHandleStart={() => setDragKey(rowKey)}
+                  onDragHandleEnd={() => setDragKey(null)}
+                />
+              </div>
             );
           })}
         </div>

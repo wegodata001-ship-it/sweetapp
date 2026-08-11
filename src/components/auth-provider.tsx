@@ -65,11 +65,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState(true);
   const initialDone = useRef(false);
+  /**
+   * מונה דור — כל login/logout מעלה אותו כדי שתשובות /me ישנות
+   * (שהתחילו לפני הקוקי החדש) לא ידרסו את המשתמש ב־client.
+   */
+  const sessionGen = useRef(0);
 
   const refresh = useCallback(async (opts?: { sync?: boolean }) => {
     const sync = opts?.sync ?? false;
     const key = sync ? AUTH_SYNC_KEY : AUTH_KEY;
     const ttl = sync ? 0 : AUTH_CACHE_MS;
+    const gen = sessionGen.current;
 
     if (sync) invalidateCacheKey(AUTH_KEY);
 
@@ -84,6 +90,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       ttl,
     );
 
+    // תשובה מיושנת אחרי setSessionUser / logout — מתעלמים
+    if (gen !== sessionGen.current) return;
+
     if (data.code === SESSION_SUPERSEDED_CODE) {
       setUser(null);
       setLoading(false);
@@ -96,6 +105,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const setSessionUser = useCallback((next: AuthUser | null) => {
+    sessionGen.current += 1;
     invalidateCacheKey(AUTH_KEY);
     invalidateCacheKey(AUTH_SYNC_KEY);
     if (next) setCached(AUTH_KEY, { user: next }, AUTH_CACHE_MS);
@@ -129,6 +139,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [user, refresh]);
 
   const logout = useCallback(async () => {
+    sessionGen.current += 1;
     await fetch("/api/auth/logout", { method: "POST", credentials: "same-origin" });
     invalidateCacheKey(AUTH_KEY);
     invalidateCacheKey(AUTH_SYNC_KEY);

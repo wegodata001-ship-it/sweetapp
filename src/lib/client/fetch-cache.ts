@@ -19,6 +19,8 @@ export function setCached<T>(key: string, data: T, ttlMs: number): void {
 
 export function invalidateCacheKey(key: string): void {
   store.delete(key);
+  /** מבטל dedupe — קריאה חדשה לא תחכה ל־Promise ישן (למשל /me לפני login) */
+  inflight.delete(key);
 }
 
 export function invalidateCache(prefix?: string): void {
@@ -42,15 +44,25 @@ export async function fetchWithDedupe<T>(
 
   let pending = inflight.get(key) as Promise<T> | undefined;
   if (!pending) {
-    pending = loader().finally(() => {
-      inflight.delete(key);
+    const slot: { current?: Promise<T> } = {};
+    const loaded = loader().then((data) => {
+      /**
+       * אם המפתח בוטל באמצע (login / logout) — לא לשמור cache מיושן.
+       * הקורא עדיין מקבל את התוצאה; AuthProvider מתעלם ממנה עם generation.
+       */
+      if (inflight.get(key) === slot.current && ttlMs > 0) {
+        setCached(key, data, ttlMs);
+      }
+      return data;
     });
+    slot.current = loaded.finally(() => {
+      if (inflight.get(key) === slot.current) inflight.delete(key);
+    });
+    pending = slot.current;
     inflight.set(key, pending);
   }
 
-  const data = await pending;
-  if (ttlMs > 0) setCached(key, data, ttlMs);
-  return data;
+  return pending;
 }
 
 export async function fetchJsonCached<T>(

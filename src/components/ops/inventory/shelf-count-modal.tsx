@@ -7,7 +7,6 @@ import {
   useMemo,
   useRef,
   useState,
-  type ReactNode,
 } from "react";
 import {
   AlertTriangle,
@@ -130,32 +129,6 @@ function useKeyboardInset(active: boolean) {
   return inset;
 }
 
-/** כפתור אייקון בסרגל התחתון — שטח נגיעה 48px ומעלה */
-function MobileBarButton({
-  label,
-  icon,
-  onClick,
-  disabled,
-}: {
-  label: string;
-  icon: ReactNode;
-  onClick: () => void;
-  disabled?: boolean;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      aria-label={label}
-      title={label}
-      className="grid h-12 w-11 shrink-0 place-items-center rounded-2xl border border-[#e7ecf5] bg-white text-slate-700 transition active:scale-95 disabled:opacity-40 sm:w-12"
-    >
-      {icon}
-    </button>
-  );
-}
-
 /** ספירות שכבר נשמרו היום לאותו מיקום — מגיע מ־meta של /api/inventory/monthly-count */
 type ExistingCountToday = {
   sessionCount: number;
@@ -261,6 +234,7 @@ function ShelfCountModalInner({
   /** ספירות שכבר נשמרו היום למיקום — בסיס לאזהרת ספירה כפולה */
   const [existingCountToday, setExistingCountToday] = useState<ExistingCountToday | null>(null);
   const [duplicateNoticeDismissed, setDuplicateNoticeDismissed] = useState(false);
+  const [duplicateDetailsOpen, setDuplicateDetailsOpen] = useState(false);
   const [summariesOpen, setSummariesOpen] = useState(false);
   const [summaryEmailOpen, setSummaryEmailOpen] = useState(false);
   /** הסרת שורה מהספירה — יעד האישור, מזהה בתהליך, ואחרונה שהוסרה (לשחזור) */
@@ -326,6 +300,7 @@ function ShelfCountModalInner({
     setSessionCountedIds(new Set());
     setMobileFilter("all");
     setFocusedProductId(null);
+    setDuplicateDetailsOpen(false);
     setDragProductId(null);
     setConfirmCloseOpen(false);
     setWorkersOpen(false);
@@ -1318,14 +1293,13 @@ function ShelfCountModalInner({
         aria-modal="true"
         dir="rtl"
       >
-        <header className="sticky top-0 z-10 shrink-0 border-b border-[#e7ecf5]/80 bg-white/90 px-3 py-2.5 backdrop-blur-md sm:px-5 sm:py-4">
-          {/* שורה עליונה — השמירה נשארת כאן תמיד, מעל למקלדת ובלי גלילה */}
+        <header className="sticky top-0 z-10 shrink-0 border-b border-[#e7ecf5]/80 bg-white/90 px-2.5 py-2 backdrop-blur-md sm:px-5 sm:py-4">
           <div className="flex items-center justify-between gap-2">
             <button
               type="button"
               onClick={requestClose}
               aria-label={t("cancel")}
-              className="grid h-11 w-11 shrink-0 place-items-center rounded-xl text-slate-500 transition hover:bg-slate-100"
+              className="grid h-10 w-10 shrink-0 place-items-center rounded-xl text-slate-500 transition hover:bg-slate-100 sm:h-11 sm:w-11"
             >
               <X className="h-5 w-5" />
             </button>
@@ -1334,16 +1308,21 @@ function ShelfCountModalInner({
                 {t("kicker")}
                 {isReadOnly ? ` · ${t("readOnlyBadge")}` : ""}
               </p>
-              <h2 className="truncate text-lg font-black text-slate-900 sm:text-xl">
+              <h2 className="truncate text-[15px] font-black text-slate-900 sm:text-xl">
                 {shelfName}
               </h2>
               {isMobile ? (
-                <p className="mt-0.5 text-[12px] font-bold text-slate-600">
-                  {t("countProgressLabel", {
-                    done: countedProgress.done,
-                    total: countedProgress.total,
-                  })}
-                </p>
+                <div className="mt-1 flex items-center justify-end gap-2">
+                  <p className="text-[11px] font-bold tabular-nums text-slate-600">
+                    {countedProgress.done}/{countedProgress.total} · {countedProgress.pct}%
+                  </p>
+                  <div className="h-1.5 w-20 overflow-hidden rounded-full bg-slate-100">
+                    <div
+                      className="h-full rounded-full bg-[#6c4cff] transition-[width]"
+                      style={{ width: `${countedProgress.pct}%` }}
+                    />
+                  </div>
+                </div>
               ) : sessionNumber != null ? (
                 <p className="truncate text-[11px] font-bold text-slate-500 sm:text-xs">
                   {t("sessionNumber", { n: sessionNumber })}
@@ -1352,20 +1331,6 @@ function ShelfCountModalInner({
             </div>
             {!isReadOnly && !isMobile ? saveButton("h-12 shrink-0 px-4 text-sm") : null}
           </div>
-
-          {isMobile ? (
-            <div className="mt-2.5">
-              <div className="h-2.5 overflow-hidden rounded-full bg-slate-100 ring-1 ring-slate-200/80">
-                <div
-                  className="h-full rounded-full bg-[#6c4cff] transition-[width] duration-300"
-                  style={{ width: `${countedProgress.pct}%` }}
-                />
-              </div>
-              <p className="mt-1 text-center text-[11px] font-black tabular-nums text-slate-500">
-                {countedProgress.pct}%
-              </p>
-            </div>
-          ) : null}
 
           {/* פעולות משניות — במובייל הן יורדות לסרגל התחתון */}
           <div className="mt-3 hidden flex-wrap gap-2 md:flex">
@@ -1503,29 +1468,36 @@ function ShelfCountModalInner({
             </p>
           ) : null}
           {showDuplicateNotice ? (
-            <div className="mt-2 flex flex-wrap items-start justify-between gap-2 rounded-2xl bg-amber-50 px-3 py-2 ring-1 ring-amber-200">
-              <div className="flex min-w-0 items-start gap-2">
-                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" aria-hidden />
-                <div className="min-w-0">
-                  <p className="text-xs font-black text-amber-900">
-                    {t("duplicateCountTitle", { count: existingCountToday!.sessionCount })}
-                  </p>
-                  <p className="mt-0.5 text-[11px] font-semibold leading-relaxed text-amber-800">
-                    {t("duplicateCountBody", {
-                      number: existingCountToday!.lastSessionNumber ?? "—",
-                      time: lastCountTodayTime,
-                      name: existingCountToday!.lastCountedByName ?? "—",
-                    })}
-                  </p>
-                </div>
+            <div className="mt-1.5 rounded-xl bg-amber-50 px-2.5 py-1.5 ring-1 ring-amber-200">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600" aria-hidden />
+                <p className="min-w-0 flex-1 truncate text-[11px] font-black text-amber-900">
+                  {t("duplicateCountShort", { count: existingCountToday!.sessionCount })}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setDuplicateDetailsOpen((v) => !v)}
+                  className="h-9 shrink-0 rounded-lg px-2 text-[11px] font-black text-amber-800 underline"
+                >
+                  {duplicateDetailsOpen ? t("duplicateCountHide") : t("duplicateCountDetails")}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDuplicateNoticeDismissed(true)}
+                  className="h-9 shrink-0 rounded-lg border border-amber-300 bg-white px-2 text-[11px] font-black text-amber-800"
+                >
+                  {t("duplicateCountDismiss")}
+                </button>
               </div>
-              <button
-                type="button"
-                onClick={() => setDuplicateNoticeDismissed(true)}
-                className="shrink-0 rounded-xl border border-amber-300 bg-white px-3 py-1.5 text-xs font-black text-amber-800 transition hover:bg-amber-50"
-              >
-                {t("duplicateCountDismiss")}
-              </button>
+              {duplicateDetailsOpen ? (
+                <p className="mt-1 text-[11px] font-semibold leading-snug text-amber-800">
+                  {t("duplicateCountBody", {
+                    number: existingCountToday!.lastSessionNumber ?? "—",
+                    time: lastCountTodayTime,
+                    name: existingCountToday!.lastCountedByName ?? "—",
+                  })}
+                </p>
+              ) : null}
             </div>
           ) : null}
           {lastRemoved && canRemoveRow ? (
@@ -1545,8 +1517,8 @@ function ShelfCountModalInner({
             </div>
           ) : null}
 
-          <div className="relative mt-2.5">
-            <ScanLine className="pointer-events-none absolute top-1/2 h-5 w-5 -translate-y-1/2 text-[#6c4cff] ltr:left-3 rtl:right-3" />
+          <div className="relative mt-1.5">
+            <ScanLine className="pointer-events-none absolute top-1/2 h-4 w-4 -translate-y-1/2 text-[#6c4cff] ltr:left-2.5 rtl:right-2.5" />
             <input
               type="search"
               value={scanQ}
@@ -1556,8 +1528,7 @@ function ShelfCountModalInner({
               }}
               placeholder={isMobile ? t("mobileSearchPlaceholder") : t("scanPlaceholder")}
               enterKeyHint="search"
-              className="h-12 w-full touch-manipulation rounded-2xl border border-[#e7ecf5] bg-[#f6f8fc] text-sm font-bold outline-none focus:border-[#6c4cff] focus:ring-2 focus:ring-[#6c4cff]/15 ltr:pl-11 ltr:pr-11 rtl:pl-11 rtl:pr-11"
-              /* אין autoFocus במובייל — המקלדת הייתה נפתחת מיד ומכסה את המסך */
+              className="h-11 w-full touch-manipulation rounded-xl border border-[#e7ecf5] bg-[#f6f8fc] text-sm font-bold outline-none focus:border-[#6c4cff] focus:ring-2 focus:ring-[#6c4cff]/15 ltr:pl-9 ltr:pr-10 rtl:pl-10 rtl:pr-9 sm:h-12 sm:rounded-2xl sm:ltr:pl-11 sm:rtl:pr-11"
               autoFocus={!isMobile}
             />
             {scanQ ? (
@@ -1565,7 +1536,7 @@ function ShelfCountModalInner({
                 type="button"
                 onClick={() => setScanQ("")}
                 aria-label={t("clearSearch")}
-                className="absolute top-1/2 grid h-11 w-11 -translate-y-1/2 place-items-center rounded-xl text-slate-400 transition hover:bg-slate-100 hover:text-slate-600 ltr:right-0.5 rtl:left-0.5"
+                className="absolute top-1/2 grid h-10 w-10 -translate-y-1/2 place-items-center rounded-xl text-slate-400 transition hover:bg-slate-100 hover:text-slate-600 ltr:right-0.5 rtl:left-0.5"
               >
                 <X className="h-4 w-4" />
               </button>
@@ -1573,7 +1544,7 @@ function ShelfCountModalInner({
           </div>
 
           {isMobile ? (
-            <div className="mt-2.5 flex gap-1.5" role="tablist" aria-label={t("mobileFiltersLabel")}>
+            <div className="mt-1.5 flex gap-1" role="tablist" aria-label={t("mobileFiltersLabel")}>
               {(
                 [
                   ["all", t("filterAll")],
@@ -1589,7 +1560,7 @@ function ShelfCountModalInner({
                     role="tab"
                     aria-selected={active}
                     onClick={() => setMobileFilter(key)}
-                    className={`h-11 min-w-0 flex-1 touch-manipulation truncate rounded-2xl px-2 text-[11px] font-black transition ${
+                    className={`h-10 min-w-0 flex-1 touch-manipulation truncate rounded-xl px-1.5 text-[10px] font-black transition ${
                       active
                         ? "bg-[#6c4cff] text-white shadow-sm"
                         : "bg-slate-50 text-slate-600 ring-1 ring-slate-200"
@@ -1605,8 +1576,8 @@ function ShelfCountModalInner({
 
         <div
           ref={listRef}
-          className={`min-h-0 flex-1 overflow-y-auto overscroll-contain p-3 sm:p-4 ${
-            isMobile ? "overflow-x-hidden pb-28" : "overflow-x-auto"
+          className={`min-h-0 flex-1 overflow-y-auto overscroll-contain p-2 sm:p-4 ${
+            isMobile ? "overflow-x-hidden pb-24" : "overflow-x-auto"
           }`}
           onScroll={(e) => {
             const el = e.currentTarget;
@@ -1632,7 +1603,7 @@ function ShelfCountModalInner({
                 </div>
               ) : null}
               {useVirtual ? <div style={{ height: padTop }} aria-hidden /> : null}
-              <div className={isMobile ? "space-y-3" : "space-y-2"}>
+              <div className={isMobile ? "space-y-2" : "space-y-2"}>
                 {visible.map((row, visibleIdx) => {
                   const requiredQty =
                     row.requiredQuantity ??
@@ -1738,34 +1709,14 @@ function ShelfCountModalInner({
           )}
         </div>
 
-        {/* Sticky save — מובייל: התקדמות + שמירה; פעולות משניות בשורה דקה */}
-        <footer className="sticky bottom-0 z-10 shrink-0 border-t border-[#e7ecf5]/80 bg-white/95 px-3 pt-2 pb-[max(0.625rem,env(safe-area-inset-bottom))] backdrop-blur-md md:hidden">
-          <div className="mb-2 flex items-center justify-between gap-2">
-            <p className="text-[12px] font-black tabular-nums text-slate-700">
-              {t("countProgressLabel", {
-                done: countedProgress.done,
-                total: countedProgress.total,
-              })}
-            </p>
-            <div className="flex items-center gap-1">
-              {canViewSummaries ? (
-                <MobileBarButton
-                  label={t("openSummaries")}
-                  icon={<BarChart3 className="h-5 w-5" aria-hidden />}
-                  onClick={() => setSummariesOpen(true)}
-                />
-              ) : null}
-              {!isReadOnly ? (
-                <MobileBarButton
-                  label={t("editWorkers")}
-                  icon={<Settings2 className="h-5 w-5" aria-hidden />}
-                  disabled={!locationId}
-                  onClick={() => setWorkersOpen(true)}
-                />
-              ) : null}
-            </div>
-          </div>
-          {!isReadOnly ? saveButton("h-14 w-full text-base") : null}
+        <footer className="sticky bottom-0 z-10 shrink-0 border-t border-[#e7ecf5]/80 bg-white/95 px-2.5 pt-1.5 pb-[max(0.5rem,env(safe-area-inset-bottom))] backdrop-blur-md md:hidden">
+          <p className="mb-1 text-center text-[11px] font-black tabular-nums text-slate-600">
+            {t("countProgressLabel", {
+              done: countedProgress.done,
+              total: countedProgress.total,
+            })}
+          </p>
+          {!isReadOnly ? saveButton("h-12 w-full text-sm") : null}
         </footer>
 
         <footer className="sticky bottom-0 z-10 hidden shrink-0 items-center justify-between gap-2 border-t border-[#e7ecf5]/80 bg-white/95 px-3 py-3 backdrop-blur-md md:flex md:px-5">

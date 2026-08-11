@@ -2828,6 +2828,7 @@
         "noShelves": "No storage locations — add your first storage location",
         "card": {
           "noPermission": "No permission for this action",
+          "dragHandle": "Drag to reorder square",
           "menu": {
             "label": "Storage location actions",
             "addProducts": "Add products",
@@ -2955,6 +2956,9 @@
           "removeRowDone": "«{{name}}» was removed from the current count",
           "removeRowFailed": "Removing the product from the count failed",
           "duplicateCountTitle": "This location was already counted today ({{count}})",
+          "duplicateCountShort": "⚠ Previous count exists today ({{count}})",
+          "duplicateCountDetails": "Details",
+          "duplicateCountHide": "Hide",
           "duplicateCountBody": "Count #{{number}} was saved at {{time}} by {{name}}. Saving again creates a new count round instead of updating that one — differences will be calculated against it.",
           "duplicateCountDismiss": "Got it",
           "removedFromCount": "«{{name}}» was removed from the count. The product stays in the system.",
@@ -3065,6 +3069,8 @@
         "sortProducts": "Sort: products",
         "sortProgress": "Sort: progress %",
         "sortLastCount": "Sort: last count",
+        "dragSquaresHint": "Drag ☰ on a square to reorder storage locations. The order is saved for everyone.",
+        "reorderFailed": "Failed to save square order",
         "locationTypes": {
           "WAREHOUSE": "Warehouse",
           "SHOWROOM": "Showroom",

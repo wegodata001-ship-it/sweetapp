@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prismaAny } from "@/lib/prisma";
 import { requireDb } from "@/lib/api-route";
 import { getSessionFromCookie } from "@/lib/auth/get-session";
+import { ensureLocationSchemaColumns } from "@/lib/inventory/ensure-location-schema";
 
 /**
  * PATCH — סדר מקומות אחסון (Drag & Drop) → InventoryLocation.displayOrder
@@ -16,6 +17,7 @@ export async function PATCH(req: NextRequest) {
   }
 
   try {
+    await ensureLocationSchemaColumns();
     const body = (await req.json()) as { locationIds?: string[] };
     const locationIds = Array.isArray(body.locationIds)
       ? body.locationIds.map((id) => String(id || "").trim()).filter(Boolean)

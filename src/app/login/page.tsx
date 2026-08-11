@@ -42,6 +42,10 @@ function LoginContent() {
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
+    if (submitting) return;
+    const id = identifier.trim();
+    if (!id || !password) return;
+
     setError(null);
     setSubmitting(true);
     try {
@@ -49,7 +53,7 @@ function LoginContent() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "same-origin",
-        body: JSON.stringify({ identifier: identifier.trim(), password }),
+        body: JSON.stringify({ identifier: id, password }),
       });
       const data = (await res.json()) as {
         ok?: boolean;
@@ -81,16 +85,23 @@ function LoginContent() {
         return;
       }
       if (data.user) setSessionUser(data.user);
-      setSubmitting(false);
+
+      /**
+       * ניווט מלא אחרי login — יציב יותר מ־router.replace כשיש race
+       * עם /api/auth/me או עדכון cookie באמצע מעבר soft.
+       * משאירים submitting=true עד רענון העמוד (מונע לחיצה כפולה).
+       */
       if (data.user?.mustChangePassword) {
-        router.replace("/change-password");
+        window.location.assign("/change-password");
         return;
       }
       const dest =
         data.user?.role === "EMPLOYEE" && (nextUrl === "/" || nextUrl === "")
           ? "/employee"
-          : nextUrl;
-      router.replace(dest);
+          : nextUrl.startsWith("/")
+            ? nextUrl
+            : "/";
+      window.location.assign(dest);
     } catch {
       setError(t("auth.errorNetwork"));
       setSubmitting(false);

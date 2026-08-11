@@ -2828,6 +2828,7 @@
         "noShelves": "لا توجد مواقع تخزين — أضف موقع تخزين",
         "card": {
           "noPermission": "لا توجد صلاحية لهذا الإجراء",
+          "dragHandle": "سحب لإعادة ترتيب المربع",
           "menu": {
             "label": "إجراءات موقع التخزين",
             "addProducts": "إضافة منتجات",
@@ -2955,6 +2956,9 @@
           "removeRowDone": "تمت إزالة «{{name}}» من الجرد الحالي",
           "removeRowFailed": "فشل حذف المنتج من الجرد",
           "duplicateCountTitle": "تم جرد هذا الموقع اليوم بالفعل ({{count}})",
+          "duplicateCountShort": "⚠ يوجد جرد سابق اليوم ({{count}})",
+          "duplicateCountDetails": "تفاصيل",
+          "duplicateCountHide": "إخفاء",
           "duplicateCountBody": "الجرد رقم {{number}} حُفظ الساعة {{time}} بواسطة {{name}}. الحفظ مرة أخرى ينشئ جولة جرد جديدة ولا يحدّث الجولة القائمة — وستُحسب الفروق مقابلها.",
           "duplicateCountDismiss": "فهمت",
           "removedFromCount": "تمت إزالة «{{name}}» من الجرد. المنتج ما زال في النظام.",
@@ -3065,6 +3069,8 @@
         "sortProducts": "فرز: عدد المنتجات",
         "sortProgress": "فرز: نسبة التقدم",
         "sortLastCount": "فرز: آخر جرد",
+        "dragSquaresHint": "اسحب ☰ على المربع لإعادة ترتيب مواقع التخزين. يُحفظ الترتيب للجميع.",
+        "reorderFailed": "فشل حفظ ترتيب المربعات",
         "locationTypes": {
           "WAREHOUSE": "مستودع",
           "SHOWROOM": "صالة عرض",

@@ -2841,6 +2841,8 @@
         "sortProducts": "מיון: מספר מוצרים",
         "sortProgress": "מיון: אחוז התקדמות",
         "sortLastCount": "מיון: ספירה אחרונה",
+        "dragSquaresHint": "גררו את ☰ על הריבוע כדי לשנות את סדר מיקומי האחסון. הסדר נשמר לכולם.",
+        "reorderFailed": "שמירת סדר הריבועים נכשלה",
         "locationTypes": {
           "WAREHOUSE": "מחסן",
           "SHOWROOM": "אולם תצוגה",
@@ -2893,6 +2895,7 @@
         },
         "card": {
           "noPermission": "אין הרשאה לפעולה זו",
+          "dragHandle": "גרירת סדר הריבוע",
           "menu": {
             "label": "פעולות מיקום אחסון",
             "edit": "עריכת מיקום",
@@ -3020,6 +3023,9 @@
           "removeRowDone": "«{{name}}» הוסר מהספירה הנוכחית",
           "removeRowFailed": "הסרת המוצר מהספירה נכשלה",
           "duplicateCountTitle": "כבר בוצעה ספירה למיקום הזה היום ({{count}})",
+          "duplicateCountShort": "⚠ קיימת ספירה קודמת מהיום ({{count}})",
+          "duplicateCountDetails": "פרטים",
+          "duplicateCountHide": "הסתר",
           "duplicateCountBody": "ספירה #{{number}} נשמרה בשעה {{time}} על ידי {{name}}. שמירה נוספת תיצור סבב ספירה חדש ולא תעדכן את הקיים — ההפרשים יחושבו מול הספירה הזו.",
           "duplicateCountDismiss": "הבנתי",
           "removedFromCount": "«{{name}}» הוסר מהספירה. המוצר נשאר במערכת.",
