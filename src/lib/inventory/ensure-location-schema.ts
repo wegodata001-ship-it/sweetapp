@@ -40,6 +40,10 @@ export async function ensureLocationSchemaColumns(): Promise<void> {
           ALTER TABLE "InventoryProductOnLocation"
             ADD COLUMN IF NOT EXISTS "minimumQuantity" DOUBLE PRECISION NOT NULL DEFAULT 0
         `);
+        await prismaAny.$executeRawUnsafe(`
+          ALTER TABLE "InventoryCount"
+            ADD COLUMN IF NOT EXISTS "minimumQuantity" DOUBLE PRECISION NOT NULL DEFAULT 0
+        `);
         // Backfill מינימום ממוצר גלובלי — רק כשעדיין 0 (לא דורס ערכים קיימים)
         await prismaAny.$executeRawUnsafe(`
           UPDATE "InventoryProductOnLocation" AS pl
@@ -48,6 +52,18 @@ export async function ensureLocationSchemaColumns(): Promise<void> {
           WHERE pl."inventoryProductId" = p."id"
             AND pl."minimumQuantity" = 0
             AND COALESCE(p."minimumQuantity", 0) > 0
+        `);
+        // Snapshot היסטורי לשורות ספירה ישנות — placement ואז מוצר; לא דורס ערך > 0
+        await prismaAny.$executeRawUnsafe(`
+          UPDATE "InventoryCount" AS c
+          SET "minimumQuantity" = COALESCE(pl."minimumQuantity", p."minimumQuantity", 0)
+          FROM "InventoryProduct" AS p
+          LEFT JOIN "InventoryProductOnLocation" AS pl
+            ON pl."inventoryProductId" = c."inventoryProductId"
+           AND pl."locationId" = c."locationId"
+          WHERE c."inventoryProductId" = p."id"
+            AND c."minimumQuantity" = 0
+            AND COALESCE(pl."minimumQuantity", p."minimumQuantity", 0) > 0
         `);
       } catch {
         // DB ללא הרשאת DDL / ספק אחר — נשארים עם fallback בשאילתות

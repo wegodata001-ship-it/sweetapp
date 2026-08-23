@@ -164,6 +164,8 @@ export type RawSession = {
     previousQuantity: number;
     currentQuantity: number;
     difference: number;
+    /** Snapshot בשורת הספירה; null/חסר בשורות ישנות לפני המיגרציה */
+    minimumQuantity?: number | null;
     inventoryProduct: {
       name: string;
       nameHe: string | null;
@@ -301,7 +303,11 @@ export function aggregateDailyReport(params: {
         break;
       }
       const product = line.inventoryProduct;
-      const minimumQuantity = product?.minimumQuantity ?? 0;
+      const lineMin = Number(line.minimumQuantity);
+      const minimumQuantity =
+        Number.isFinite(lineMin) && lineMin >= 0
+          ? lineMin
+          : (product?.minimumQuantity ?? 0);
       lines.push({
         sessionNumber: session.sessionNumber,
         locationName,
@@ -453,6 +459,7 @@ export async function loadInventoryReportRange(
             previousQuantity: true,
             currentQuantity: true,
             difference: true,
+            minimumQuantity: true,
             inventoryProduct: {
               select: {
                 name: true,

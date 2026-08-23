@@ -1,4 +1,5 @@
 import { prismaAny } from "@/lib/prisma";
+import { ensureLocationSchemaColumns } from "@/lib/inventory/ensure-location-schema";
 
 export type CountSessionListItem = {
   id: string;
@@ -117,6 +118,7 @@ export async function listCountSessions(params: {
 export async function getCountSessionDetail(
   sessionId: string,
 ): Promise<CountSessionDetail | null> {
+  await ensureLocationSchemaColumns();
   const row = await prismaAny.inventoryCountSession.findUnique({
     where: { id: sessionId },
     select: {
@@ -141,6 +143,8 @@ export async function getCountSessionDetail(
           previousQuantity: true,
           currentQuantity: true,
           difference: true,
+          /** Snapshot של אותה ספירה — לא מינימום נוכחי של המוצר/placement */
+          minimumQuantity: true,
           inventoryProduct: {
             select: {
               name: true,
@@ -182,6 +186,7 @@ export async function getCountSessionDetail(
         previousQuantity: number;
         currentQuantity: number;
         difference: number;
+        minimumQuantity: number;
         inventoryProduct: {
           name: string;
           nameHe: string | null;
@@ -200,29 +205,36 @@ export async function getCountSessionDetail(
           createdAt: Date;
           locationWorker: { displayName: string; workArea: string } | null;
         }[];
-      }) => ({
-        id: line.id,
-        inventoryProductId: line.inventoryProductId,
-        name: line.inventoryProduct.nameHe?.trim() || line.inventoryProduct.name,
-        nameHe: line.inventoryProduct.nameHe,
-        nameAr: line.inventoryProduct.nameAr,
-        nameEn: line.inventoryProduct.nameEn,
-        barcode: line.inventoryProduct.barcode,
-        sku: line.inventoryProduct.sku,
-        unit: line.inventoryProduct.unit,
-        minimumQuantity: line.inventoryProduct.minimumQuantity,
-        previousQuantity: line.previousQuantity,
-        currentQuantity: line.currentQuantity,
-        difference: line.difference,
-        workers: line.workerLines.map((w) => ({
-          inventoryLocationWorkerId: w.inventoryLocationWorkerId,
-          workerDisplayName:
-            w.workerDisplayName || w.locationWorker?.displayName || "—",
-          workerWorkArea: w.workerWorkArea || w.locationWorker?.workArea || "",
-          countedQuantity: w.countedQuantity,
-          createdAt: w.createdAt.toISOString(),
-        })),
-      }),
+      }) => {
+        const lineMin = Number(line.minimumQuantity);
+        const snapshotMin =
+          Number.isFinite(lineMin) && lineMin >= 0
+            ? lineMin
+            : Math.max(0, Number(line.inventoryProduct.minimumQuantity) || 0);
+        return {
+          id: line.id,
+          inventoryProductId: line.inventoryProductId,
+          name: line.inventoryProduct.nameHe?.trim() || line.inventoryProduct.name,
+          nameHe: line.inventoryProduct.nameHe,
+          nameAr: line.inventoryProduct.nameAr,
+          nameEn: line.inventoryProduct.nameEn,
+          barcode: line.inventoryProduct.barcode,
+          sku: line.inventoryProduct.sku,
+          unit: line.inventoryProduct.unit,
+          minimumQuantity: snapshotMin,
+          previousQuantity: line.previousQuantity,
+          currentQuantity: line.currentQuantity,
+          difference: line.difference,
+          workers: line.workerLines.map((w) => ({
+            inventoryLocationWorkerId: w.inventoryLocationWorkerId,
+            workerDisplayName:
+              w.workerDisplayName || w.locationWorker?.displayName || "—",
+            workerWorkArea: w.workerWorkArea || w.locationWorker?.workArea || "",
+            countedQuantity: w.countedQuantity,
+            createdAt: w.createdAt.toISOString(),
+          })),
+        };
+      },
     ),
   };
 }

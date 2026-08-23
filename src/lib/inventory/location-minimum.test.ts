@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import {
   locationMinimumStatus,
   requiredQtyToMinimum,
+  resolveCountDefaultMinimum,
   resolveLocationMinimum,
 } from "./count-latest";
 
@@ -33,6 +34,55 @@ function run() {
   assert.equal(counted, 8);
   assert.equal(afterMinChange.status, "below");
   assert.equal(afterMinChange.shortage, 4);
+
+  // TEST 5: ברירת מחדל לספירה חדשה = snapshot אחרון (לא placement נוכחי)
+  assert.equal(
+    resolveCountDefaultMinimum({
+      hasLastCountForLocation: true,
+      lastCountMinimum: 8,
+      placementMinimum: 99,
+      productMinimum: 5,
+    }),
+    8,
+  );
+  // יום חדש אחרי שינוי ל־12
+  assert.equal(
+    resolveCountDefaultMinimum({
+      hasLastCountForLocation: true,
+      lastCountMinimum: 12,
+      placementMinimum: 8,
+      productMinimum: 5,
+    }),
+    12,
+  );
+  // אין ספירה קודמת במיקום — placement
+  assert.equal(
+    resolveCountDefaultMinimum({
+      hasLastCountForLocation: false,
+      lastCountMinimum: null,
+      placementMinimum: 30,
+      productMinimum: 10,
+    }),
+    30,
+  );
+  // מחסנים נפרדים — snapshot שונה לכל מיקום
+  const locA = resolveCountDefaultMinimum({
+    hasLastCountForLocation: true,
+    lastCountMinimum: 10,
+    placementMinimum: 10,
+    productMinimum: 5,
+  });
+  const locB = resolveCountDefaultMinimum({
+    hasLastCountForLocation: true,
+    lastCountMinimum: 30,
+    placementMinimum: 30,
+    productMinimum: 5,
+  });
+  assert.equal(locA, 10);
+  assert.equal(locB, 30);
+  // חסר = max(min - counted, 0)
+  assert.equal(requiredQtyToMinimum(5, 8), 3);
+  assert.equal(requiredQtyToMinimum(20, 8), 0);
 
   console.log("location-minimum.test.ts: OK");
 }

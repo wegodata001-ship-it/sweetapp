@@ -86,7 +86,7 @@ function buildFixture() {
       shortageCount: 1,
       surplusCount: 0,
       totalCountedQty: 30,
-      lines: [line(), line({ currentQuantity: 8, difference: -2 }), line()],
+      lines: [line(), line({ currentQuantity: 8, difference: -2, minimumQuantity: 8 }), line()],
     }),
     session({
       id: "s2",
@@ -252,8 +252,10 @@ function testAggregation() {
 
   const shortLine = report.lines.find((l) => l.difference === -2);
   assert(!!shortLine, "shortage line present");
-  assert(shortLine!.shortageVsMinimum === 12, "shortage vs minimum = 20 - 8");
-  assert(report.lines[0]!.shortageVsMinimum === 10, "matched line still below minimum");
+  // snapshot בשורת הספירה (8) גובר על מינימום מוצר (20) — חסר = 0
+  assert(shortLine!.minimumQuantity === 8, "line snapshot minimum used");
+  assert(shortLine!.shortageVsMinimum === 0, "shortage vs snapshot min = max(8-8,0)");
+  assert(report.lines[0]!.shortageVsMinimum === 10, "matched line still below product minimum");
   assert(report.lines[0]!.productName === "סוכר 1 ק״ג", "hebrew product name preferred");
   assert(report.lines[0]!.workersText.includes("אחמד"), "worker breakdown kept");
   assert(report.lines.some((l) => l.productName === "—"), "missing product falls back");

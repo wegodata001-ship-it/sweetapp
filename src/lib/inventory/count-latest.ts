@@ -74,6 +74,24 @@ export function resolveLocationMinimum(
   return 0;
 }
 
+/**
+ * ברירת מחדל למינימום בפתיחת ספירה חדשה:
+ * snapshot מהספירה האחרונה באותו מוצר+מיקום, אחרת placement/מוצר.
+ * היסטוריה נשארת בשורות InventoryCount — לא כאן.
+ */
+export function resolveCountDefaultMinimum(opts: {
+  lastCountMinimum: number | null | undefined;
+  hasLastCountForLocation: boolean;
+  placementMinimum: number | null | undefined;
+  productMinimum: number | null | undefined;
+}): number {
+  if (opts.hasLastCountForLocation) {
+    const snap = Number(opts.lastCountMinimum);
+    if (Number.isFinite(snap)) return Math.max(0, snap);
+  }
+  return resolveLocationMinimum(opts.placementMinimum, opts.productMinimum);
+}
+
 export type LocationMinimumStatus = "ok" | "below" | "unset";
 
 /** סטטוס מול מינימום המקום — לפי הכמות שנספרה (או on-hand אם אין ספירה) */

@@ -974,56 +974,30 @@ function ShelfCountModalInner({
     };
   }, [actualById, hasWorkers, listTotal, products, workerQtyByProduct, workers]);
 
-  const saveLocationMinimum = useCallback(
-    async (productId: string, minimumQuantity: number) => {
-      if (!locationId?.trim()) {
-        setError(t("minimumSaveNeedsLocation"));
-        return;
-      }
-      setError(null);
-      try {
-        const res = await fetch(
-          `/api/inventory/shelves/${encodeURIComponent(locationId.trim())}/products`,
-          {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            credentials: "same-origin",
-            body: JSON.stringify({
-              productId,
-              shelfName: shelfName.trim() || undefined,
-              minimumQuantity,
-            }),
-          },
-        );
-        const j = (await res.json()) as {
-          ok?: boolean;
-          error?: string;
-          data?: { minimumQuantity?: number };
-        };
-        if (!res.ok || !j.ok) {
-          setError(j.error ?? t("minimumSaveFailed"));
-          return;
-        }
-        const savedMin = Number(j.data?.minimumQuantity ?? minimumQuantity);
-        setProducts((prev) =>
-          prev.map((row) => {
-            if (row.id !== productId) return row;
-            const onHand = row.systemTotalQuantity ?? row.previousQuantity;
-            const required = requiredQtyToMinimum(onHand, savedMin);
-            return {
-              ...row,
-              minimumQuantity: savedMin,
-              systemShortage: required,
-              requiredQuantity: required,
-            };
-          }),
-        );
-        setNotice(t("minimumSaved"));
-      } catch {
-        setError(t("minimumSaveFailed"));
-      }
+  /**
+   * מינימום בספירה = snapshot ליום/סבב זה.
+   * נשמר עם שמירת הספירה (לא PATCH מיידי ל-placement) — כדי לא לדרוס
+   * מינימום של ספירות ישנות ולשמור עריכה מהירה בשורה.
+   */
+  const updateSessionMinimum = useCallback(
+    (productId: string, minimumQuantity: number) => {
+      const nextMin = Math.max(0, Number(minimumQuantity) || 0);
+      setProducts((prev) =>
+        prev.map((row) => {
+          if (row.id !== productId) return row;
+          const onHand = row.systemTotalQuantity ?? row.previousQuantity;
+          const required = requiredQtyToMinimum(onHand, nextMin);
+          return {
+            ...row,
+            minimumQuantity: nextMin,
+            systemShortage: required,
+            requiredQuantity: required,
+          };
+        }),
+      );
+      markTouched(productId);
     },
-    [locationId, shelfName, t],
+    [markTouched],
   );
 
   /**
@@ -1049,9 +1023,12 @@ function ShelfCountModalInner({
       type SaveLine = {
         inventoryProductId: string;
         currentQuantity: number;
+        minimumQuantity: number;
         workers?: { inventoryLocationWorkerId: string; countedQuantity: number }[];
       };
       const lines: SaveLine[] = [];
+      const minOf = (productId: string) =>
+        Math.max(0, Number(products.find((p) => p.id === productId)?.minimumQuantity) || 0);
 
       if (hasWorkers) {
         for (const productId of dirtyProductIds) {
@@ -1061,6 +1038,7 @@ function ShelfCountModalInner({
           lines.push({
             inventoryProductId: productId,
             currentQuantity: sum,
+            minimumQuantity: minOf(productId),
             workers: workers.map((w) => {
               const raw = map[w.id] ?? "";
               const qty = raw === "" ? 0 : Number(raw);
@@ -1077,7 +1055,11 @@ function ShelfCountModalInner({
           if (raw === "") continue;
           const qty = Number(raw);
           if (!Number.isFinite(qty) || qty < 0) continue;
-          lines.push({ inventoryProductId: id, currentQuantity: qty });
+          lines.push({
+            inventoryProductId: id,
+            currentQuantity: qty,
+            minimumQuantity: minOf(id),
+          });
         }
       }
 
@@ -1116,6 +1098,7 @@ function ShelfCountModalInner({
               systemTotalQuantity?: number;
               systemShortage?: number;
               requiredQuantity?: number;
+              minimumQuantity?: number;
               workers?: {
                 inventoryLocationWorkerId: string;
                 countedQuantity: number;
@@ -1143,16 +1126,21 @@ function ShelfCountModalInner({
             if (!saved) return product;
             const systemTotal =
               saved.systemTotalQuantity ?? product.systemTotalQuantity ?? saved.currentQuantity;
+            const savedMin =
+              saved.minimumQuantity != null && Number.isFinite(Number(saved.minimumQuantity))
+                ? Math.max(0, Number(saved.minimumQuantity))
+                : product.minimumQuantity || 0;
             const required =
               saved.requiredQuantity ??
               saved.systemShortage ??
-              requiredQtyToMinimum(systemTotal, product.minimumQuantity || 0);
+              requiredQtyToMinimum(systemTotal, savedMin);
             return {
               ...product,
               previousQuantity: saved.currentQuantity,
               systemTotalQuantity: systemTotal,
               systemShortage: required,
               requiredQuantity: required,
+              minimumQuantity: savedMin,
               lastWorkerQtys:
                 saved.workers?.map((w) => ({
                   inventoryLocationWorkerId: w.inventoryLocationWorkerId,
@@ -1205,6 +1193,7 @@ function ShelfCountModalInner({
       hasWorkers,
       locationId,
       onClose,
+      products,
       scheduleShelfRefresh,
       shelfName,
       startedAt,
@@ -1679,7 +1668,7 @@ function ShelfCountModalInner({
                           if (!isReadOnly) bump(row.id, row.previousQuantity, d);
                         }}
                         onMinimumChange={(min) => {
-                          if (!isReadOnly) void saveLocationMinimum(row.id, min);
+                          if (!isReadOnly) updateSessionMinimum(row.id, min);
                         }}
                         onQtyFocus={() => setFocusedProductId(row.id)}
                         onQtyEnterNext={() => focusNextProduct(row.id)}
@@ -1840,12 +1829,9 @@ function ShelfCountModalInner({
               };
             }),
           );
-          // מינימום נשמר ל־product+location בלבד (לא משנה מלאי / מחסנים אחרים)
-          if (locationId?.trim()) {
-            void saveLocationMinimum(p.id, p.minimumQuantity);
-          } else {
-            setNotice(t("productUpdated"));
-          }
+          // מינימום בספירה — מקומי לסבב; נשמר עם שמירת הספירה
+          updateSessionMinimum(p.id, p.minimumQuantity);
+          setNotice(t("productUpdated"));
         }}
         t={t}
       />

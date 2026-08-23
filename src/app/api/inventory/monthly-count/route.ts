@@ -20,6 +20,7 @@ import {
   pickLatestCountForLocation,
   previousQtyFromCounts,
   requiredQtyToMinimum,
+  resolveCountDefaultMinimum,
   resolveLocationMinimum,
   systemTotalFromCounts,
 } from "@/lib/inventory/count-latest";
@@ -30,6 +31,7 @@ import {
 import { ACTIVE_COUNT_LINE_WHERE } from "@/lib/inventory/count-session-status";
 import { loadExistingCountToday } from "@/lib/inventory/count-round-guard";
 import { scheduleCountSessionCompletedAlert } from "@/lib/inventory/count-session-alert";
+import { ensureLocationSchemaColumns } from "@/lib/inventory/ensure-location-schema";
 
 /**
  * שעת פתיחת הספירה מהלקוח.
@@ -85,6 +87,8 @@ type CountQtyRow = {
   inventoryProductId: string;
   locationId: string | null;
   currentQuantity: number;
+  /** Snapshot מינימום בשורת הספירה האחרונה (null בשורות ישנות לפני המיגרציה) */
+  minimumQuantity?: number | null;
   countDate: Date;
   createdAt: Date;
   workerLines: {
@@ -105,6 +109,7 @@ async function loadLatestCountsForProducts(productIds: string[]): Promise<Map<st
       inventoryProductId: true,
       locationId: true,
       currentQuantity: true,
+      minimumQuantity: true,
       countDate: true,
       createdAt: true,
       workerLines: {
@@ -152,10 +157,12 @@ function mapProductRow(
   /** SUM גלובלי — לדוחות בלבד; לא מוצג כמלאי במסך ספירת Location */
   const businessTotal = systemTotalFromCounts(counts);
   const hasPlacementMin = placementMinimums.has(p.id);
-  const locationMin = resolveLocationMinimum(
-    hasPlacementMin ? placementMinimums.get(p.id) : null,
-    p.minimumQuantity,
-  );
+  const locationMin = resolveCountDefaultMinimum({
+    hasLastCountForLocation: latestForShelf != null,
+    lastCountMinimum: latestForShelf?.minimumQuantity,
+    placementMinimum: hasPlacementMin ? placementMinimums.get(p.id) : null,
+    productMinimum: p.minimumQuantity,
+  });
   const locationRequired = requiredQtyToMinimum(locationQty, locationMin);
   const tier = classifyStockTier(locationQty, locationMin);
   const lastWorkerQtys =
@@ -218,6 +225,7 @@ export async function GET(req: NextRequest) {
   }
 
   try {
+    await ensureLocationSchemaColumns();
     const shelf = await resolveShelfWithWorkers(locationIdParam ?? null, locationEq);
     if (!shelf) {
       return NextResponse.json({
@@ -374,6 +382,7 @@ export async function POST(req: NextRequest) {
   }
 
   try {
+    await ensureLocationSchemaColumns();
     const body = (await req.json()) as {
       countDate?: string | null;
       countedAt?: string | null;
@@ -387,6 +396,8 @@ export async function POST(req: NextRequest) {
         currentQuantity?: number;
         countedQuantity?: number;
         actualQty?: number;
+        /** מינימום לספירה זו (snapshot) — מוצר+מיקום+סבב */
+        minimumQuantity?: number;
         note?: string | null;
         notes?: string | null;
         workers?: {
@@ -441,6 +452,7 @@ export async function POST(req: NextRequest) {
       previousQuantity: number;
       currentQuantity: number;
       difference: number;
+      minimumQuantity: number;
       note: string | null;
       workers: PreparedWorker[];
     };
@@ -489,6 +501,7 @@ export async function POST(req: NextRequest) {
               inventoryProductId: true,
               locationId: true,
               currentQuantity: true,
+              minimumQuantity: true,
               countDate: true,
               createdAt: true,
               workerLines: {
@@ -575,11 +588,18 @@ export async function POST(req: NextRequest) {
       const previousQuantity = previousQtyFromCounts(countsByProduct.get(pid) ?? [], locationId);
       const difference = currentQuantity - previousQuantity;
       const noteText = line.note?.trim() ?? line.notes?.trim() ?? "";
+      const fallbackMin = productMeta.get(pid) ?? 0;
+      const rawMin = line.minimumQuantity;
+      const minimumQuantity =
+        rawMin != null && Number.isFinite(Number(rawMin))
+          ? Math.max(0, Number(rawMin))
+          : Math.max(0, fallbackMin);
       prepared.push({
         inventoryProductId: pid,
         previousQuantity,
         currentQuantity,
         difference,
+        minimumQuantity,
         note: noteText || null,
         workers: workerLines,
       });
@@ -637,11 +657,22 @@ export async function POST(req: NextRequest) {
           countDate,
           previousQuantity: p.previousQuantity,
           currentQuantity: p.currentQuantity,
+          minimumQuantity: p.minimumQuantity,
           difference: p.difference,
           note: p.note,
           countedByUserId: session.sub,
         })),
       });
+
+      /** מעדכן מינימום "אחרון" למיקום — לספירה הבאה / מסכים אחרים; לא נוגע בספירות ישנות */
+      if (locationId) {
+        for (const p of uniquePrepared) {
+          await tx.inventoryProductOnLocation.updateMany({
+            where: { locationId, inventoryProductId: p.inventoryProductId },
+            data: { minimumQuantity: p.minimumQuantity },
+          });
+        }
+      }
 
       const createdCounts = (await tx.inventoryCount.findMany({
         where: { sessionId: countSession.id },
@@ -687,8 +718,7 @@ export async function POST(req: NextRequest) {
             .map((c) => ({ locationId: c.locationId, currentQuantity: c.currentQuantity }));
           nextCounts.push({ locationId, currentQuantity: p.currentQuantity });
           const businessTotal = systemTotalFromCounts(nextCounts);
-          const minQty = productMeta.get(p.inventoryProductId) ?? 0;
-          const required = requiredQtyToMinimum(p.currentQuantity, minQty);
+          const required = requiredQtyToMinimum(p.currentQuantity, p.minimumQuantity);
           return {
             id: countIdByProduct.get(p.inventoryProductId) ?? "",
             inventoryProductId: p.inventoryProductId,
@@ -701,6 +731,7 @@ export async function POST(req: NextRequest) {
             businessTotalQuantity: businessTotal,
             systemShortage: required,
             requiredQuantity: required,
+            minimumQuantity: p.minimumQuantity,
             workers: p.workers,
           };
         }),

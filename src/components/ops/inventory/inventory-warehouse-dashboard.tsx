@@ -5,6 +5,7 @@ import {
   AlertTriangle,
   BarChart3,
   CheckCircle2,
+  ClipboardCopy,
   ClipboardList,
   Layers,
   Mail,
@@ -24,6 +25,7 @@ import {
   canViewCountSummary,
   canVoidCountSession,
 } from "@/lib/inventory/count-access";
+import { CountCopyModal } from "./count-copy-modal";
 import { CountSummaryModal } from "./count-summary-modal";
 import { CountSummaryEmailModal } from "./count-summary-email-modal";
 import { LocationFormModal, type LocationFormValues } from "./location-form-modal";
@@ -147,6 +149,7 @@ export function InventoryWarehouseDashboard() {
   const [historyOpen, setHistoryOpen] = useState(false);
   const [summariesOpen, setSummariesOpen] = useState(false);
   const [summaryEmailOpen, setSummaryEmailOpen] = useState(false);
+  const [copyCountsOpen, setCopyCountsOpen] = useState(false);
   const [viewSessionId, setViewSessionId] = useState<string | null>(null);
   const [viewSessionShelf, setViewSessionShelf] = useState<{
     name: string;
@@ -321,6 +324,14 @@ export function InventoryWarehouseDashboard() {
     exitingNames,
     modalShelf,
   ]);
+
+  const copyLocations = useMemo(
+    () =>
+      shelfSummaries
+        .filter((s) => Boolean(s.locationId?.trim()))
+        .map((s) => ({ id: s.locationId!.trim(), name: s.name })),
+    [shelfSummaries],
+  );
 
   const kpis: WarehouseKpi[] = useMemo(() => {
     const all = shelfSummaries.map(summaryToGrid);
@@ -585,6 +596,14 @@ export function InventoryWarehouseDashboard() {
           <p className="mt-1 text-sm font-semibold text-slate-500">{tW("pageHint")}</p>
         </div>
         <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto sm:flex-wrap">
+          <button
+            type="button"
+            onClick={() => setCopyCountsOpen(true)}
+            className={headerActionClass}
+          >
+            <ClipboardCopy className="h-4 w-4 shrink-0 text-[#6c4cff]" />
+            <span className="truncate">{tW("copyCounts.open")}</span>
+          </button>
           {canSeeSummaries ? (
             <>
               <button
@@ -912,6 +931,11 @@ export function InventoryWarehouseDashboard() {
       <CountSummaryEmailModal
         open={summaryEmailOpen}
         onClose={() => setSummaryEmailOpen(false)}
+      />
+      <CountCopyModal
+        open={copyCountsOpen}
+        onClose={() => setCopyCountsOpen(false)}
+        locations={copyLocations}
       />
 
       <ShelfAddProductsModal

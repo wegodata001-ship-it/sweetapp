@@ -617,6 +617,8 @@ model InventoryCount {
   previousQuantity   Float
   /// סה״כ נספר (= סכום כמויות העובדים כשיש פירוט)
   currentQuantity    Float
+  /// Snapshot מינימום בזמן הספירה (מוצר+מיקום+סבב) — לא משתנה כשמעדכנים מינימום בספירה מאוחרת
+  minimumQuantity    Float                  @default(0)
   countDate          DateTime
   createdAt          DateTime               @default(now())
   countedByUserId    String?
