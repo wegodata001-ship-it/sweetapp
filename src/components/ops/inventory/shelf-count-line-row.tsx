@@ -202,29 +202,37 @@ function CountSiteSquare({
   );
 }
 
-/** Touch-friendly 44–48px — קומפקטי לספירה מהירה בטלפון */
+/** כפתור +/- קומפקטי למובייל — לא תופס רוחב של 2 עמודות */
 function StepperButton({
   dir,
   onClick,
   label,
+  compact,
 }: {
   dir: "inc" | "dec";
   onClick: () => void;
   label: string;
+  compact?: boolean;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
       aria-label={label}
-      className="grid h-11 w-11 shrink-0 touch-manipulation place-items-center rounded-xl border border-[#e7ecf5] bg-white text-slate-700 transition active:scale-95 active:bg-slate-100"
+      className={`grid shrink-0 touch-manipulation place-items-center rounded-lg border border-[#e7ecf5] bg-white text-slate-700 transition active:scale-95 active:bg-slate-100 ${
+        compact ? "h-9 w-9" : "h-11 w-11 rounded-xl"
+      }`}
     >
-      {dir === "inc" ? <Plus className="h-5 w-5" /> : <Minus className="h-5 w-5" />}
+      {dir === "inc" ? (
+        <Plus className={compact ? "h-4 w-4" : "h-5 w-5"} />
+      ) : (
+        <Minus className={compact ? "h-4 w-4" : "h-5 w-5"} />
+      )}
     </button>
   );
 }
 
-/** שורת כמות למובייל — קומפקטית, מתאימה ל־2 עמודות זו לצד זו */
+/** שורת כמות למובייל — קומפקטית; ב־dense בלי steppers רחבים כדי לא לחתוך נקודות ספירה */
 function MobileQtyRow({
   label,
   value,
@@ -238,6 +246,7 @@ function MobileQtyRow({
   onEnterNext,
   placeholder,
   dense,
+  hideSteppers,
 }: {
   label: string;
   value: string;
@@ -250,25 +259,32 @@ function MobileQtyRow({
   onFocus?: () => void;
   onEnterNext?: () => void;
   placeholder?: string;
-  /** תווית קטנה מעל — לזוג יחידות בכרטיס */
   dense?: boolean;
+  /** בלי +/- — ל־2+ נקודות ספירה ברוחב מסך */
+  hideSteppers?: boolean;
 }) {
+  const showSteppers = !readOnly && !hideSteppers;
   const inputTone =
     tone === "emerald"
       ? "border-emerald-300 focus:border-emerald-500 focus:ring-emerald-500/25"
       : "border-slate-300 focus:border-[#6c4cff] focus:ring-[#6c4cff]/25";
   return (
-    <div className="min-w-0">
+    <div className="min-w-0 w-full">
       <span
-        className={`mb-1 block truncate text-center font-black leading-tight text-slate-700 ${
+        className={`mb-0.5 block truncate text-center font-black leading-tight text-slate-700 ${
           dense ? "text-[10px]" : "text-[11px]"
         }`}
       >
         {label}
       </span>
-      <div className={`flex items-center ${dense ? "gap-1" : "gap-1.5"}`}>
-        {!readOnly ? (
-          <StepperButton dir="dec" onClick={() => onStep(-1)} label={`${label} -1`} />
+      <div className={`flex min-w-0 items-center ${dense ? "gap-0.5" : "gap-1"}`}>
+        {showSteppers ? (
+          <StepperButton
+            dir="dec"
+            compact={dense}
+            onClick={() => onStep(-1)}
+            label={`${label} -1`}
+          />
         ) : null}
         <input
           ref={inputRef}
@@ -296,12 +312,17 @@ function MobileQtyRow({
           disabled={readOnly}
           enterKeyHint={enterKeyHint}
           aria-label={label}
-          className={`h-11 min-w-0 flex-1 touch-manipulation rounded-xl border-2 bg-white text-center font-black leading-none tabular-nums text-slate-900 outline-none transition focus:ring-2 disabled:bg-slate-50 ${
-            dense ? "text-lg" : "text-xl"
+          className={`h-10 min-w-0 flex-1 touch-manipulation rounded-lg border-2 bg-white text-center font-black leading-none tabular-nums text-slate-900 outline-none transition focus:ring-2 disabled:bg-slate-50 ${
+            dense ? "text-base" : "text-lg"
           } ${inputTone}`}
         />
-        {!readOnly ? (
-          <StepperButton dir="inc" onClick={() => onStep(1)} label={`${label} +1`} />
+        {showSteppers ? (
+          <StepperButton
+            dir="inc"
+            compact={dense}
+            onClick={() => onStep(1)}
+            label={`${label} +1`}
+          />
         ) : null}
       </div>
     </div>
@@ -636,16 +657,20 @@ function ShelfCountLineRowInner({
     const belowMin =
       sessionCounted && minimumQuantity > 0 && minimumStatus === "below";
     const minFieldLabel = t("minimum");
+    /** 2+ נקודות — בלי steppers בצד כדי שלא ייחתכו ב־375px */
+    const multiSites = hasWorkers && workers.length >= 2;
+    const sessionTotalLabel =
+      countedTotal === null || Number.isNaN(countedTotal) ? "—" : String(countedTotal);
 
     return (
       <div
         data-count-card
-        className={`overflow-hidden rounded-xl border px-2.5 py-2 transition-shadow ${
+        className={`rounded-lg border px-2 py-1.5 transition-shadow ${
           belowMin ? "border-rose-300 bg-rose-50/40" : ""
         } ${cardRing}`}
       >
-        {/* Header: מחיקה | שם */}
-        <div className="flex items-start gap-1.5">
+        {/* Header: מחיקה | שם + מלאי במקום (SSOT) */}
+        <div className="flex items-start gap-1">
           {showRemove ? (
             <RemoveRowButton
               size="lg"
@@ -655,23 +680,24 @@ function ShelfCountLineRowInner({
             />
           ) : null}
           <div className="min-w-0 flex-1 text-end">
-            <p className="line-clamp-2 text-[15px] font-black leading-snug text-slate-900">
-              {name}
-            </p>
+            <p className="line-clamp-2 text-sm font-black leading-snug text-slate-900">{name}</p>
             {unit ? (
               <p className="truncate text-[10px] font-semibold text-slate-500">{unit}</p>
             ) : null}
-            {/* SSOT מלאי המיקום — זהה למנהל ולעובד; לא תלוי ב־prefill של מיקומי ספירה */}
             <p className="mt-0.5 text-[11px] font-bold tabular-nums text-slate-600">
-              {t("systemTotal")}: {systemTotalQuantity}
+              {t("systemTotal")}:{" "}
+              <span className="font-black text-slate-800">{systemTotalQuantity}</span>
             </p>
           </div>
         </div>
 
+        {/* כל נקודות הספירה מההגדרה הנוכחית — בלי slice / בלי הסתרה */}
         {hasWorkers ? (
           <div
-            className={`mt-2 ${
-              workers.length >= 2 ? "grid grid-cols-2 gap-1.5" : "space-y-2"
+            className={`mt-1.5 grid gap-1.5 ${
+              multiSites
+                ? "grid-cols-1 min-[360px]:grid-cols-2"
+                : "grid-cols-1"
             }`}
           >
             {workers.map((w, idx) => {
@@ -683,7 +709,8 @@ function ShelfCountLineRowInner({
                   label={countSiteLabel(w)}
                   value={raw}
                   readOnly={readOnly}
-                  dense={workers.length >= 2}
+                  dense={multiSites}
+                  hideSteppers={multiSites}
                   enterKeyHint={isLastWorker ? (isLastInList ? "done" : "next") : "next"}
                   placeholder={qtyPlaceholder}
                   inputRef={idx === 0 ? qtyInputRef : undefined}
@@ -715,55 +742,44 @@ function ShelfCountLineRowInner({
               );
             })}
           </div>
-        ) : null}
-
-        {/* נספר | מינימום — זה לצד זה לספירה מהירה בטלפון */}
-        <div className="mt-2 grid grid-cols-2 gap-1.5">
-          {!hasWorkers ? (
+        ) : (
+          <div className="mt-1.5">
             <MobileQtyRow
               label={t("countedQtyLabel")}
               value={actualRaw}
               readOnly={readOnly}
               tone="emerald"
               dense
-              enterKeyHint="next"
+              enterKeyHint={isLastInList ? "done" : "next"}
               placeholder={qtyPlaceholder}
               inputRef={qtyInputRef}
               onFocus={onQtyFocus}
-              onEnterNext={() => {
-                const root = (document.activeElement as HTMLElement | null)?.closest(
-                  "[data-count-card]",
-                );
-                const inputs = root?.querySelectorAll<HTMLInputElement>(
-                  "input[inputmode='numeric'], input[inputmode='decimal']",
-                );
-                const minInput = inputs?.[1];
-                if (minInput) {
-                  minInput.focus();
-                  minInput.select();
-                  return;
-                }
-                onQtyEnterNext?.();
-              }}
+              onEnterNext={onQtyEnterNext}
               onChange={onActualChange}
               onStep={onBump}
             />
-          ) : (
-            <div className="min-w-0 rounded-xl bg-emerald-50/80 px-2 py-1.5 text-center ring-1 ring-emerald-200">
-              <span className="mb-0.5 block text-[10px] font-black text-emerald-800">
-                {t("countedTotal")}
-              </span>
-              <p className="text-lg font-black tabular-nums text-slate-900">{totalLabel}</p>
-            </div>
-          )}
+          </div>
+        )}
+
+        {/* סה״כ ספירה (חי) | מינימום — שני מספרים שונים ממלאי במקום */}
+        <div className="mt-1.5 grid grid-cols-2 gap-1.5">
+          <div className="min-w-0 rounded-lg bg-emerald-50 px-1.5 py-1 text-center ring-1 ring-emerald-200">
+            <span className="block text-[10px] font-black leading-tight text-emerald-800">
+              {t("countSessionTotal")}
+            </span>
+            <p className="text-lg font-black tabular-nums leading-tight text-slate-900">
+              {sessionTotalLabel}
+            </p>
+          </div>
           <div className="min-w-0">
-            <span className="mb-1 block truncate text-center text-[10px] font-black leading-tight text-slate-700">
+            <span className="mb-0.5 block truncate text-center text-[10px] font-black leading-tight text-slate-700">
               {minFieldLabel}
             </span>
-            <div className="flex items-center gap-1">
+            <div className="flex min-w-0 items-center gap-0.5">
               {!readOnly && onMinimumChange ? (
                 <StepperButton
                   dir="dec"
+                  compact
                   onClick={() => onMinimumChange(Math.max(0, minimumQuantity - 1))}
                   label={`${minFieldLabel} -1`}
                 />
@@ -772,7 +788,7 @@ function ShelfCountLineRowInner({
                 value={minimumQuantity}
                 onCommit={!readOnly ? onMinimumChange : undefined}
                 readOnly={readOnly}
-                className={`h-11 min-w-0 flex-1 touch-manipulation rounded-xl border-2 bg-white text-center text-lg font-black tabular-nums outline-none transition focus:ring-2 disabled:bg-slate-50 ${
+                className={`h-10 min-w-0 flex-1 touch-manipulation rounded-lg border-2 bg-white text-center text-base font-black tabular-nums outline-none transition focus:ring-2 disabled:bg-slate-50 ${
                   belowMin
                     ? "border-rose-300 text-rose-800 focus:border-rose-500 focus:ring-rose-500/25"
                     : "border-slate-300 text-slate-900 focus:border-[#6c4cff] focus:ring-[#6c4cff]/25"
@@ -781,6 +797,7 @@ function ShelfCountLineRowInner({
               {!readOnly && onMinimumChange ? (
                 <StepperButton
                   dir="inc"
+                  compact
                   onClick={() => onMinimumChange(minimumQuantity + 1)}
                   label={`${minFieldLabel} +1`}
                 />
@@ -789,24 +806,24 @@ function ShelfCountLineRowInner({
           </div>
         </div>
 
-        <div className="mt-1.5 flex flex-wrap items-center justify-center gap-1.5">
+        <div className="mt-1 flex flex-wrap items-center justify-center gap-1">
           {!sessionCounted ? (
-            <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-black text-slate-600 ring-1 ring-slate-200">
+            <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-black text-slate-600 ring-1 ring-slate-200">
               <span className="h-1.5 w-1.5 rounded-full bg-slate-400" aria-hidden />
               {t("sessionUncounted")}
             </span>
           ) : belowMin ? (
-            <span className="inline-flex items-center gap-1 rounded-full bg-rose-50 px-2 py-0.5 text-[11px] font-black text-rose-700 ring-1 ring-rose-200">
+            <span className="inline-flex items-center gap-1 rounded-full bg-rose-50 px-2 py-0.5 text-[10px] font-black text-rose-700 ring-1 ring-rose-200">
               <AlertTriangle className="h-3 w-3" aria-hidden />
               {t("minimumBelowWithShortage", { n: shortageToMin })}
             </span>
           ) : countedTotal !== null && !Number.isNaN(countedTotal) && countedTotal === 0 ? (
-            <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-black text-slate-700 ring-1 ring-slate-200">
+            <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-black text-slate-700 ring-1 ring-slate-200">
               <CheckCircle2 className="h-3 w-3" aria-hidden />
               {t("sessionCountedZero")}
             </span>
           ) : (
-            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-black text-emerald-700 ring-1 ring-emerald-200">
+            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-black text-emerald-700 ring-1 ring-emerald-200">
               <CheckCircle2 className="h-3 w-3" aria-hidden />
               {t("minimumOk")}
             </span>

@@ -2890,6 +2890,7 @@
           "loading": "جاري التحميل…",
           "inSystem": "في النظام",
           "systemTotal": "المخزون في الموقع",
+          "countSessionTotal": "إجمالي الجرد",
           "locationExpected": "الكمية المطلوبة (للحد الأدنى)",
           "editWorkers": "تعديل مواقع الجرد",
           "editWorkersTitle": "إدارة العمال",

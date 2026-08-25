@@ -1536,7 +1536,7 @@ function ShelfCountModalInner({
         <div
           ref={listRef}
           className={`min-h-0 flex-1 overflow-y-auto overscroll-contain p-2 sm:p-4 ${
-            isMobile ? "overflow-x-hidden pb-24" : "overflow-x-auto"
+            isMobile ? "overflow-x-hidden overflow-y-auto pb-24" : "overflow-x-auto"
           }`}
           onScroll={(e) => {
             const el = e.currentTarget;

@@ -2890,6 +2890,7 @@
           "loading": "Loading…",
           "inSystem": "System",
           "systemTotal": "Stock at location",
+          "countSessionTotal": "Count total",
           "locationExpected": "Required qty (to minimum)",
           "editWorkers": "Edit count sites",
           "editWorkersTitle": "Manage workers",
