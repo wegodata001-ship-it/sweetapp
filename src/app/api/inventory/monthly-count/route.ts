@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { prismaAny } from "@/lib/prisma";
 import { requireDb } from "@/lib/api-route";
 import { getSessionFromCookie } from "@/lib/auth/get-session";
+
+/** כמויות מלאי לפי מיקום — לא לפי משתמש; תמיד דינמי */
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 import {
   classifyStockTier,
   clampPage,

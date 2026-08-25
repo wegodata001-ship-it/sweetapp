@@ -35,6 +35,7 @@ import {
   type WorkerQtyMap,
 } from "./shelf-count-line-row";
 import { requiredQtyToMinimum } from "@/lib/inventory/count-latest";
+import { buildPrefillFromLastCount } from "@/lib/inventory/count-prefill";
 import { LocationWorkersModal } from "./location-workers-modal";
 import { ProductEditModal, type ProductEditValues } from "./product-edit-modal";
 import { CountRowRemoveConfirmModal } from "./count-row-remove-confirm-modal";
@@ -54,39 +55,6 @@ const MOBILE_MQ = "(max-width: 767px)";
 const KEYBOARD_MIN_INSET = 120;
 /** עמוד ראשון קטן — אין pageSize 500; המשך ב־infinite scroll */
 const COUNT_PAGE_SIZE = 80;
-
-/** טעינת ברירת מחדל מהספירה האחרונה — לא מאפסים ל־0 */
-function buildPrefillFromLastCount(
-  rows: InventoryCountProductRow[],
-  workers: LocationWorkerDto[],
-): { actual: Record<string, string>; workerQty: Record<string, WorkerQtyMap> } {
-  const actual: Record<string, string> = {};
-  const workerQty: Record<string, WorkerQtyMap> = {};
-  for (const row of rows) {
-    if (workers.length > 0) {
-      const map: WorkerQtyMap = {};
-      const last = row.lastWorkerQtys ?? [];
-      if (last.length > 0) {
-        for (const w of workers) {
-          const found = last.find((l) => l.inventoryLocationWorkerId === w.id);
-          map[w.id] = found != null ? String(found.countedQuantity) : "0";
-        }
-      } else {
-        const first = workers[0];
-        if (first) {
-          map[first.id] = String(row.previousQuantity ?? 0);
-          for (let i = 1; i < workers.length; i++) {
-            map[workers[i]!.id] = "0";
-          }
-        }
-      }
-      workerQty[row.id] = map;
-    } else {
-      actual[row.id] = String(row.previousQuantity ?? 0);
-    }
-  }
-  return { actual, workerQty };
-}
 
 function useIsMobileLayout() {
   const [isMobile, setIsMobile] = useState(false);
@@ -417,6 +385,7 @@ function ShelfCountModalInner({
         if (countDate) params.set("countDate", countDate);
         const res = await fetch(`/api/inventory/monthly-count?${params}`, {
           credentials: "same-origin",
+          cache: "no-store",
           signal: ac.signal,
         });
         const j = (await res.json()) as {
@@ -488,6 +457,7 @@ function ShelfCountModalInner({
       if (countDate) params.set("countDate", countDate);
       const res = await fetch(`/api/inventory/monthly-count?${params}`, {
         credentials: "same-origin",
+        cache: "no-store",
       });
       const j = (await res.json()) as {
         data?: InventoryCountProductRow[];
