@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { ArrowRightLeft, Loader2, X } from "lucide-react";
+import type { ShelfSummary } from "@/components/ops/inventory-count/types";
 
 type LocOption = { id: string; name: string };
 
@@ -11,7 +12,10 @@ type Props = {
   sourceLocationId: string | null;
   locations: LocOption[];
   onClose: () => void;
-  onTransferred: () => void;
+  onTransferred: (data?: {
+    sourceSummary?: ShelfSummary;
+    targetSummary?: ShelfSummary;
+  }) => void;
   t: (key: string, vars?: Record<string, string | number>) => string;
 };
 
@@ -56,12 +60,23 @@ export function ShelfTransferModal({
           shelfName: sourceName,
         }),
       });
-      const j = (await res.json()) as { ok?: boolean; error?: string; data?: { moved?: number } };
+      const j = (await res.json()) as {
+        ok?: boolean;
+        error?: string;
+        data?: {
+          moved?: number;
+          sourceSummary?: ShelfSummary;
+          targetSummary?: ShelfSummary;
+        };
+      };
       if (!res.ok || !j.ok) {
         setError(j.error ?? t("failed"));
         return;
       }
-      onTransferred();
+      onTransferred({
+        sourceSummary: j.data?.sourceSummary,
+        targetSummary: j.data?.targetSummary,
+      });
       onClose();
     } catch {
       setError(t("failed"));

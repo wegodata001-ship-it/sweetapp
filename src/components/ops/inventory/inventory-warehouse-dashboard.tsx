@@ -5,6 +5,7 @@ import {
   AlertTriangle,
   BarChart3,
   CheckCircle2,
+  CalendarDays,
   ClipboardCopy,
   ClipboardList,
   Layers,
@@ -21,11 +22,13 @@ import { useToast } from "@/components/toast-provider";
 import type { ShelfSummary } from "@/components/ops/inventory-count/types";
 import { localYmd } from "@/components/ops/inventory-count/utils";
 import {
+  canEditWeekdayMinimums,
   canRemoveCountRow,
   canViewCountSummary,
   canVoidCountSession,
 } from "@/lib/inventory/count-access";
 import { CountCopyModal } from "./count-copy-modal";
+import { WeekdayMinimumsModal } from "./weekday-minimums-modal";
 import { CountSummaryModal } from "./count-summary-modal";
 import { CountSummaryEmailModal } from "./count-summary-email-modal";
 import { LocationFormModal, type LocationFormValues } from "./location-form-modal";
@@ -124,6 +127,7 @@ export function InventoryWarehouseDashboard() {
   const canRemoveRows = canRemoveCountRow(user?.role);
   /** סיכומי ספירות ושליחתם במייל — מנהל מערכת / בעל העסק בלבד */
   const canSeeSummaries = canViewCountSummary(user?.role);
+  const canEditWeekdays = canEditWeekdayMinimums(user?.role);
   /** ביטול סבב ספירה שגוי — מנהל מערכת / בעל העסק בלבד */
   const canVoidSessions = canVoidCountSession(user?.role);
 
@@ -150,6 +154,7 @@ export function InventoryWarehouseDashboard() {
   const [summariesOpen, setSummariesOpen] = useState(false);
   const [summaryEmailOpen, setSummaryEmailOpen] = useState(false);
   const [copyCountsOpen, setCopyCountsOpen] = useState(false);
+  const [weekdayMinimumsOpen, setWeekdayMinimumsOpen] = useState(false);
   const [viewSessionId, setViewSessionId] = useState<string | null>(null);
   const [viewSessionShelf, setViewSessionShelf] = useState<{
     name: string;
@@ -604,6 +609,16 @@ export function InventoryWarehouseDashboard() {
             <ClipboardCopy className="h-4 w-4 shrink-0 text-[#6c4cff]" />
             <span className="truncate">{tW("copyCounts.open")}</span>
           </button>
+          {canEditWeekdays ? (
+            <button
+              type="button"
+              onClick={() => setWeekdayMinimumsOpen(true)}
+              className={headerActionClass}
+            >
+              <CalendarDays className="h-4 w-4 shrink-0 text-[#6c4cff]" />
+              <span className="truncate">{tW("weekdayMinimums.open")}</span>
+            </button>
+          ) : null}
           {canSeeSummaries ? (
             <>
               <button
@@ -907,8 +922,13 @@ export function InventoryWarehouseDashboard() {
         canRemoveRows={canRemoveRows}
         canViewSummaries={canSeeSummaries}
         locale={locale}
+        locations={copyLocations}
         onClose={closeShelfCount}
         onShelfStatsChange={loadShelves}
+        onProductPlacementChange={({ sourceSummary, targetSummary }) => {
+          if (sourceSummary) upsertSummary(sourceSummary);
+          if (targetSummary) upsertSummary(targetSummary);
+        }}
         t={tModal}
       />
 
@@ -935,6 +955,11 @@ export function InventoryWarehouseDashboard() {
       <CountCopyModal
         open={copyCountsOpen}
         onClose={() => setCopyCountsOpen(false)}
+        locations={copyLocations}
+      />
+      <WeekdayMinimumsModal
+        open={weekdayMinimumsOpen}
+        onClose={() => setWeekdayMinimumsOpen(false)}
         locations={copyLocations}
       />
 
@@ -973,7 +998,10 @@ export function InventoryWarehouseDashboard() {
           setTransferOpen(false);
           setActionShelf(null);
         }}
-        onTransferred={() => void loadShelves()}
+        onTransferred={(data) => {
+          if (data?.sourceSummary) upsertSummary(data.sourceSummary);
+          if (data?.targetSummary) upsertSummary(data.targetSummary);
+        }}
         t={(k, v) => tW(`transfer.${k}`, v)}
       />
 

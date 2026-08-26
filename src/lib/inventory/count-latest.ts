@@ -48,12 +48,13 @@ export function systemTotalFromCounts(
   return total;
 }
 
-/** כמה חסר כדי להגיע למינימום — לעולם לא שלילי */
+/** כמה חסר כדי להגיע למינימום — לעולם לא שלילי (0 מינימום מפורש = חסר 0) */
 export function requiredQtyToMinimum(
   onHand: number,
   minimumQuantity: number,
 ): number {
-  if (!(minimumQuantity > 0)) return 0;
+  if (!Number.isFinite(minimumQuantity) || minimumQuantity < 0) return 0;
+  if (!Number.isFinite(onHand)) return 0;
   return Math.max(0, minimumQuantity - onHand);
 }
 
@@ -99,7 +100,9 @@ export function locationMinimumStatus(
   onHandOrCounted: number | null,
   minimumQuantity: number,
 ): { status: LocationMinimumStatus; shortage: number } {
-  if (!(minimumQuantity > 0)) return { status: "unset", shortage: 0 };
+  if (!Number.isFinite(minimumQuantity) || minimumQuantity < 0) {
+    return { status: "unset", shortage: 0 };
+  }
   if (onHandOrCounted === null || !Number.isFinite(onHandOrCounted)) {
     return { status: "unset", shortage: 0 };
   }

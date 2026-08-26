@@ -351,13 +351,24 @@
 }
 
 .error {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.45rem;
   border-radius: 0.75rem;
   border: 1px solid rgba(248, 113, 113, 0.35);
   background: rgba(127, 29, 29, 0.25);
-  padding: 0.55rem 0.75rem;
-  font-size: 0.8rem;
+  padding: 0.5rem 0.65rem;
+  font-size: 0.78rem;
+  line-height: 1.35;
   font-weight: 700;
   color: #fecaca;
+}
+
+.errorIcon {
+  margin-top: 0.05rem;
+  height: 0.95rem;
+  width: 0.95rem;
+  flex-shrink: 0;
 }
 
 .submitBtn {

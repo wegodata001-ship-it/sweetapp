@@ -4,11 +4,31 @@ import Image from "next/image";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { FormEvent, Suspense, useEffect, useState } from "react";
-import { Lock, ShieldCheck, User } from "lucide-react";
+import { AlertTriangle, Lock, ShieldCheck, User } from "lucide-react";
 import { useAuth } from "@/components/auth-provider";
 import { useI18n } from "@/components/i18n-provider";
 import { LanguageSwitcher } from "@/components/language-switcher";
 import styles from "./login.module.css";
+
+function loginErrorMessage(code: string | undefined, t: (key: string) => string): string {
+  switch (code) {
+    case "REQUIRED_FIELDS":
+      return t("auth.errors.requiredFields");
+    case "INVALID_CREDENTIALS":
+    case "bad_credentials":
+    case "use_national_id":
+      return t("auth.errors.invalidCredentials");
+    case "ACCOUNT_DISABLED":
+    case "inactive":
+      return t("auth.errors.accountDisabled");
+    case "SYSTEM_ERROR":
+    case "server_error":
+    case "server_config":
+      return t("auth.errors.systemError");
+    default:
+      return t("auth.errors.systemError");
+  }
+}
 
 function LoginContent() {
   const router = useRouter();
@@ -44,7 +64,10 @@ function LoginContent() {
     e.preventDefault();
     if (submitting) return;
     const id = identifier.trim();
-    if (!id || !password) return;
+    if (!id || !password) {
+      setError(t("auth.errors.requiredFields"));
+      return;
+    }
 
     setError(null);
     setSubmitting(true);
@@ -57,7 +80,6 @@ function LoginContent() {
       });
       const data = (await res.json()) as {
         ok?: boolean;
-        error?: string;
         code?: string;
         user?: {
           id: string;
@@ -71,26 +93,12 @@ function LoginContent() {
         };
       };
       if (!res.ok || !data.ok) {
-        const code = data.code ?? "";
-        const msg =
-          code === "inactive"
-            ? t("auth.errorInactive")
-            : code === "use_national_id"
-              ? t("auth.errorUseNationalId")
-              : code === "server_config"
-                ? t("auth.errorServerConfig")
-                : data.error || t("auth.errorInvalidCredentials");
-        setError(msg);
+        setError(loginErrorMessage(data.code, t));
         setSubmitting(false);
         return;
       }
       if (data.user) setSessionUser(data.user);
 
-      /**
-       * ניווט מלא אחרי login — יציב יותר מ־router.replace כשיש race
-       * עם /api/auth/me או עדכון cookie באמצע מעבר soft.
-       * משאירים submitting=true עד רענון העמוד (מונע לחיצה כפולה).
-       */
       if (data.user?.mustChangePassword) {
         window.location.assign("/change-password");
         return;
@@ -103,7 +111,7 @@ function LoginContent() {
             : "/";
       window.location.assign(dest);
     } catch {
-      setError(t("auth.errorNetwork"));
+      setError(t("auth.errors.systemError"));
       setSubmitting(false);
     }
   }
@@ -189,9 +197,10 @@ function LoginContent() {
               </div>
 
               {error ? (
-                <p className={styles.error} role="alert">
-                  {error}
-                </p>
+                <div className={styles.error} role="alert">
+                  <AlertTriangle className={styles.errorIcon} aria-hidden />
+                  <span>{error}</span>
+                </div>
               ) : null}
 
               <button

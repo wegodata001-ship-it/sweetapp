@@ -33,6 +33,8 @@ export type LocationWorkerDto = {
 export type LastWorkerQtyDto = {
   inventoryLocationWorkerId: string;
   countedQuantity: number;
+  workerWorkArea?: string | null;
+  workerDisplayName?: string | null;
 };
 
 export type InventoryCountProductRow = {
@@ -61,6 +63,9 @@ export type InventoryCountProductRow = {
   lastCountedAt: string | null;
   /** פירוט עובדים מהספירה האחרונה — לטעינת ברירת מחדל */
   lastWorkerQtys?: LastWorkerQtyDto[];
+  /** baseline לזיהוי Draft מיושן / concurrency בשמירה */
+  latestCountId?: string | null;
+  latestCountCreatedAt?: string | null;
 };
 
 export type MonthlyCountRow = InventoryCountProductRow & {

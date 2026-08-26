@@ -40,6 +40,20 @@ export async function ensureLocationSchemaColumns(): Promise<void> {
           ALTER TABLE "InventoryProductOnLocation"
             ADD COLUMN IF NOT EXISTS "minimumQuantity" DOUBLE PRECISION NOT NULL DEFAULT 0
         `);
+        for (const col of [
+          "minimumSun",
+          "minimumMon",
+          "minimumTue",
+          "minimumWed",
+          "minimumThu",
+          "minimumFri",
+          "minimumSat",
+        ]) {
+          await prismaAny.$executeRawUnsafe(`
+            ALTER TABLE "InventoryProductOnLocation"
+              ADD COLUMN IF NOT EXISTS "${col}" DOUBLE PRECISION
+          `);
+        }
         await prismaAny.$executeRawUnsafe(`
           ALTER TABLE "InventoryCount"
             ADD COLUMN IF NOT EXISTS "minimumQuantity" DOUBLE PRECISION NOT NULL DEFAULT 0

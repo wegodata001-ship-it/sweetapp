@@ -32,3 +32,8 @@ export function canViewCountSummary(role: string | null | undefined): boolean {
 export function canVoidCountSession(role: string | null | undefined): boolean {
   return isInventoryManager(role);
 }
+
+/** עריכת מינימום לפי ימים — מנהל מערכת / בעל העסק בלבד */
+export function canEditWeekdayMinimums(role: string | null | undefined): boolean {
+  return isInventoryManager(role);
+}

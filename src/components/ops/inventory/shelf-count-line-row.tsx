@@ -3,6 +3,7 @@
 import { memo, useEffect, useState, type ReactNode } from "react";
 import {
   AlertTriangle,
+  ArrowRightLeft,
   CheckCircle2,
   GripVertical,
   Loader2,
@@ -12,6 +13,10 @@ import {
   Plus,
   Trash2,
 } from "lucide-react";
+import {
+  ProductRowActionsMenu,
+  type ProductRowMenuAction,
+} from "./product-row-actions-menu";
 import {
   countStatusLabel,
   countStatusStyles,
@@ -23,6 +28,10 @@ import {
   locationMinimumStatus,
   requiredQtyToMinimum,
 } from "@/lib/inventory/count-latest";
+import {
+  analyzeWorkerQuantities,
+  sumWorkerQuantities,
+} from "@/lib/inventory/count-worker-qty";
 
 export type CountRowVariant = "table" | "card";
 
@@ -71,28 +80,16 @@ export type ShelfCountLineRowProps = {
   onQtyEnterNext?: () => void;
   onEditProduct: () => void;
   onRemoveFromCount?: () => void;
+  onProductMenuAction?: (action: ProductRowMenuAction) => void;
+  onTransferDragStart?: () => void;
+  onTransferDragEnd?: () => void;
+  transferDragging?: boolean;
   t: (key: string, vars?: Record<string, string | number>) => string;
 };
 
-/** סה״כ נספר = סכום כמויות מיקומי הספירה (workers) — ללא שינוי לוגיקה */
-export function sumWorkerQuantities(
-  workers: LocationWorkerDto[],
-  workerQtys: WorkerQtyMap,
-): number | null {
-  if (workers.length === 0) return null;
-  let any = false;
-  let sum = 0;
-  for (const w of workers) {
-    const raw = workerQtys[w.id] ?? "";
-    if (raw === "") continue;
-    any = true;
-    const n = Number(raw);
-    if (!Number.isFinite(n) || n < 0) return Number.NaN;
-    sum += n;
-  }
-  if (!any) return null;
-  return sum;
-}
+/** סה״כ נספר = סכום כמויות מיקומי הספירה (רק כשכל הנקודות הושלמו) */
+export { analyzeWorkerQuantities, sumWorkerQuantities } from "@/lib/inventory/count-worker-qty";
+export type { WorkerQtyAnalysis } from "@/lib/inventory/count-worker-qty";
 
 /** תווית מיקום ספירה — אזור אחריות, אחרת שם */
 export function countSiteLabel(w: LocationWorkerDto): string {
@@ -546,13 +543,53 @@ function DragHandle({
       draggable
       onDragStart={(e) => {
         e.dataTransfer.effectAllowed = "move";
+        e.dataTransfer.setData("application/x-count-reorder", "1");
         onDragStart?.();
       }}
       className="grid h-8 w-8 cursor-grab place-items-center justify-self-center rounded-lg text-slate-400 active:cursor-grabbing hover:bg-white hover:text-slate-600"
       aria-label="Reorder"
-      title="Drag"
+      title="Reorder"
     >
       <GripVertical className="h-4 w-4" aria-hidden />
+    </button>
+  );
+}
+
+function TransferDragHandle({
+  disabled,
+  dragging,
+  onDragStart,
+  onDragEnd,
+  label,
+}: {
+  disabled?: boolean;
+  dragging?: boolean;
+  onDragStart?: () => void;
+  onDragEnd?: () => void;
+  label: string;
+}) {
+  if (disabled) return null;
+  return (
+    <button
+      type="button"
+      draggable
+      onDragStart={(e) => {
+        e.stopPropagation();
+        e.dataTransfer.effectAllowed = "move";
+        e.dataTransfer.setData("application/x-product-transfer", "1");
+        onDragStart?.();
+      }}
+      onDragEnd={(e) => {
+        e.stopPropagation();
+        onDragEnd?.();
+      }}
+      className={`grid h-8 w-8 shrink-0 cursor-grab touch-manipulation place-items-center rounded-lg text-[#6c4cff] active:cursor-grabbing hover:bg-violet-50 ${
+        dragging ? "bg-violet-100 ring-2 ring-[#6c4cff]/40" : ""
+      }`}
+      aria-label={label}
+      title={label}
+    >
+      <ArrowRightLeft className="h-4 w-4" aria-hidden />
     </button>
   );
 }
@@ -622,11 +659,17 @@ function ShelfCountLineRowInner({
   onQtyEnterNext,
   onEditProduct,
   onRemoveFromCount,
+  onProductMenuAction,
+  onTransferDragStart,
+  onTransferDragEnd,
+  transferDragging = false,
   t,
 }: ShelfCountLineRowProps) {
   const showRemove = !readOnly && canRemove && !!onRemoveFromCount;
+  const showMenu = !readOnly && !!onProductMenuAction;
   const hasWorkers = workers.length > 0;
-  const workerSum = hasWorkers ? sumWorkerQuantities(workers, workerQtys) : null;
+  const workerAnalysis = hasWorkers ? analyzeWorkerQuantities(workers, workerQtys) : null;
+  const workerSum = workerAnalysis?.total ?? null;
   const countedTotal = hasWorkers
     ? workerSum
     : actualRaw === ""
@@ -646,7 +689,21 @@ function ShelfCountLineRowInner({
     totalLabel,
   } = useCountDerived(countedTotal, systemQty, systemTotalQuantity, minimumQuantity);
   const requiredDisplay = requiredNow > 0 ? requiredNow : requiredQuantity;
-  const qtyPlaceholder = sessionCounted ? "0" : t("qtyPlaceholder");
+  const qtyPlaceholder = t("qtyPlaceholder");
+  const sessionTotalIncomplete =
+    hasWorkers && workerAnalysis != null && !workerAnalysis.complete;
+  const sessionTotalLabel = !hasWorkers
+    ? countedTotal === null || Number.isNaN(countedTotal)
+      ? "—"
+      : String(countedTotal)
+    : workerAnalysis?.complete
+      ? String(workerAnalysis.total)
+      : sessionTotalIncomplete
+        ? t("partialCountTotal", {
+            sum: workerAnalysis!.partialSum,
+            n: workerAnalysis!.unsetCount,
+          })
+        : "—";
 
   if (variant === "card") {
     const cardRing = focused
@@ -654,13 +711,11 @@ function ShelfCountLineRowInner({
       : sessionCounted
         ? "border-[#e7ecf5] bg-white"
         : "border-dashed border-slate-200 bg-slate-50/60";
-    const belowMin =
-      sessionCounted && minimumQuantity > 0 && minimumStatus === "below";
-    const minFieldLabel = t("minimum");
+    const belowMin = sessionCounted && shortageToMin > 0;
+    const minFieldLabel = t("minimumToday");
+    const shortageLabel = t("shortageToday");
     /** 2+ נקודות — בלי steppers בצד כדי שלא ייחתכו ב־375px */
     const multiSites = hasWorkers && workers.length >= 2;
-    const sessionTotalLabel =
-      countedTotal === null || Number.isNaN(countedTotal) ? "—" : String(countedTotal);
 
     return (
       <div
@@ -671,7 +726,19 @@ function ShelfCountLineRowInner({
       >
         {/* Header: מחיקה | שם + מלאי במקום (SSOT) */}
         <div className="flex items-start gap-1">
-          {showRemove ? (
+          {showMenu ? (
+            <ProductRowActionsMenu
+              canRemove={showRemove}
+              removing={removing}
+              disabled={readOnly}
+              t={t}
+              onAction={(action) => {
+                if (action === "edit") onEditProduct();
+                else if (action === "remove") onRemoveFromCount?.();
+                else onProductMenuAction?.(action);
+              }}
+            />
+          ) : showRemove ? (
             <RemoveRowButton
               size="lg"
               removing={removing}
@@ -679,6 +746,13 @@ function ShelfCountLineRowInner({
               label={t("removeRow")}
             />
           ) : null}
+          <TransferDragHandle
+            disabled={readOnly}
+            dragging={transferDragging}
+            label={t("moveToLocation")}
+            onDragStart={onTransferDragStart}
+            onDragEnd={onTransferDragEnd}
+          />
           <div className="min-w-0 flex-1 text-end">
             <p className="line-clamp-2 text-sm font-black leading-snug text-slate-900">{name}</p>
             {unit ? (
@@ -688,6 +762,20 @@ function ShelfCountLineRowInner({
               {t("systemTotal")}:{" "}
               <span className="font-black text-slate-800">{systemTotalQuantity}</span>
             </p>
+            <p className="text-[11px] font-bold tabular-nums text-slate-600">
+              {minFieldLabel}:{" "}
+              <span className="font-black text-slate-800">{minimumQuantity}</span>
+            </p>
+            {countedTotal !== null && !Number.isNaN(countedTotal) ? (
+              <p className="text-[11px] font-bold tabular-nums text-slate-600">
+                {shortageLabel}:{" "}
+                <span
+                  className={`font-black ${shortageToMin > 0 ? "text-rose-700" : "text-slate-800"}`}
+                >
+                  {shortageToMin}
+                </span>
+              </p>
+            ) : null}
           </div>
         </div>
 
@@ -761,7 +849,7 @@ function ShelfCountLineRowInner({
           </div>
         )}
 
-        {/* סה״כ ספירה (חי) | מינימום — שני מספרים שונים ממלאי במקום */}
+        {/* סה״כ ספירה (חי) | חסר להיום */}
         <div className="mt-1.5 grid grid-cols-2 gap-1.5">
           <div className="min-w-0 rounded-lg bg-emerald-50 px-1.5 py-1 text-center ring-1 ring-emerald-200">
             <span className="block text-[10px] font-black leading-tight text-emerald-800">
@@ -771,38 +859,25 @@ function ShelfCountLineRowInner({
               {sessionTotalLabel}
             </p>
           </div>
-          <div className="min-w-0">
-            <span className="mb-0.5 block truncate text-center text-[10px] font-black leading-tight text-slate-700">
-              {minFieldLabel}
+          <div
+            className={`min-w-0 rounded-lg px-1.5 py-1 text-center ring-1 ${
+              shortageToMin > 0 ? "bg-rose-50 ring-rose-200" : "bg-slate-50 ring-slate-200"
+            }`}
+          >
+            <span
+              className={`block text-[10px] font-black leading-tight ${
+                shortageToMin > 0 ? "text-rose-800" : "text-slate-600"
+              }`}
+            >
+              {shortageLabel}
             </span>
-            <div className="flex min-w-0 items-center gap-0.5">
-              {!readOnly && onMinimumChange ? (
-                <StepperButton
-                  dir="dec"
-                  compact
-                  onClick={() => onMinimumChange(Math.max(0, minimumQuantity - 1))}
-                  label={`${minFieldLabel} -1`}
-                />
-              ) : null}
-              <MinimumQtyInput
-                value={minimumQuantity}
-                onCommit={!readOnly ? onMinimumChange : undefined}
-                readOnly={readOnly}
-                className={`h-10 min-w-0 flex-1 touch-manipulation rounded-lg border-2 bg-white text-center text-base font-black tabular-nums outline-none transition focus:ring-2 disabled:bg-slate-50 ${
-                  belowMin
-                    ? "border-rose-300 text-rose-800 focus:border-rose-500 focus:ring-rose-500/25"
-                    : "border-slate-300 text-slate-900 focus:border-[#6c4cff] focus:ring-[#6c4cff]/25"
-                }`}
-              />
-              {!readOnly && onMinimumChange ? (
-                <StepperButton
-                  dir="inc"
-                  compact
-                  onClick={() => onMinimumChange(minimumQuantity + 1)}
-                  label={`${minFieldLabel} +1`}
-                />
-              ) : null}
-            </div>
+            <p
+              className={`text-lg font-black tabular-nums leading-tight ${
+                shortageToMin > 0 ? "text-rose-800" : "text-slate-900"
+              }`}
+            >
+              {countedTotal === null || Number.isNaN(countedTotal) ? "—" : shortageToMin}
+            </p>
           </div>
         </div>
 
@@ -849,15 +924,20 @@ function ShelfCountLineRowInner({
 
       <div className="min-w-0 text-end">
         <div className="flex items-start justify-end gap-1">
-          {showRemove ? (
-            <RemoveRowButton
-              size="sm"
+          {showMenu ? (
+            <ProductRowActionsMenu
+              canRemove={showRemove}
               removing={removing}
-              onClick={() => onRemoveFromCount?.()}
-              label={t("removeRow")}
+              disabled={readOnly}
+              t={t}
+              onAction={(action) => {
+                if (action === "edit") onEditProduct();
+                else if (action === "remove") onRemoveFromCount?.();
+                else onProductMenuAction?.(action);
+              }}
             />
           ) : null}
-          {!readOnly ? (
+          {!readOnly && !showMenu ? (
             <button
               type="button"
               onClick={onEditProduct}
@@ -867,6 +947,13 @@ function ShelfCountLineRowInner({
               <Pencil className="h-3.5 w-3.5" />
             </button>
           ) : null}
+          <TransferDragHandle
+            disabled={readOnly}
+            dragging={transferDragging}
+            label={t("moveToLocation")}
+            onDragStart={onTransferDragStart}
+            onDragEnd={onTransferDragEnd}
+          />
           <div className="min-w-0">
             <p className="line-clamp-2 break-words text-sm font-black leading-tight text-slate-900 sm:text-[13px]">
               {name}
@@ -905,12 +992,19 @@ function ShelfCountLineRowInner({
       )}
 
       <div className={`min-w-0 rounded-xl border px-1 py-1.5 text-center ${minimumClasses}`}>
-        <MinimumQtyInput
-          value={minimumQuantity}
-          onCommit={!readOnly ? onMinimumChange : undefined}
-          readOnly={readOnly}
-          className="h-10 w-full border-0 bg-transparent text-center text-sm font-black tabular-nums text-inherit outline-none"
-        />
+        {onMinimumChange && !readOnly ? (
+          <MinimumQtyInput
+            value={minimumQuantity}
+            onCommit={onMinimumChange}
+            readOnly={readOnly}
+            className="h-10 w-full border-0 bg-transparent text-center text-sm font-black tabular-nums text-inherit outline-none"
+          />
+        ) : (
+          <>
+            <span className="block text-[10px] font-bold opacity-80">{t("minimumToday")}</span>
+            <p className="text-sm font-black tabular-nums">{minimumQuantity}</p>
+          </>
+        )}
       </div>
 
       <div className={`min-w-0 rounded-xl px-1.5 py-2 text-center ring-1 ${diffBox}`}>
@@ -938,7 +1032,7 @@ function ShelfCountLineRowInner({
             </button>
           </>
         ) : null}
-        {minimumQuantity > 0 ? (
+        {shortageToMin > 0 ? (
           minimumStatus === "below" ? (
             <span className="inline-flex items-center gap-1 rounded-full bg-rose-50 px-2 py-0.5 text-[10px] font-black text-rose-700 ring-1 ring-rose-200">
               <AlertTriangle className="h-3 w-3" aria-hidden />

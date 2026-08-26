@@ -26,6 +26,7 @@ import { resolveCountLineStatus } from "@/components/ops/inventory-count/count-p
 import type {
   InventoryCountProductRow,
   LocationWorkerDto,
+  ShelfSummary,
 } from "@/components/ops/inventory-count/types";
 import type { CountSessionDetail } from "@/lib/inventory/count-session-service";
 import {
@@ -36,8 +37,26 @@ import {
 } from "./shelf-count-line-row";
 import { requiredQtyToMinimum } from "@/lib/inventory/count-latest";
 import { buildPrefillFromLastCount } from "@/lib/inventory/count-prefill";
+import { analyzeWorkerQuantities, parseWorkerQtyField } from "@/lib/inventory/count-worker-qty";
+import {
+  buildBaseCountsFromProducts,
+  clearCountDraft,
+  isCountDraftStale,
+  loadCountDraft,
+  saveCountDraft,
+  type CountDraftBaseCount,
+  type CountDraftPayload,
+} from "@/lib/inventory/count-draft";
 import { LocationWorkersModal } from "./location-workers-modal";
 import { ProductEditModal, type ProductEditValues } from "./product-edit-modal";
+import { ProductTransferModal } from "./product-transfer-modal";
+import { ProductTransferDropStrip } from "./product-transfer-drop-strip";
+import type { ProductRowMenuAction } from "./product-row-actions-menu";
+import {
+  transferProduct,
+  type ProductTransferMode,
+  type ProductTransferResult,
+} from "@/lib/inventory/product-transfer-client";
 import { CountRowRemoveConfirmModal } from "./count-row-remove-confirm-modal";
 import { CountSummaryModal } from "./count-summary-modal";
 import { CountSummaryEmailModal } from "./count-summary-email-modal";
@@ -123,6 +142,13 @@ type Props = {
   locale?: string;
   onClose: () => void;
   onShelfStatsChange?: () => void;
+  /** מיקומים פעילים — להעברת מוצר */
+  locations?: { id: string; name: string }[];
+  onProductPlacementChange?: (payload: {
+    result: ProductTransferResult;
+    sourceSummary?: ShelfSummary;
+    targetSummary?: ShelfSummary;
+  }) => void;
   t: (key: string, vars?: Record<string, string | number>) => string;
 };
 
@@ -168,6 +194,8 @@ function ShelfCountModalInner({
   locale = "he-IL",
   onClose,
   onShelfStatsChange,
+  locations = [],
+  onProductPlacementChange,
   t,
 }: Props) {
   const [products, setProducts] = useState<InventoryCountProductRow[]>([]);
@@ -217,6 +245,20 @@ function ShelfCountModalInner({
   const [belowMinReport, setBelowMinReport] = useState<
     { id: string; name: string; counted: number; minimum: number; shortage: number }[] | null
   >(null);
+  /** Draft מקומי — הצעה להמשיך אחרי refresh */
+  const [draftOffer, setDraftOffer] = useState<CountDraftPayload | null>(null);
+  /** Draft מיושן — ספירה חדשה בשרת מאז התחלת הטיוטה */
+  const [draftStale, setDraftStale] = useState<CountDraftPayload | null>(null);
+  /** baseline לכל מוצר בפתיחה — concurrency + Draft v2 */
+  const [countBaseByProduct, setCountBaseByProduct] = useState<
+    Record<string, CountDraftBaseCount>
+  >({});
+  const [transferModal, setTransferModal] = useState<{
+    mode: ProductTransferMode;
+    product: { id: string; name: string };
+  } | null>(null);
+  const [transferDragProductId, setTransferDragProductId] = useState<string | null>(null);
+  const [transferBusyTargetId, setTransferBusyTargetId] = useState<string | null>(null);
   const [scanQ, setScanQ] = useState("");
   const [scrollTop, setScrollTop] = useState(0);
   const [viewportH, setViewportH] = useState(480);
@@ -279,6 +321,12 @@ function ShelfCountModalInner({
     setNotice(null);
     setError(null);
     setBelowMinReport(null);
+    setDraftOffer(null);
+    setDraftStale(null);
+    setCountBaseByProduct({});
+    setTransferModal(null);
+    setTransferDragProductId(null);
+    setTransferBusyTargetId(null);
     setScanQ("");
     setScrollTop(0);
     setExporting(null);
@@ -351,10 +399,7 @@ function ShelfCountModalInner({
             unit: line.unit,
             previousQuantity: line.previousQuantity,
             systemTotalQuantity: line.previousQuantity,
-            systemShortage:
-              line.minimumQuantity > 0
-                ? Math.max(0, line.minimumQuantity - line.currentQuantity)
-                : 0,
+            systemShortage: requiredQtyToMinimum(line.currentQuantity, line.minimumQuantity),
             minimumQuantity: line.minimumQuantity,
             lastCountedAt: detail.createdAt,
           }));
@@ -419,10 +464,29 @@ function ShelfCountModalInner({
         setActualById(prefill.actual);
         setWorkerQtyByProduct(prefill.workerQty);
         setTouchedIds(new Set());
+        setCountBaseByProduct(buildBaseCountsFromProducts(rows));
         setExistingCountToday(j.meta?.existingCountToday ?? null);
         setListTotal(j.meta?.total ?? rows.length);
         setHasMore(Boolean(j.meta?.hasMore));
         setNextPage(2);
+        if (locationId?.trim() && !sessionId) {
+          const draft = loadCountDraft(locationId.trim(), countDate);
+          if (draft && draft.touchedIds.length > 0) {
+            if (isCountDraftStale(draft, rows)) {
+              setDraftStale(draft);
+              setDraftOffer(null);
+            } else {
+              setDraftOffer(draft);
+              setDraftStale(null);
+            }
+          } else {
+            setDraftOffer(null);
+            setDraftStale(null);
+          }
+        } else {
+          setDraftOffer(null);
+          setDraftStale(null);
+        }
       } catch (e) {
         if (cancelled || (e instanceof DOMException && e.name === "AbortError")) return;
         setProducts([]);
@@ -481,6 +545,10 @@ function ShelfCountModalInner({
       const prefill = buildPrefillFromLastCount(rows, workers);
       setActualById((prev) => ({ ...prefill.actual, ...prev }));
       setWorkerQtyByProduct((prev) => ({ ...prefill.workerQty, ...prev }));
+      setCountBaseByProduct((prev) => ({
+        ...prev,
+        ...buildBaseCountsFromProducts(rows),
+      }));
       setListTotal(j.meta?.total ?? listTotal);
       setHasMore(Boolean(j.meta?.hasMore));
       setNextPage((p) => p + 1);
@@ -520,6 +588,180 @@ function ShelfCountModalInner({
       void loadMoreProducts();
     }
   }, [open, loading, sessionId, readOnly, hasMore, loadingMore, products.length, loadMoreProducts]);
+
+  /** Draft מקומי — לא DB */
+  useEffect(() => {
+    if (!open || sessionId || readOnly || !locationId?.trim()) return;
+    if (touchedIds.size === 0) return;
+    const timer = window.setTimeout(() => {
+      const baseLatestCountsByProduct: Record<string, CountDraftBaseCount> = {};
+      for (const pid of touchedIds) {
+        const base = countBaseByProduct[pid];
+        if (base) baseLatestCountsByProduct[pid] = base;
+      }
+      saveCountDraft({
+        version: 2,
+        locationId: locationId.trim(),
+        countDate,
+        actualById,
+        workerQtyByProduct,
+        touchedIds: [...touchedIds],
+        savedAt: new Date().toISOString(),
+        baseLatestCountsByProduct,
+      });
+    }, 800);
+    return () => window.clearTimeout(timer);
+  }, [
+    open,
+    sessionId,
+    readOnly,
+    locationId,
+    countDate,
+    actualById,
+    workerQtyByProduct,
+    touchedIds,
+    countBaseByProduct,
+  ]);
+
+  const applyDraft = useCallback(() => {
+    if (!draftOffer) return;
+    setActualById({ ...draftOffer.actualById });
+    setWorkerQtyByProduct({ ...draftOffer.workerQtyByProduct });
+    setTouchedIds(new Set(draftOffer.touchedIds));
+    setSessionCountedIds(new Set(draftOffer.touchedIds));
+    setDraftOffer(null);
+    setNotice(t("draftRestored"));
+  }, [draftOffer, t]);
+
+  const dismissStaleDraft = useCallback(() => {
+    if (locationId?.trim()) clearCountDraft(locationId.trim(), countDate);
+    setDraftStale(null);
+  }, [locationId, countDate]);
+
+  const transferTargets = useMemo(
+    () => locations.filter((l) => l.id && l.id !== locationId?.trim()),
+    [locations, locationId],
+  );
+
+  const transferDragProduct = useMemo(
+    () => products.find((p) => p.id === transferDragProductId) ?? null,
+    [products, transferDragProductId],
+  );
+
+  const removeProductFromList = useCallback(
+    (productId: string): RemovedRowSnapshot | null => {
+      const idx = products.findIndex((p) => p.id === productId);
+      if (idx < 0) return null;
+      const snap: RemovedRowSnapshot = {
+        row: products[idx]!,
+        index: idx,
+        actual: actualById[productId],
+        workerQty: workerQtyByProduct[productId],
+      };
+      setProducts((prev) => prev.filter((p) => p.id !== productId));
+      setActualById((prev) => {
+        const next = { ...prev };
+        delete next[productId];
+        return next;
+      });
+      setWorkerQtyByProduct((prev) => {
+        const next = { ...prev };
+        delete next[productId];
+        return next;
+      });
+      setTouchedIds((prev) => {
+        const next = new Set(prev);
+        next.delete(productId);
+        return next;
+      });
+      setSessionCountedIds((prev) => {
+        const next = new Set(prev);
+        next.delete(productId);
+        return next;
+      });
+      setListTotal((n) => Math.max(0, n - 1));
+      return snap;
+    },
+    [actualById, products, workerQtyByProduct],
+  );
+
+  const restoreRemovedProduct = useCallback((snap: RemovedRowSnapshot) => {
+    setProducts((prev) => {
+      const next = [...prev];
+      next.splice(Math.min(snap.index, next.length), 0, snap.row);
+      return next;
+    });
+    if (snap.actual !== undefined) {
+      setActualById((prev) => ({ ...prev, [snap.row.id]: snap.actual! }));
+    }
+    if (snap.workerQty) {
+      setWorkerQtyByProduct((prev) => ({ ...prev, [snap.row.id]: snap.workerQty! }));
+    }
+    setListTotal((n) => n + 1);
+  }, []);
+
+  const applyTransferSuccess = useCallback(
+    (result: ProductTransferResult) => {
+      onProductPlacementChange?.({
+        result,
+        sourceSummary: result.sourceSummary,
+        targetSummary: result.targetSummary,
+      });
+      if (result.mode === "move") {
+        removeProductFromList(result.productId);
+      }
+      setNotice(t("transferSuccess"));
+      setError(null);
+    },
+    [onProductPlacementChange, removeProductFromList, t],
+  );
+
+  const runProductTransfer = useCallback(
+    async (
+      productId: string,
+      targetLocationId: string,
+      targetName: string,
+      mode: ProductTransferMode,
+      opts?: { optimistic?: boolean },
+    ) => {
+      if (transferBusyTargetId) return false;
+      const rollback =
+        opts?.optimistic && mode === "move" ? removeProductFromList(productId) : null;
+      setTransferBusyTargetId(targetLocationId);
+      setError(null);
+      try {
+        const result = await transferProduct({
+          mode,
+          sourceLocationId: locationId ?? null,
+          sourceName: shelfName,
+          targetLocationId,
+          targetName,
+          productId,
+        });
+        if (rollback) {
+          /* כבר הוסר אופטימית — לא להחזיר */
+        }
+        applyTransferSuccess(result);
+        return true;
+      } catch (e) {
+        if (rollback) restoreRemovedProduct(rollback);
+        setError(e instanceof Error ? e.message : t("transferFailed"));
+        return false;
+      } finally {
+        setTransferBusyTargetId(null);
+        setTransferDragProductId(null);
+      }
+    },
+    [
+      applyTransferSuccess,
+      locationId,
+      removeProductFromList,
+      restoreRemovedProduct,
+      shelfName,
+      t,
+      transferBusyTargetId,
+    ],
+  );
 
   const scheduleShelfRefresh = useCallback(() => {
     if (!onShelfStatsChange) return;
@@ -834,13 +1076,12 @@ function ShelfCountModalInner({
     }
     // belowMin — לפי הכמות הנוכחית בשדה (כולל prefill) מול מינימום המיקום
     return list.filter((p) => {
-      if (!(p.minimumQuantity > 0)) return false;
       const counted = getCountedQty(p.id);
       const onHand =
         counted !== null && Number.isFinite(counted)
           ? counted
           : (p.systemTotalQuantity ?? p.previousQuantity);
-      return onHand < p.minimumQuantity;
+      return requiredQtyToMinimum(onHand, p.minimumQuantity) > 0;
     });
   }, [
     getCountedQty,
@@ -923,7 +1164,6 @@ function ShelfCountModalInner({
   const minimumSummary = useMemo(() => {
     let below = 0;
     for (const product of products) {
-      if (product.minimumQuantity <= 0) continue;
       const counted = hasWorkers
         ? sumWorkerQuantities(workers, workerQtyByProduct[product.id] ?? {})
         : actualById[product.id] === "" || actualById[product.id] == null
@@ -933,7 +1173,7 @@ function ShelfCountModalInner({
         counted !== null && Number.isFinite(counted)
           ? counted
           : (product.systemTotalQuantity ?? product.previousQuantity);
-      if (onHand < product.minimumQuantity) below += 1;
+      if (requiredQtyToMinimum(onHand, product.minimumQuantity) > 0) below += 1;
     }
     const total = listTotal > 0 ? listTotal : products.length;
     return {
@@ -943,32 +1183,6 @@ function ShelfCountModalInner({
       loaded: products.length,
     };
   }, [actualById, hasWorkers, listTotal, products, workerQtyByProduct, workers]);
-
-  /**
-   * מינימום בספירה = snapshot ליום/סבב זה.
-   * נשמר עם שמירת הספירה (לא PATCH מיידי ל-placement) — כדי לא לדרוס
-   * מינימום של ספירות ישנות ולשמור עריכה מהירה בשורה.
-   */
-  const updateSessionMinimum = useCallback(
-    (productId: string, minimumQuantity: number) => {
-      const nextMin = Math.max(0, Number(minimumQuantity) || 0);
-      setProducts((prev) =>
-        prev.map((row) => {
-          if (row.id !== productId) return row;
-          const onHand = row.systemTotalQuantity ?? row.previousQuantity;
-          const required = requiredQtyToMinimum(onHand, nextMin);
-          return {
-            ...row,
-            minimumQuantity: nextMin,
-            systemShortage: required,
-            requiredQuantity: required,
-          };
-        }),
-      );
-      markTouched(productId);
-    },
-    [markTouched],
-  );
 
   /**
    * עודפים — צבירה של אותו סטטוס שכל כרטיס כבר מציג (נספר > הספירה הקודמת במיקום).
@@ -993,31 +1207,44 @@ function ShelfCountModalInner({
       type SaveLine = {
         inventoryProductId: string;
         currentQuantity: number;
-        minimumQuantity: number;
+        baseLatestCountId?: string;
+        baseLatestCountCreatedAt?: string;
         workers?: { inventoryLocationWorkerId: string; countedQuantity: number }[];
       };
       const lines: SaveLine[] = [];
-      const minOf = (productId: string) =>
-        Math.max(0, Number(products.find((p) => p.id === productId)?.minimumQuantity) || 0);
 
       if (hasWorkers) {
+        const incomplete: string[] = [];
         for (const productId of dirtyProductIds) {
           const map = workerQtyByProduct[productId] ?? {};
-          const sum = sumWorkerQuantities(workers, map);
-          if (sum === null || Number.isNaN(sum) || sum < 0) continue;
+          const analysis = analyzeWorkerQuantities(workers, map);
+          if (!analysis.complete) {
+            const name = products.find((p) => p.id === productId)?.name ?? productId;
+            incomplete.push(name);
+            continue;
+          }
+          if (analysis.total === null || Number.isNaN(analysis.total) || analysis.total < 0) continue;
+          const base = countBaseByProduct[productId];
           lines.push({
             inventoryProductId: productId,
-            currentQuantity: sum,
-            minimumQuantity: minOf(productId),
+            currentQuantity: analysis.total,
+            baseLatestCountId: base?.countId,
+            baseLatestCountCreatedAt: base?.createdAt,
             workers: workers.map((w) => {
-              const raw = map[w.id] ?? "";
-              const qty = raw === "" ? 0 : Number(raw);
+              const parsed = parseWorkerQtyField(map[w.id]);
+              if (parsed === null || Number.isNaN(parsed)) {
+                throw new Error("incomplete");
+              }
               return {
                 inventoryLocationWorkerId: w.id,
-                countedQuantity: Number.isFinite(qty) && qty >= 0 ? qty : 0,
+                countedQuantity: parsed,
               };
             }),
           });
+        }
+        if (incomplete.length > 0) {
+          setError(t("incompleteSitesSave", { name: incomplete[0] }));
+          return false;
         }
       } else {
         for (const id of dirtyProductIds) {
@@ -1025,10 +1252,12 @@ function ShelfCountModalInner({
           if (raw === "") continue;
           const qty = Number(raw);
           if (!Number.isFinite(qty) || qty < 0) continue;
+          const base = countBaseByProduct[id];
           lines.push({
             inventoryProductId: id,
             currentQuantity: qty,
-            minimumQuantity: minOf(id),
+            baseLatestCountId: base?.countId,
+            baseLatestCountCreatedAt: base?.createdAt,
           });
         }
       }
@@ -1069,6 +1298,8 @@ function ShelfCountModalInner({
               systemShortage?: number;
               requiredQuantity?: number;
               minimumQuantity?: number;
+              latestCountId?: string;
+              latestCountCreatedAt?: string | null;
               workers?: {
                 inventoryLocationWorkerId: string;
                 countedQuantity: number;
@@ -1078,7 +1309,10 @@ function ShelfCountModalInner({
         };
 
         if (!res.ok || !j.ok) {
-          setError(j.error ?? t("saveFailed"));
+          setError(
+            j.error ??
+              (res.status === 409 ? t("countConflict") : t("saveFailed")),
+          );
           return false;
         }
 
@@ -1111,6 +1345,9 @@ function ShelfCountModalInner({
               systemShortage: required,
               requiredQuantity: required,
               minimumQuantity: savedMin,
+              latestCountId: saved.latestCountId ?? product.latestCountId,
+              latestCountCreatedAt:
+                saved.latestCountCreatedAt ?? product.latestCountCreatedAt,
               lastWorkerQtys:
                 saved.workers?.map((w) => ({
                   inventoryLocationWorkerId: w.inventoryLocationWorkerId,
@@ -1123,7 +1360,7 @@ function ShelfCountModalInner({
               const counted = product.previousQuantity;
               const minimum = product.minimumQuantity || 0;
               const shortage = requiredQtyToMinimum(counted, minimum);
-              if (!(minimum > 0) || shortage <= 0) return null;
+              if (shortage <= 0) return null;
               return {
                 id: product.id,
                 name: product.name,
@@ -1139,12 +1376,25 @@ function ShelfCountModalInner({
           setWorkerQtyByProduct(prefill.workerQty);
           return next;
         });
+        setCountBaseByProduct((prev) => {
+          const merged = { ...prev };
+          for (const saved of savedRows) {
+            if (saved.latestCountId) {
+              merged[saved.inventoryProductId] = {
+                countId: saved.latestCountId,
+                createdAt: saved.latestCountCreatedAt ?? "",
+              };
+            }
+          }
+          return merged;
+        });
         setBelowMinReport(report);
         if (j.data?.sessionId) setActiveSessionId(j.data.sessionId);
         if (j.data?.sessionNumber != null) setSessionNumber(j.data.sessionNumber);
         setTouchedIds(new Set());
         setConfirmCloseOpen(false);
         setNotice(t("savedSuccess"));
+        if (locationId?.trim()) clearCountDraft(locationId.trim(), countDate);
         scheduleShelfRefresh();
         if (opts?.closeAfterSave) onClose();
         return true;
@@ -1159,6 +1409,7 @@ function ShelfCountModalInner({
     [
       actualById,
       countDate,
+      countBaseByProduct,
       dirtyProductIds,
       hasWorkers,
       locationId,
@@ -1198,10 +1449,20 @@ function ShelfCountModalInner({
     [activeSessionId, t],
   );
 
+  const hasIncompleteDirtyCounts = useMemo(() => {
+    if (!hasWorkers) return false;
+    for (const productId of dirtyProductIds) {
+      const analysis = analyzeWorkerQuantities(workers, workerQtyByProduct[productId] ?? {});
+      if (!analysis.complete) return true;
+    }
+    return false;
+  }, [dirtyProductIds, hasWorkers, workerQtyByProduct, workers]);
+
   if (!open) return null;
   const isReadOnly = readOnly || !!sessionId;
   const canRemoveRow = canRemoveRows && !isReadOnly;
-  const saveDisabled = savingAll || !hasDirtyChanges || hasInvalidChanges;
+  const saveDisabled =
+    savingAll || !hasDirtyChanges || hasInvalidChanges || hasIncompleteDirtyCounts;
   const dirtyCount = dirtyProductIds.size;
   /**
    * שמירה נוספת יוצרת סבב ספירה חדש ולא מעדכנת את הקיים. האזהרה מתריעה בלבד —
@@ -1414,6 +1675,42 @@ function ShelfCountModalInner({
             </div>
           ) : null}
 
+          {draftStale && !isReadOnly ? (
+            <div className="mt-2 flex flex-wrap items-center justify-end gap-2 rounded-xl bg-amber-50 px-3 py-2 ring-1 ring-amber-300/60">
+              <p className="text-[11px] font-bold text-amber-900">{t("draftStalePrompt")}</p>
+              <button
+                type="button"
+                onClick={dismissStaleDraft}
+                className="rounded-lg bg-amber-700 px-3 py-1.5 text-[11px] font-black text-white"
+              >
+                {t("draftStaleLoadNew")}
+              </button>
+            </div>
+          ) : null}
+
+          {draftOffer && !draftStale && !isReadOnly ? (
+            <div className="mt-2 flex flex-wrap items-center justify-end gap-2 rounded-xl bg-[#f5f3ff] px-3 py-2 ring-1 ring-[#6c4cff]/25">
+              <p className="text-[11px] font-bold text-slate-700">{t("draftRestorePrompt")}</p>
+              <button
+                type="button"
+                onClick={applyDraft}
+                className="rounded-lg bg-[#6c4cff] px-3 py-1.5 text-[11px] font-black text-white"
+              >
+                {t("draftRestoreAction")}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (locationId?.trim()) clearCountDraft(locationId.trim(), countDate);
+                  setDraftOffer(null);
+                }}
+                className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-black text-slate-600"
+              >
+                {t("draftDiscard")}
+              </button>
+            </div>
+          ) : null}
+
           {notice ? (
             <p className="mt-2 inline-flex items-center gap-1 rounded-full bg-emerald-50 px-3 py-1 text-xs font-black text-emerald-700 ring-1 ring-emerald-200">
               <CheckCircle2 className="h-4 w-4" aria-hidden />
@@ -1591,7 +1888,7 @@ function ShelfCountModalInner({
                         e.preventDefault();
                       }}
                       onDrop={(e) => {
-                        if (!canDragReorder || !dragProductId) return;
+                        if (!canDragReorder || !dragProductId || transferDragProductId) return;
                         e.preventDefault();
                         reorderProduct(dragProductId, row.id);
                         setDragProductId(null);
@@ -1628,6 +1925,22 @@ function ShelfCountModalInner({
                           setRemoveTarget({ id: row.id, name: row.name });
                         }}
                         onDragStart={() => setDragProductId(row.id)}
+                        onProductMenuAction={(action) => {
+                          if (action === "move") {
+                            setTransferModal({
+                              mode: "move",
+                              product: { id: row.id, name: row.name },
+                            });
+                          } else if (action === "addAlso") {
+                            setTransferModal({
+                              mode: "add",
+                              product: { id: row.id, name: row.name },
+                            });
+                          }
+                        }}
+                        onTransferDragStart={() => setTransferDragProductId(row.id)}
+                        onTransferDragEnd={() => setTransferDragProductId(null)}
+                        transferDragging={transferDragProductId === row.id}
                         onWorkerQtyChange={(workerId, v) => {
                           if (!isReadOnly) setWorkerQty(row.id, workerId, v);
                         }}
@@ -1636,9 +1949,6 @@ function ShelfCountModalInner({
                         }}
                         onBump={(d) => {
                           if (!isReadOnly) bump(row.id, row.previousQuantity, d);
-                        }}
-                        onMinimumChange={(min) => {
-                          if (!isReadOnly) updateSessionMinimum(row.id, min);
                         }}
                         onQtyFocus={() => setFocusedProductId(row.id)}
                         onQtyEnterNext={() => focusNextProduct(row.id)}
@@ -1667,6 +1977,27 @@ function ShelfCountModalInner({
             </div>
           )}
         </div>
+
+        {transferDragProduct && !isReadOnly ? (
+          <ProductTransferDropStrip
+            targets={transferTargets}
+            busyTargetId={transferBusyTargetId}
+            productName={transferDragProduct.name}
+            onDragEnd={() => {
+              setTransferDragProductId(null);
+            }}
+            onDropTarget={(targetId, targetName) => {
+              void runProductTransfer(
+                transferDragProduct.id,
+                targetId,
+                targetName,
+                "move",
+                { optimistic: true },
+              );
+            }}
+            t={t}
+          />
+        ) : null}
 
         <footer className="sticky bottom-0 z-10 shrink-0 border-t border-[#e7ecf5]/80 bg-white/95 px-2.5 pt-1.5 pb-[max(0.5rem,env(safe-area-inset-bottom))] backdrop-blur-md md:hidden">
           <p className="mb-1 text-center text-[11px] font-black tabular-nums text-slate-600">
@@ -1771,7 +2102,7 @@ function ShelfCountModalInner({
             for (const [productId, map] of Object.entries(prev)) {
               const nextMap: WorkerQtyMap = {};
               for (const w of next) {
-                nextMap[w.id] = map[w.id] ?? "0";
+                nextMap[w.id] = map[w.id] ?? "";
               }
               out[productId] = nextMap;
             }
@@ -1799,10 +2130,20 @@ function ShelfCountModalInner({
               };
             }),
           );
-          // מינימום בספירה — מקומי לסבב; נשמר עם שמירת הספירה
-          updateSessionMinimum(p.id, p.minimumQuantity);
           setNotice(t("productUpdated"));
         }}
+        t={t}
+      />
+
+      <ProductTransferModal
+        open={transferModal !== null}
+        mode={transferModal?.mode ?? "move"}
+        product={transferModal?.product ?? null}
+        sourceName={shelfName}
+        sourceLocationId={locationId ?? null}
+        locations={locations}
+        onClose={() => setTransferModal(null)}
+        onSuccess={(result) => applyTransferSuccess(result)}
         t={t}
       />
     </div>

@@ -24,12 +24,16 @@ import {
   pickLatestCountForLocation,
   previousQtyFromCounts,
   requiredQtyToMinimum,
-  resolveCountDefaultMinimum,
-  resolveLocationMinimum,
   systemTotalFromCounts,
 } from "@/lib/inventory/count-latest";
 import {
+  israelWeekdayIndexFromCountDay,
+  resolveTodayMinimumForCountDay,
+  type PlacementWeekdayMinimums,
+} from "@/lib/inventory/weekday-minimum";
+import {
   loadExcludedProductIds,
+  normalizeCountDay,
   resolveCountRoundScope,
 } from "@/lib/inventory/count-exclusions";
 import { ACTIVE_COUNT_LINE_WHERE } from "@/lib/inventory/count-session-status";
@@ -98,6 +102,8 @@ type CountQtyRow = {
   workerLines: {
     inventoryLocationWorkerId: string;
     countedQuantity: number;
+    workerDisplayName?: string;
+    workerWorkArea?: string;
   }[];
 };
 
@@ -120,6 +126,8 @@ async function loadLatestCountsForProducts(productIds: string[]): Promise<Map<st
         select: {
           inventoryLocationWorkerId: true,
           countedQuantity: true,
+          workerDisplayName: true,
+          workerWorkArea: true,
         },
       },
     },
@@ -132,18 +140,28 @@ async function loadLatestCountsForProducts(productIds: string[]): Promise<Map<st
   return countsByProduct;
 }
 
-async function loadPlacementMinimums(
+async function loadPlacementWeekdayData(
   locationId: string | null,
   productIds: string[],
-): Promise<Map<string, number>> {
-  const out = new Map<string, number>();
+): Promise<Map<string, PlacementWeekdayMinimums>> {
+  const out = new Map<string, PlacementWeekdayMinimums>();
   if (!locationId || productIds.length === 0) return out;
   const rows = (await prismaAny.inventoryProductOnLocation.findMany({
     where: { locationId, inventoryProductId: { in: productIds } },
-    select: { inventoryProductId: true, minimumQuantity: true },
-  })) as { inventoryProductId: string; minimumQuantity: number }[];
+    select: {
+      inventoryProductId: true,
+      minimumQuantity: true,
+      minimumSun: true,
+      minimumMon: true,
+      minimumTue: true,
+      minimumWed: true,
+      minimumThu: true,
+      minimumFri: true,
+      minimumSat: true,
+    },
+  })) as (PlacementWeekdayMinimums & { inventoryProductId: string })[];
   for (const r of rows) {
-    out.set(r.inventoryProductId, Number(r.minimumQuantity) || 0);
+    out.set(r.inventoryProductId, r);
   }
   return out;
 }
@@ -152,7 +170,8 @@ function mapProductRow(
   p: ProductRow,
   shelf: { id: string | null; name: string },
   countsByProduct: Map<string, CountQtyRow[]>,
-  placementMinimums: Map<string, number>,
+  placementWeekdays: Map<string, PlacementWeekdayMinimums>,
+  countDay: string,
 ) {
   const counts = countsByProduct.get(p.id) ?? [];
   const locationName = shelf.name || p.inventoryLocation?.name || p.location || "";
@@ -160,19 +179,16 @@ function mapProductRow(
   const locationQty = previousQtyFromCounts(counts, shelf.id);
   /** SUM גלובלי — לדוחות בלבד; לא מוצג כמלאי במסך ספירת Location */
   const businessTotal = systemTotalFromCounts(counts);
-  const hasPlacementMin = placementMinimums.has(p.id);
-  const locationMin = resolveCountDefaultMinimum({
-    hasLastCountForLocation: latestForShelf != null,
-    lastCountMinimum: latestForShelf?.minimumQuantity,
-    placementMinimum: hasPlacementMin ? placementMinimums.get(p.id) : null,
-    productMinimum: p.minimumQuantity,
-  });
+  const placement = placementWeekdays.get(p.id);
+  const locationMin = resolveTodayMinimumForCountDay(placement, p.minimumQuantity, countDay);
   const locationRequired = requiredQtyToMinimum(locationQty, locationMin);
   const tier = classifyStockTier(locationQty, locationMin);
   const lastWorkerQtys =
     latestForShelf?.workerLines?.map((w) => ({
       inventoryLocationWorkerId: w.inventoryLocationWorkerId,
       countedQuantity: w.countedQuantity,
+      workerDisplayName: w.workerDisplayName ?? null,
+      workerWorkArea: w.workerWorkArea ?? null,
     })) ?? [];
   return {
     id: p.id,
@@ -202,9 +218,18 @@ function mapProductRow(
       ? new Date(latestForShelf.countDate).toISOString()
       : null,
     lastWorkerQtys,
+    latestCountId: latestForShelf?.id ?? null,
+    latestCountCreatedAt: latestForShelf?.createdAt
+      ? new Date(latestForShelf.createdAt).toISOString()
+      : null,
     stockTier: tier,
   };
 }
+
+const ROSTER_STALE_MSG =
+  "רשימת נקודות הספירה עודכנה — יש לרענן לפני שמירה.";
+const COUNT_CONFLICT_MSG =
+  "הספירה עודכנה על ידי משתמש אחר. יש לרענן את הנתונים לפני שמירה.";
 
 export async function GET(req: NextRequest) {
   const block = await requireDb();
@@ -298,12 +323,12 @@ export async function GET(req: NextRequest) {
         .map((id) => byId.get(id))
         .filter((p): p is ProductRow => !!p);
       const productIds = orderedProducts.map((p) => p.id);
-      const [countsByProduct, placementMinimums] = await Promise.all([
+      const [countsByProduct, placementWeekdays] = await Promise.all([
         loadLatestCountsForProducts(productIds),
-        loadPlacementMinimums(shelf.id, productIds),
+        loadPlacementWeekdayData(shelf.id, productIds),
       ]);
       const mapped = orderedProducts.map((p) =>
-        mapProductRow(p, shelf, countsByProduct, placementMinimums),
+        mapProductRow(p, shelf, countsByProduct, placementWeekdays, roundScope.countDay),
       );
       const filtered = mapped.filter((m) => matchesStockFilter(m.stockTier, stock));
       const total = filtered.length;
@@ -322,6 +347,7 @@ export async function GET(req: NextRequest) {
           workers: shelf.workers,
           hasMore: start + pageSize < total,
           countDay: roundScope.countDay,
+          todayWeekday: israelWeekdayIndexFromCountDay(roundScope.countDay),
           removedCount: excludedProductIds.length,
           existingCountToday,
         },
@@ -338,16 +364,17 @@ export async function GET(req: NextRequest) {
     const orderedPage = pageIds.map((id) => byId.get(id)).filter((p): p is ProductRow => !!p);
 
     const pageProductIds = orderedPage.map((p) => p.id);
-    const [countsByProduct, placementMinimums] = await Promise.all([
+    const [countsByProduct, placementWeekdays] = await Promise.all([
       loadLatestCountsForProducts(pageProductIds),
-      loadPlacementMinimums(shelf.id, pageProductIds),
+      loadPlacementWeekdayData(shelf.id, pageProductIds),
     ]);
     const paged = orderedPage.map((p) => {
       const { stockTier: _s, ...rest } = mapProductRow(
         p,
         shelf,
         countsByProduct,
-        placementMinimums,
+        placementWeekdays,
+        roundScope.countDay,
       );
       return rest;
     });
@@ -408,6 +435,9 @@ export async function POST(req: NextRequest) {
           inventoryLocationWorkerId?: string;
           countedQuantity?: number;
         }[];
+        /** baseline מהפתיחה — לזיהוי שמירה מיושנת */
+        baseLatestCountId?: string | null;
+        baseLatestCountCreatedAt?: string | null;
       }[];
     };
     if (!Array.isArray(body.lines) || body.lines.length === 0) {
@@ -415,6 +445,7 @@ export async function POST(req: NextRequest) {
     }
 
     const rawDate = body.countDate?.trim() || body.countedAt?.trim();
+    const countDay = normalizeCountDay(rawDate);
     /** תאריך עסקי מהלקוח + שעת שמירה אמיתית — מונע tie באותו יום */
     let countDate = new Date();
     if (rawDate) {
@@ -487,7 +518,16 @@ export async function POST(req: NextRequest) {
             ? {
                 placements: {
                   where: { locationId },
-                  select: { minimumQuantity: true },
+                  select: {
+                    minimumQuantity: true,
+                    minimumSun: true,
+                    minimumMon: true,
+                    minimumTue: true,
+                    minimumWed: true,
+                    minimumThu: true,
+                    minimumFri: true,
+                    minimumSat: true,
+                  },
                   take: 1,
                 },
               }
@@ -512,6 +552,8 @@ export async function POST(req: NextRequest) {
                 select: {
                   inventoryLocationWorkerId: true,
                   countedQuantity: true,
+                  workerDisplayName: true,
+                  workerWorkArea: true,
                 },
               },
             },
@@ -532,16 +574,13 @@ export async function POST(req: NextRequest) {
         existingProducts as {
           id: string;
           minimumQuantity: number;
-          placements?: { minimumQuantity: number }[];
+          placements?: PlacementWeekdayMinimums[];
         }[]
       ).map((p) => {
-        const placementMin = p.placements?.[0]?.minimumQuantity;
+        const placement = p.placements?.[0];
         return [
           p.id,
-          resolveLocationMinimum(
-            placementMin != null ? placementMin : null,
-            p.minimumQuantity,
-          ),
+          resolveTodayMinimumForCountDay(placement, p.minimumQuantity, countDay),
         ] as const;
       }),
     );
@@ -592,12 +631,7 @@ export async function POST(req: NextRequest) {
       const previousQuantity = previousQtyFromCounts(countsByProduct.get(pid) ?? [], locationId);
       const difference = currentQuantity - previousQuantity;
       const noteText = line.note?.trim() ?? line.notes?.trim() ?? "";
-      const fallbackMin = productMeta.get(pid) ?? 0;
-      const rawMin = line.minimumQuantity;
-      const minimumQuantity =
-        rawMin != null && Number.isFinite(Number(rawMin))
-          ? Math.max(0, Number(rawMin))
-          : Math.max(0, fallbackMin);
+      const minimumQuantity = productMeta.get(pid) ?? 0;
       prepared.push({
         inventoryProductId: pid,
         previousQuantity,
@@ -635,6 +669,95 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const baseByProduct = new Map<string, { countId: string; createdAt?: string }>();
+    for (const line of body.lines) {
+      const pid = (line.inventoryProductId ?? line.productId)?.trim();
+      const baseId = line.baseLatestCountId?.trim();
+      if (pid && baseId) {
+        baseByProduct.set(pid, {
+          countId: baseId,
+          createdAt: line.baseLatestCountCreatedAt?.trim() || undefined,
+        });
+      }
+    }
+
+    const roster =
+      locationId
+        ? ((await prismaAny.inventoryLocationWorker.findMany({
+            where: { inventoryLocationId: locationId, isActive: true },
+            select: { id: true, displayName: true, workArea: true },
+            orderBy: { displayOrder: "asc" },
+          })) as { id: string; displayName: string; workArea: string }[])
+        : [];
+
+    if (locationId && roster.length > 0) {
+      const rosterIds = new Set(roster.map((w) => w.id));
+      for (const line of body.lines) {
+        for (const w of line.workers ?? []) {
+          const wid = w.inventoryLocationWorkerId?.trim();
+          if (wid && !rosterIds.has(wid)) {
+            return NextResponse.json({ ok: false, error: ROSTER_STALE_MSG }, { status: 409 });
+          }
+        }
+      }
+    }
+
+    const freshLatest = await loadLatestCountsForProducts(
+      uniquePrepared.map((p) => p.inventoryProductId),
+    );
+    for (const row of uniquePrepared) {
+      const counts = freshLatest.get(row.inventoryProductId) ?? [];
+      const latest = pickLatestCountForLocation(counts, locationId);
+      const base = baseByProduct.get(row.inventoryProductId);
+      if (latest) {
+        if (!base || latest.id !== base.countId) {
+          return NextResponse.json({ ok: false, error: COUNT_CONFLICT_MSG }, { status: 409 });
+        }
+        if (base.createdAt) {
+          const serverAt = new Date(latest.createdAt).toISOString();
+          if (serverAt !== base.createdAt) {
+            return NextResponse.json({ ok: false, error: COUNT_CONFLICT_MSG }, { status: 409 });
+          }
+        }
+      } else if (base) {
+        return NextResponse.json({ ok: false, error: COUNT_CONFLICT_MSG }, { status: 409 });
+      }
+    }
+
+    /** כל נקודות הספירה של המיקום חייבות להיות ב-payload — missing ≠ 0 */
+    if (roster.length > 0) {
+      const labelById = new Map(
+        roster.map((w) => [w.id, (w.workArea || "").trim() || (w.displayName || "").trim() || w.id]),
+      );
+      for (const line of uniquePrepared) {
+        if (line.workers.length === 0) {
+          return NextResponse.json(
+            {
+              ok: false,
+              error:
+                "חסר פירוט נקודות ספירה — יש להזין כמות בכל נקודת ספירה לפני שמירה.",
+            },
+            { status: 400 },
+          );
+        }
+        const provided = new Map(
+          line.workers.map((w) => [w.inventoryLocationWorkerId, w.countedQuantity]),
+        );
+        for (const wid of roster.map((w) => w.id)) {
+          if (!provided.has(wid)) {
+            const label = labelById.get(wid) ?? wid;
+            return NextResponse.json(
+              {
+                ok: false,
+                error: `חסרה כמות בנקודת הספירה "${label}". יש להשלים את הספירה לפני שמירה.`,
+              },
+              { status: 409 },
+            );
+          }
+        }
+      }
+    }
+
     const created = await prismaAny.$transaction(async (tx: typeof prismaAny) => {
       const countSession = await tx.inventoryCountSession.create({
         data: {
@@ -668,23 +791,13 @@ export async function POST(req: NextRequest) {
         })),
       });
 
-      /** מעדכן מינימום "אחרון" למיקום — לספירה הבאה / מסכים אחרים; לא נוגע בספירות ישנות */
-      if (locationId) {
-        for (const p of uniquePrepared) {
-          await tx.inventoryProductOnLocation.updateMany({
-            where: { locationId, inventoryProductId: p.inventoryProductId },
-            data: { minimumQuantity: p.minimumQuantity },
-          });
-        }
-      }
-
       const createdCounts = (await tx.inventoryCount.findMany({
         where: { sessionId: countSession.id },
-        select: { id: true, inventoryProductId: true },
-      })) as { id: string; inventoryProductId: string }[];
+        select: { id: true, inventoryProductId: true, createdAt: true },
+      })) as { id: string; inventoryProductId: string; createdAt: Date }[];
 
-      const countIdByProduct = new Map(
-        createdCounts.map((c) => [c.inventoryProductId, c.id]),
+      const countMetaByProduct = new Map(
+        createdCounts.map((c) => [c.inventoryProductId, c]),
       );
 
       const workerRows: {
@@ -695,8 +808,9 @@ export async function POST(req: NextRequest) {
         workerWorkArea: string;
       }[] = [];
       for (const p of uniquePrepared) {
-        const countId = countIdByProduct.get(p.inventoryProductId);
-        if (!countId) continue;
+        const countMeta = countMetaByProduct.get(p.inventoryProductId);
+        if (!countMeta) continue;
+        const countId = countMeta.id;
         for (const w of p.workers) {
           workerRows.push({
             inventoryCountId: countId,
@@ -723,8 +837,9 @@ export async function POST(req: NextRequest) {
           nextCounts.push({ locationId, currentQuantity: p.currentQuantity });
           const businessTotal = systemTotalFromCounts(nextCounts);
           const required = requiredQtyToMinimum(p.currentQuantity, p.minimumQuantity);
+          const createdMeta = countMetaByProduct.get(p.inventoryProductId);
           return {
-            id: countIdByProduct.get(p.inventoryProductId) ?? "",
+            id: createdMeta?.id ?? "",
             inventoryProductId: p.inventoryProductId,
             previousQuantity: p.currentQuantity,
             currentQuantity: p.currentQuantity,
@@ -736,6 +851,10 @@ export async function POST(req: NextRequest) {
             systemShortage: required,
             requiredQuantity: required,
             minimumQuantity: p.minimumQuantity,
+            latestCountId: createdMeta?.id ?? "",
+            latestCountCreatedAt: createdMeta?.createdAt
+              ? new Date(createdMeta.createdAt).toISOString()
+              : null,
             workers: p.workers,
           };
         }),

@@ -82,6 +82,13 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
       return count;
     });
 
+    if (productIds.length > 0 && moved === 0) {
+      return NextResponse.json(
+        { ok: false, error: "המוצר לא נמצא במיקום המקור" },
+        { status: 404 },
+      );
+    }
+
     const [sourceSummary, targetSummary] = await Promise.all([
       summarizeShelf(source),
       summarizeShelf({ id: target.id, name: target.name }),

@@ -566,6 +566,14 @@ model InventoryProductOnLocation {
   displayOrder       Int               @default(0)
   /// מינימום מלאי למוצר בתוך המקום בלבד (לא גלובלי). התראה בלבד — לא משנה כמות.
   minimumQuantity    Float             @default(0)
+  /// מינימום לפי יום בשבוע (ישראל). null = לא הוגדר → fallback ל־minimumQuantity
+  minimumSun         Float?
+  minimumMon         Float?
+  minimumTue         Float?
+  minimumWed         Float?
+  minimumThu         Float?
+  minimumFri         Float?
+  minimumSat         Float?
   createdAt          DateTime          @default(now())
   product            InventoryProduct  @relation(fields: [inventoryProductId], references: [id], onDelete: Cascade)
   location           InventoryLocation @relation(fields: [locationId], references: [id], onDelete: Cascade)

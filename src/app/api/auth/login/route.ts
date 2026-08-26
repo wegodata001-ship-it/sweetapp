@@ -6,8 +6,13 @@ import { resolveLoginUser } from "@/lib/auth/resolve-login-user";
 import { signSessionToken, COOKIE_NAME } from "@/lib/auth/jwt";
 import { getPermissionStringsForUser } from "@/lib/auth/user-permissions";
 import { logActivity } from "@/lib/activity-log";
-import { looksLikeEmail } from "@/lib/employees/national-id";
 import { createUserSession, requestClientMeta } from "@/lib/auth/session-binding";
+import {
+  AUTH_API_CODES,
+  authErrorResponse,
+  handleAuthApiCatch,
+  logAuthApiError,
+} from "@/lib/auth/auth-api-errors";
 
 async function writeAudit(params: {
   userId: string | null;
@@ -39,7 +44,12 @@ async function writeAudit(params: {
 
 export async function POST(req: NextRequest) {
   try {
-    await ensureBootstrapSuperAdmin();
+    try {
+      await ensureBootstrapSuperAdmin();
+    } catch (bootstrapErr) {
+      // bootstrap ראשוני — כשל כאן לא אמור לחשוף Prisma ללקוח; התחברות רגילה תמשיך
+      logAuthApiError("AUTH_BOOTSTRAP_ERROR", bootstrapErr);
+    }
 
     const body = (await req.json()) as {
       identifier?: string;
@@ -55,10 +65,7 @@ export async function POST(req: NextRequest) {
       "";
     const password = body.password;
     if (!rawIdentifier || !password) {
-      return NextResponse.json(
-        { ok: false, code: "missing_fields", error: "תעודת זהות / אימייל וסיסמה נדרשים" },
-        { status: 400 },
-      );
+      return authErrorResponse(AUTH_API_CODES.REQUIRED_FIELDS, 400);
     }
 
     const user = await resolveLoginUser(rawIdentifier);
@@ -71,17 +78,7 @@ export async function POST(req: NextRequest) {
         reason: "not_found",
         req,
       });
-      const hint = looksLikeEmail(rawIdentifier)
-        ? "bad_credentials"
-        : "use_national_id";
-      return NextResponse.json(
-        {
-          ok: false,
-          code: hint,
-          error: "פרטי התחברות שגויים",
-        },
-        { status: 401 },
-      );
+      return authErrorResponse(AUTH_API_CODES.INVALID_CREDENTIALS, 401);
     }
 
     if (!user.isActive) {
@@ -92,14 +89,7 @@ export async function POST(req: NextRequest) {
         reason: "inactive",
         req,
       });
-      return NextResponse.json(
-        {
-          ok: false,
-          code: "inactive",
-          error: "המשתמש אינו פעיל — פנו למנהל",
-        },
-        { status: 401 },
-      );
+      return authErrorResponse(AUTH_API_CODES.ACCOUNT_DISABLED, 401);
     }
 
     const ok = await verifyPassword(password, user.passwordHash);
@@ -111,13 +101,13 @@ export async function POST(req: NextRequest) {
         reason: "bad_password",
         req,
       });
-      return NextResponse.json(
-        { ok: false, code: "bad_credentials", error: "פרטי התחברות שגויים" },
-        { status: 401 },
-      );
+      return authErrorResponse(AUTH_API_CODES.INVALID_CREDENTIALS, 401);
     }
 
-    const permissions = await getPermissionStringsForUser(user.id, user.role as "EMPLOYEE" | "ADMIN" | "SUPER_ADMIN");
+    const permissions = await getPermissionStringsForUser(
+      user.id,
+      user.role as "EMPLOYEE" | "ADMIN" | "SUPER_ADMIN",
+    );
     const clientMeta = requestClientMeta(req.headers);
     const sessionId = await createUserSession(user.id, clientMeta);
 
@@ -164,11 +154,6 @@ export async function POST(req: NextRequest) {
 
     return res;
   } catch (e) {
-    const msg = e instanceof Error ? e.message : "שגיאה";
-    const code = msg.includes("JWT_SECRET") ? "server_config" : "server_error";
-    return NextResponse.json(
-      { ok: false, code, error: msg },
-      { status: 500 },
-    );
+    return handleAuthApiCatch("AUTH_LOGIN_ERROR", e);
   }
 }

@@ -1,30 +1,94 @@
 /**
- * Prefill כמויות לספירה חדשה — SSOT = previousQuantity (ספירה אחרונה למיקום).
- * פירוט לפי מיקומי ספירה (workers) הוא שכבת תצוגה בלבד; אסור לאפס מלאי
- * כש־worker IDs לא תואמים לשורות ישנות.
- *
- * חשוב: הפונקציה ממלאת כמויות בלבד — היא לא מסננת / לא מסתירה נקודות ספירה.
- * רשימת ה־workers להצגה מגיעה תמיד מהגדרת המיקום הנוכחית (API meta.workers).
+ * Prefill כמויות לספירה חדשה — SSOT = previousQuantity (מידע בלבד).
+ * שדות worker = ספירה מחדשה; missing ≠ 0.
  */
+
+export type PrefillLastWorkerQty = {
+  inventoryLocationWorkerId: string;
+  countedQuantity: number;
+  workerWorkArea?: string | null;
+  workerDisplayName?: string | null;
+};
 
 export type PrefillProductRow = {
   id: string;
   previousQuantity?: number | null;
-  lastWorkerQtys?: {
-    inventoryLocationWorkerId: string;
-    countedQuantity: number;
-  }[] | null;
+  lastWorkerQtys?: PrefillLastWorkerQty[] | null;
 };
 
-export type PrefillWorker = { id: string };
+export type PrefillWorker = {
+  id: string;
+  workArea?: string | null;
+  displayName?: string | null;
+};
 
 export type PrefillWorkerQtyMap = Record<string, string>;
 
+function normalizeSiteKey(value: string | null | undefined): string {
+  return (value ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+function uniqueWorkAreaMatch(
+  worker: PrefillWorker,
+  workers: PrefillWorker[],
+  last: PrefillLastWorkerQty[],
+  consumed: Set<string>,
+): PrefillLastWorkerQty | null {
+  const areaKey = normalizeSiteKey(worker.workArea);
+  if (!areaKey) return null;
+  const lastMatches = last.filter(
+    (l) =>
+      !consumed.has(l.inventoryLocationWorkerId) &&
+      normalizeSiteKey(l.workerWorkArea) === areaKey,
+  );
+  const workerMatches = workers.filter((w) => normalizeSiteKey(w.workArea) === areaKey);
+  if (lastMatches.length !== 1 || workerMatches.length !== 1) return null;
+  if (workerMatches[0]!.id !== worker.id) return null;
+  return lastMatches[0]!;
+}
+
+function uniqueDisplayNameMatch(
+  worker: PrefillWorker,
+  workers: PrefillWorker[],
+  last: PrefillLastWorkerQty[],
+  consumed: Set<string>,
+): PrefillLastWorkerQty | null {
+  const nameKey = normalizeSiteKey(worker.displayName);
+  if (!nameKey) return null;
+  const lastMatches = last.filter(
+    (l) =>
+      !consumed.has(l.inventoryLocationWorkerId) &&
+      normalizeSiteKey(l.workerDisplayName) === nameKey,
+  );
+  const workerMatches = workers.filter((w) => normalizeSiteKey(w.displayName) === nameKey);
+  if (lastMatches.length !== 1 || workerMatches.length !== 1) return null;
+  if (workerMatches[0]!.id !== worker.id) return null;
+  return lastMatches[0]!;
+}
+
+function matchLastEntry(
+  worker: PrefillWorker,
+  workers: PrefillWorker[],
+  last: PrefillLastWorkerQty[],
+  consumed: Set<string>,
+): PrefillLastWorkerQty | null {
+  const byId = last.find(
+    (l) => !consumed.has(l.inventoryLocationWorkerId) && l.inventoryLocationWorkerId === worker.id,
+  );
+  if (byId) return byId;
+
+  const byArea = uniqueWorkAreaMatch(worker, workers, last, consumed);
+  if (byArea) return byArea;
+
+  const byName = uniqueDisplayNameMatch(worker, workers, last, consumed);
+  if (byName) return byName;
+
+  return null;
+}
+
 /**
  * בונה ערכי ברירת מחדל לשדות הספירה.
- * - בלי workers: actual = previousQuantity
- * - עם workers + lastWorkerQtys תואמים: כמויות לפי worker id
- * - עם workers אבל בלי התאמה / בלי פירוט: previousQuantity על האתר הראשון
+ * unset = "" (לא "0"). אין התאמה → כל הנקודות unset.
  */
 export function buildPrefillFromLastCount(
   rows: PrefillProductRow[],
@@ -43,27 +107,18 @@ export function buildPrefillFromLastCount(
 
     const map: PrefillWorkerQtyMap = {};
     const last = row.lastWorkerQtys ?? [];
-    let anyMatch = false;
+    const consumed = new Set<string>();
+
+    for (const w of workers) {
+      map[w.id] = "";
+    }
 
     if (last.length > 0) {
       for (const w of workers) {
-        const found = last.find((l) => l.inventoryLocationWorkerId === w.id);
-        if (found != null) {
-          anyMatch = true;
-          map[w.id] = String(found.countedQuantity);
-        } else {
-          map[w.id] = "0";
-        }
-      }
-    }
-
-    /** IDs של מיקומי ספירה השתנו / אין פירוט — לא מאפסים את מלאי המיקום */
-    if (!anyMatch) {
-      const first = workers[0];
-      if (first) {
-        map[first.id] = String(locationQty);
-        for (let i = 1; i < workers.length; i++) {
-          map[workers[i]!.id] = "0";
+        const matched = matchLastEntry(w, workers, last, consumed);
+        if (matched) {
+          consumed.add(matched.inventoryLocationWorkerId);
+          map[w.id] = String(matched.countedQuantity);
         }
       }
     }
