@@ -2,10 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireDb } from "@/lib/api-route";
 import { getSessionFromCookie } from "@/lib/auth/get-session";
 import { canViewCountHistory } from "@/lib/inventory/count-access";
-import { listCountSessions } from "@/lib/inventory/count-session-service";
+import { listDailyCountCoverage } from "@/lib/inventory/count-session-service";
 import { resolveQuickRange, type QuickRangeKey } from "@/lib/inventory/count-history-audit";
 
-/** GET — היסטוריית ספירות (סשנים) — READ ONLY */
+/** GET — תצוגה יומית של ספירות שנשמרו — READ ONLY */
 export async function GET(req: NextRequest) {
   const block = await requireDb();
   if (block) return block;
@@ -17,16 +17,7 @@ export async function GET(req: NextRequest) {
   try {
     const { searchParams } = req.nextUrl;
     const locationId = searchParams.get("locationId")?.trim() || null;
-    const location = searchParams.get("location")?.trim() || null;
     const allLocations = searchParams.get("allLocations") === "1";
-    const take = parseInt(searchParams.get("take") || "40", 10);
-    const countedByUserId = searchParams.get("countedByUserId")?.trim() || null;
-    const countedBySearch = searchParams.get("countedBySearch")?.trim() || null;
-    const status = searchParams.get("status")?.trim() || null;
-    const productSearch = searchParams.get("productSearch")?.trim() || null;
-    const productId = searchParams.get("productId")?.trim() || null;
-    const cursorCreatedAt = searchParams.get("cursorCreatedAt")?.trim() || null;
-    const cursorId = searchParams.get("cursorId")?.trim() || null;
     const rangeKey = (searchParams.get("range")?.trim() || "7d") as QuickRangeKey;
     const dateFromParam = searchParams.get("dateFrom")?.trim() || null;
     const dateToParam = searchParams.get("dateTo")?.trim() || null;
@@ -37,10 +28,9 @@ export async function GET(req: NextRequest) {
         { status: 403 },
       );
     }
-
-    if (!locationId && !location && !allLocations) {
+    if (!locationId && !allLocations) {
       return NextResponse.json(
-        { ok: false, error: "נדרש locationId, location או allLocations=1" },
+        { ok: false, error: "נדרש locationId או allLocations=1" },
         { status: 400 },
       );
     }
@@ -51,28 +41,14 @@ export async function GET(req: NextRequest) {
       dateToParam,
     );
 
-    const { rows, nextCursor } = await listCountSessions({
-      locationId,
-      locationName: location,
-      allLocations,
+    const data = await listDailyCountCoverage({
       dateFrom,
       dateTo,
-      countedByUserId,
-      countedBySearch,
-      status,
-      productSearch,
-      productId,
-      take,
-      cursorCreatedAt,
-      cursorId,
+      locationId,
+      allLocations,
     });
 
-    return NextResponse.json({
-      ok: true,
-      data: rows,
-      nextCursor,
-      meta: { dateFrom, dateTo, range: rangeKey },
-    });
+    return NextResponse.json({ ok: true, data, meta: { dateFrom, dateTo } });
   } catch (e) {
     return NextResponse.json(
       { ok: false, error: e instanceof Error ? e.message : "שגיאה" },

@@ -21,6 +21,25 @@ export function parseWorkerQtyField(raw: string | undefined): number | null {
   return n;
 }
 
+/**
+ * Stepper בטוח לספירה:
+ * "" + (−) → ""   (לא יוצרים explicit 0)
+ * "" + (+) → "1"  (התחלת ספירה מפורשת)
+ * "1" + (−) → "0" (0 מפורש חוקי)
+ * "0" + (−) → "0"
+ */
+export function stepCountQtyField(raw: string | undefined, delta: number): string {
+  const value = raw ?? "";
+  if (value === "") {
+    if (delta < 0) return "";
+    if (delta > 0) return String(delta);
+    return "";
+  }
+  const n = Number(value);
+  const base = Number.isFinite(n) && n >= 0 ? n : 0;
+  return String(Math.max(0, base + delta));
+}
+
 export function analyzeWorkerQuantities(
   workers: LocationWorkerDto[],
   workerQtys: WorkerQtyMap,

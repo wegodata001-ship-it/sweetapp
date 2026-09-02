@@ -8,6 +8,7 @@ import {
   CalendarDays,
   ClipboardCopy,
   ClipboardList,
+  History,
   Layers,
   Mail,
   PackageCheck,
@@ -24,6 +25,7 @@ import { localYmd } from "@/components/ops/inventory-count/utils";
 import {
   canEditWeekdayMinimums,
   canRemoveCountRow,
+  canViewCountHistory,
   canViewCountSummary,
   canVoidCountSession,
 } from "@/lib/inventory/count-access";
@@ -127,6 +129,7 @@ export function InventoryWarehouseDashboard() {
   const canRemoveRows = canRemoveCountRow(user?.role);
   /** סיכומי ספירות ושליחתם במייל — מנהל מערכת / בעל העסק בלבד */
   const canSeeSummaries = canViewCountSummary(user?.role);
+  const canSeeFullHistory = canViewCountHistory(user?.role);
   const canEditWeekdays = canEditWeekdayMinimums(user?.role);
   /** ביטול סבב ספירה שגוי — מנהל מערכת / בעל העסק בלבד */
   const canVoidSessions = canVoidCountSession(user?.role);
@@ -151,6 +154,8 @@ export function InventoryWarehouseDashboard() {
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [transferOpen, setTransferOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
+  /** היסטוריה גלובלית (כל המלאי) — למנהלים */
+  const [globalHistoryOpen, setGlobalHistoryOpen] = useState(false);
   const [summariesOpen, setSummariesOpen] = useState(false);
   const [summaryEmailOpen, setSummaryEmailOpen] = useState(false);
   const [copyCountsOpen, setCopyCountsOpen] = useState(false);
@@ -609,6 +614,19 @@ export function InventoryWarehouseDashboard() {
             <ClipboardCopy className="h-4 w-4 shrink-0 text-[#6c4cff]" />
             <span className="truncate">{tW("copyCounts.open")}</span>
           </button>
+          {canSeeFullHistory ? (
+            <button
+              type="button"
+              onClick={() => {
+                setActionShelf(null);
+                setGlobalHistoryOpen(true);
+              }}
+              className={headerActionClass}
+            >
+              <History className="h-4 w-4 shrink-0 text-[#6c4cff]" />
+              <span className="truncate">{tW("history.openFromDashboard")}</span>
+            </button>
+          ) : null}
           {canEditWeekdays ? (
             <button
               type="button"
@@ -923,6 +941,24 @@ export function InventoryWarehouseDashboard() {
         canViewSummaries={canSeeSummaries}
         locale={locale}
         locations={copyLocations}
+        onOpenHistory={() => {
+          const fromList = shelfSummaries.find((s) => s.name === modalShelf);
+          if (fromList) setActionShelf(summaryToGrid(fromList));
+          else if (modalShelf) {
+            setActionShelf(
+              summaryToGrid({
+                name: modalShelf,
+                locationId: modalShelfId,
+                productCount: 0,
+                shortageCount: 0,
+                surplusCount: 0,
+                okCount: 0,
+                matchPct: 0,
+              }),
+            );
+          }
+          setHistoryOpen(true);
+        }}
         onClose={closeShelfCount}
         onShelfStatsChange={loadShelves}
         onProductPlacementChange={({ sourceSummary, targetSummary }) => {
@@ -1009,22 +1045,43 @@ export function InventoryWarehouseDashboard() {
         open={historyOpen && actionShelf !== null}
         shelfName={actionShelf?.name ?? ""}
         locationId={actionShelf?.locationId ?? null}
+        allowAllLocations={canSeeFullHistory}
+        locations={copyLocations}
         canVoid={canVoidSessions}
         onVoidChanged={() => void loadShelves()}
         onClose={() => {
           setHistoryOpen(false);
           setActionShelf(null);
         }}
-        onOpenSession={(sessionId) => {
-          if (!actionShelf) return;
-          setViewSessionShelf({
-            name: actionShelf.name,
-            locationId: actionShelf.locationId ?? null,
-          });
+        onOpenSession={(sessionId, meta) => {
+          const name = meta?.locationName || actionShelf?.name || "";
+          const locId = meta?.locationId ?? actionShelf?.locationId ?? null;
+          setViewSessionShelf({ name, locationId: locId });
           setViewSessionId(sessionId);
           setHistoryOpen(false);
         }}
-        t={(k) => tW(`history.${k}`)}
+        t={(k, v) => tW(`history.${k}`, v)}
+        locale={locale}
+      />
+
+      <ShelfHistoryModal
+        open={globalHistoryOpen}
+        shelfName={tW("history.allInventory")}
+        locationId={null}
+        allowAllLocations
+        locations={copyLocations}
+        canVoid={canVoidSessions}
+        onVoidChanged={() => void loadShelves()}
+        onClose={() => setGlobalHistoryOpen(false)}
+        onOpenSession={(sessionId, meta) => {
+          setViewSessionShelf({
+            name: meta?.locationName || "",
+            locationId: meta?.locationId ?? null,
+          });
+          setViewSessionId(sessionId);
+          setGlobalHistoryOpen(false);
+        }}
+        t={(k, v) => tW(`history.${k}`, v)}
         locale={locale}
       />
 

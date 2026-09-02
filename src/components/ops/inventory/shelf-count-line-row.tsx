@@ -30,6 +30,7 @@ import {
 } from "@/lib/inventory/count-latest";
 import {
   analyzeWorkerQuantities,
+  stepCountQtyField,
   sumWorkerQuantities,
 } from "@/lib/inventory/count-worker-qty";
 
@@ -822,9 +823,7 @@ function ShelfCountLineRowInner({
                   }}
                   onChange={(v) => onWorkerQtyChange(w.id, v)}
                   onStep={(delta) => {
-                    const base = raw === "" ? 0 : Number(raw);
-                    const next = Math.max(0, (Number.isNaN(base) ? 0 : base) + delta);
-                    onWorkerQtyChange(w.id, String(next));
+                    onWorkerQtyChange(w.id, stepCountQtyField(raw, delta));
                   }}
                 />
               );

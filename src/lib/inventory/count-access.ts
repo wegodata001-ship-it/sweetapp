@@ -26,6 +26,14 @@ export function canViewCountSummary(role: string | null | undefined): boolean {
 }
 
 /**
+ * היסטוריית ספירות מלאה (כל המיקומים / מסננים רחבים).
+ * צפייה לפי מיקום בודד נשארת זמינה למשתמשים מחוברים כפי שהיה.
+ */
+export function canViewCountHistory(role: string | null | undefined): boolean {
+  return isInventoryManager(role);
+}
+
+/**
  * ביטול סבב ספירה שגוי. הביטול מוציא את הסשן מהדוחות, מה־KPI ומבסיס ההשוואה
  * של הספירה הבאה, ולכן שמור לאותם תפקידים בלבד.
  */

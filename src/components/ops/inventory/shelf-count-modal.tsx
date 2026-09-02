@@ -14,6 +14,7 @@ import {
   CheckCircle2,
   FileSpreadsheet,
   FileText,
+  History,
   Loader2,
   Mail,
   RotateCcw,
@@ -37,7 +38,7 @@ import {
 } from "./shelf-count-line-row";
 import { requiredQtyToMinimum } from "@/lib/inventory/count-latest";
 import { buildPrefillFromLastCount } from "@/lib/inventory/count-prefill";
-import { analyzeWorkerQuantities, parseWorkerQtyField } from "@/lib/inventory/count-worker-qty";
+import { analyzeWorkerQuantities, parseWorkerQtyField, stepCountQtyField } from "@/lib/inventory/count-worker-qty";
 import {
   buildBaseCountsFromProducts,
   clearCountDraft,
@@ -138,6 +139,8 @@ type Props = {
   canRemoveRows?: boolean;
   /** צפייה בסיכומי ספירות ושליחתם במייל — מנהל מערכת / בעל העסק בלבד */
   canViewSummaries?: boolean;
+  /** פתיחת היסטוריית ספירות למיקום הנוכחי */
+  onOpenHistory?: () => void;
   /** BCP-47 לעיצוב שעות באזהרת ספירה כפולה */
   locale?: string;
   onClose: () => void;
@@ -191,6 +194,7 @@ function ShelfCountModalInner({
   readOnly = false,
   canRemoveRows = false,
   canViewSummaries = false,
+  onOpenHistory,
   locale = "he-IL",
   onClose,
   onShelfStatsChange,
@@ -796,7 +800,7 @@ function ShelfCountModalInner({
   );
 
   const bump = useCallback(
-    (productId: string, systemQty: number, delta: number) => {
+    (productId: string, _systemQty: number, delta: number) => {
       setNotice(null);
       setError(null);
       markTouched(productId);
@@ -806,17 +810,18 @@ function ShelfCountModalInner({
         setWorkerQtyByProduct((prev) => {
           const map = prev[productId] ?? {};
           const raw = map[firstWorkerId] ?? "";
-          const base = raw === "" ? 0 : Number(raw);
-          const next = Math.max(0, (Number.isNaN(base) ? 0 : base) + delta);
-          return { ...prev, [productId]: { ...map, [firstWorkerId]: String(next) } };
+          const next = stepCountQtyField(raw, delta);
+          if (next === raw) return prev;
+          return { ...prev, [productId]: { ...map, [firstWorkerId]: next } };
         });
         return;
       }
+      // ללא נקודות ספירה: אותו כלל — ריק + מינוס נשאר ריק; ריק + פלוס = 1
       setActualById((prev) => {
         const raw = prev[productId] ?? "";
-        const base = raw === "" ? systemQty : Number(raw);
-        const next = Math.max(0, (Number.isNaN(base) ? systemQty : base) + delta);
-        return { ...prev, [productId]: String(next) };
+        const next = stepCountQtyField(raw, delta);
+        if (next === raw) return prev;
+        return { ...prev, [productId]: next };
       });
     },
     [markTouched, workers],
@@ -1591,6 +1596,16 @@ function ShelfCountModalInner({
               )}
               {t("exportExcel")}
             </button>
+            {onOpenHistory ? (
+              <button
+                type="button"
+                onClick={onOpenHistory}
+                className="inline-flex min-h-11 flex-1 items-center justify-center gap-2 rounded-2xl border border-[#e7ecf5] bg-white px-3 text-xs font-black text-slate-700 sm:flex-none"
+              >
+                <History className="h-4 w-4" />
+                {t("openHistory")}
+              </button>
+            ) : null}
             {canViewSummaries ? (
               <>
                 <button
@@ -2006,7 +2021,21 @@ function ShelfCountModalInner({
               total: countedProgress.total,
             })}
           </p>
-          {!isReadOnly ? saveButton("h-12 w-full text-sm") : null}
+          <div className="flex gap-2">
+            {onOpenHistory ? (
+              <button
+                type="button"
+                onClick={onOpenHistory}
+                className="inline-flex h-12 shrink-0 items-center justify-center gap-1 rounded-2xl border border-[#e7ecf5] bg-white px-3 text-xs font-black text-slate-700"
+              >
+                <History className="h-4 w-4" />
+                {t("openHistory")}
+              </button>
+            ) : null}
+            {!isReadOnly ? (
+              <div className="min-w-0 flex-1">{saveButton("h-12 w-full text-sm")}</div>
+            ) : null}
+          </div>
         </footer>
 
         <footer className="sticky bottom-0 z-10 hidden shrink-0 items-center justify-between gap-2 border-t border-[#e7ecf5]/80 bg-white/95 px-3 py-3 backdrop-blur-md md:flex md:px-5">
