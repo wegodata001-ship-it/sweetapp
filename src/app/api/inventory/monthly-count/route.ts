@@ -40,6 +40,10 @@ import { ACTIVE_COUNT_LINE_WHERE } from "@/lib/inventory/count-session-status";
 import { loadExistingCountToday } from "@/lib/inventory/count-round-guard";
 import { scheduleCountSessionCompletedAlert } from "@/lib/inventory/count-session-alert";
 import { ensureLocationSchemaColumns } from "@/lib/inventory/ensure-location-schema";
+import {
+  hasCountedQuantityKey,
+  parseStrictCountedQuantity,
+} from "@/lib/inventory/count-quantity-validate";
 
 /**
  * שעת פתיחת הספירה מהלקוח.
@@ -602,29 +606,56 @@ export async function POST(req: NextRequest) {
       const pid = (line.inventoryProductId ?? line.productId)?.trim();
       if (!pid || !productMeta.has(pid)) continue;
 
-      const workerLines: PreparedWorker[] = Array.isArray(line.workers)
-        ? line.workers
-            .map((w) => {
-              const wid = w.inventoryLocationWorkerId?.trim();
-              const qty = Number(w.countedQuantity);
-              if (!wid || !Number.isFinite(qty) || qty < 0) return null;
-              const snap = workerSnap.get(wid);
-              if (!snap) return null;
-              return {
-                inventoryLocationWorkerId: wid,
-                countedQuantity: qty,
-                workerDisplayName: snap.displayName,
-                workerWorkArea: snap.workArea,
-              };
-            })
-            .filter((w): w is PreparedWorker => !!w)
-        : [];
+      const workerLines: PreparedWorker[] = [];
+      if (Array.isArray(line.workers) && line.workers.length > 0) {
+        for (const w of line.workers) {
+          const wid = w.inventoryLocationWorkerId?.trim();
+          if (!wid) {
+            return NextResponse.json(
+              { ok: false, error: "חסר מזהה נקודת ספירה" },
+              { status: 400 },
+            );
+          }
+          if (!hasCountedQuantityKey(w)) {
+            return NextResponse.json(
+              { ok: false, error: "חסרה כמות בנקודת ספירה" },
+              { status: 400 },
+            );
+          }
+          const qtyParsed = parseStrictCountedQuantity(w.countedQuantity);
+          if (!qtyParsed.ok) {
+            return NextResponse.json(
+              {
+                ok: false,
+                error:
+                  qtyParsed.reason === "missing"
+                    ? "חסרה כמות בנקודת ספירה"
+                    : "כמות נקודת ספירה לא תקינה",
+              },
+              { status: 400 },
+            );
+          }
+          const snap = workerSnap.get(wid);
+          if (!snap) {
+            return NextResponse.json({ ok: false, error: ROSTER_STALE_MSG }, { status: 409 });
+          }
+          workerLines.push({
+            inventoryLocationWorkerId: wid,
+            countedQuantity: qtyParsed.value,
+            workerDisplayName: snap.displayName,
+            workerWorkArea: snap.workArea,
+          });
+        }
+      }
 
       let currentQuantity: number;
       if (workerLines.length > 0) {
         currentQuantity = workerLines.reduce((sum, w) => sum + w.countedQuantity, 0);
       } else {
-        currentQuantity = Number(line.currentQuantity ?? line.countedQuantity ?? line.actualQty);
+        const rawLineQty = line.currentQuantity ?? line.countedQuantity ?? line.actualQty;
+        const lineQty = parseStrictCountedQuantity(rawLineQty);
+        if (!lineQty.ok) continue;
+        currentQuantity = lineQty.value;
       }
       if (!Number.isFinite(currentQuantity) || currentQuantity < 0) continue;
 

@@ -41,13 +41,22 @@ import { buildPrefillFromLastCount } from "@/lib/inventory/count-prefill";
 import { analyzeWorkerQuantities, parseWorkerQtyField, stepCountQtyField } from "@/lib/inventory/count-worker-qty";
 import {
   buildBaseCountsFromProducts,
+  canOfferDraftRestore,
   clearCountDraft,
+  CURRENT_COUNT_DRAFT_VERSION,
   isCountDraftStale,
+  isLegacyCountDraft,
   loadCountDraft,
   saveCountDraft,
   type CountDraftBaseCount,
   type CountDraftPayload,
 } from "@/lib/inventory/count-draft";
+import {
+  canSaveWithLoadGuards,
+  shouldShowEmptyInventoryMessage,
+  shouldShowInitialLoadError,
+  type CountLoadPhase,
+} from "@/lib/inventory/count-load-state";
 import { LocationWorkersModal } from "./location-workers-modal";
 import { ProductEditModal, type ProductEditValues } from "./product-edit-modal";
 import { ProductTransferModal } from "./product-transfer-modal";
@@ -204,6 +213,9 @@ function ShelfCountModalInner({
 }: Props) {
   const [products, setProducts] = useState<InventoryCountProductRow[]>([]);
   const [workers, setWorkers] = useState<LocationWorkerDto[]>([]);
+  const [loadPhase, setLoadPhase] = useState<CountLoadPhase>("loading");
+  const [baselineValidated, setBaselineValidated] = useState(false);
+  const [refreshWarning, setRefreshWarning] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [listTotal, setListTotal] = useState(0);
@@ -249,11 +261,13 @@ function ShelfCountModalInner({
   const [belowMinReport, setBelowMinReport] = useState<
     { id: string; name: string; counted: number; minimum: number; shortage: number }[] | null
   >(null);
-  /** Draft מקומי — הצעה להמשיך אחרי refresh */
+  /** Draft מקומי — הצעה להמשיך אחרי refresh (גרסה נוכחית בלבד) */
   const [draftOffer, setDraftOffer] = useState<CountDraftPayload | null>(null);
   /** Draft מיושן — ספירה חדשה בשרת מאז התחלת הטיוטה */
   const [draftStale, setDraftStale] = useState<CountDraftPayload | null>(null);
-  /** baseline לכל מוצר בפתיחה — concurrency + Draft v2 */
+  /** Draft מלפני Safety Fix — לא לשחזר כמויות */
+  const [draftLegacy, setDraftLegacy] = useState<CountDraftPayload | null>(null);
+  /** baseline לכל מוצר בפתיחה — concurrency + Draft v3 */
   const [countBaseByProduct, setCountBaseByProduct] = useState<
     Record<string, CountDraftBaseCount>
   >({});
@@ -281,6 +295,8 @@ function ShelfCountModalInner({
   const rowRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const qtyInputRefs = useRef<Map<string, HTMLInputElement>>(new Map());
   const loadingMoreRef = useRef(false);
+  const hadSuccessfulLoadRef = useRef(false);
+  const loadAbortRef = useRef<AbortController | null>(null);
   const tRef = useRef(t);
   tRef.current = t;
 
@@ -302,50 +318,82 @@ function ShelfCountModalInner({
   /**
    * טעינה יחידה בפתיחה — ללא תלות ב־t / callbacks לא יציבים.
    * (ההורה מרענן כל שנייה לטיימר ספירה; t inline היה גורם ללולאת refetch + loading אינסופי)
+   *
+   * בכשל: לא מנקים כמויות ל־{} / [] כאילו המלאי התאפס.
+   * אם כבר היה load מוצלח — משמרים state וחוסמים Save עד revalidation.
    */
-  useEffect(() => {
-    if (!open) return;
+  const runCountLoad = useCallback(
+    async (mode: "initial" | "retry" | "revalidate") => {
+      const preserveOnFail = mode === "revalidate" || hadSuccessfulLoadRef.current;
+      loadAbortRef.current?.abort();
+      const ac = new AbortController();
+      loadAbortRef.current = ac;
 
-    let cancelled = false;
-    const ac = new AbortController();
+      if (mode === "initial") {
+        hadSuccessfulLoadRef.current = false;
+        setSavingIds(new Set());
+        setTouchedIds(new Set());
+        setSessionCountedIds(new Set());
+        setMobileFilter("all");
+        setFocusedProductId(null);
+        setDuplicateDetailsOpen(false);
+        setDragProductId(null);
+        setConfirmCloseOpen(false);
+        setWorkersOpen(false);
+        setEditProduct(null);
+        setRemoveTarget(null);
+        setRemovingId(null);
+        setLastRemoved(null);
+        setNotice(null);
+        setError(null);
+        setBelowMinReport(null);
+        setDraftOffer(null);
+        setDraftStale(null);
+        setDraftLegacy(null);
+        setCountBaseByProduct({});
+        setTransferModal(null);
+        setTransferDragProductId(null);
+        setTransferBusyTargetId(null);
+        setScanQ("");
+        setScrollTop(0);
+        setExporting(null);
+        setProducts([]);
+        setWorkers([]);
+        setActualById({});
+        setWorkerQtyByProduct({});
+        setExistingCountToday(null);
+        setHasMore(false);
+        setNextPage(2);
+        setListTotal(0);
+      setRefreshWarning(null);
+        setBaselineValidated(false);
+      }
 
-    setSavingIds(new Set());
-    setTouchedIds(new Set());
-    setSessionCountedIds(new Set());
-    setMobileFilter("all");
-    setFocusedProductId(null);
-    setDuplicateDetailsOpen(false);
-    setDragProductId(null);
-    setConfirmCloseOpen(false);
-    setWorkersOpen(false);
-    setEditProduct(null);
-    setRemoveTarget(null);
-    setRemovingId(null);
-    setLastRemoved(null);
-    setNotice(null);
-    setError(null);
-    setBelowMinReport(null);
-    setDraftOffer(null);
-    setDraftStale(null);
-    setCountBaseByProduct({});
-    setTransferModal(null);
-    setTransferDragProductId(null);
-    setTransferBusyTargetId(null);
-    setScanQ("");
-    setScrollTop(0);
-    setExporting(null);
-    setLoading(true);
-    setLoadingMore(false);
-    loadingMoreRef.current = false;
-    setHasMore(false);
-    setNextPage(2);
-    setListTotal(0);
+      if (mode !== "revalidate") {
+        setLoadPhase("loading");
+      }
+      setLoading(true);
+      setLoadingMore(false);
+      loadingMoreRef.current = false;
+      if (mode !== "revalidate") {
+        setRefreshWarning(null);
+      }
 
-    const finish = () => {
-      if (!cancelled) setLoading(false);
-    };
+      const fail = (message: string) => {
+        if (ac.signal.aborted) return;
+        if (preserveOnFail) {
+          setRefreshWarning(tRef.current("refreshFailedWarning"));
+          setBaselineValidated(false);
+          setLoadPhase("loaded");
+          setError(null);
+        } else {
+          setLoadPhase("error");
+          setError(message);
+          setBaselineValidated(false);
+          // לא מנקים products/quantities — מראים Error State במקום «אין מלאי»
+        }
+      };
 
-    void (async () => {
       try {
         if (sessionId) {
           setActiveSessionId(sessionId);
@@ -358,11 +406,9 @@ function ShelfCountModalInner({
             data?: CountSessionDetail;
             error?: string;
           };
-          if (cancelled) return;
+          if (ac.signal.aborted) return;
           if (!res.ok || !j.ok || !j.data) {
-            setError(j.error ?? tRef.current("saveFailed"));
-            setProducts([]);
-            setWorkers([]);
+            fail(j.error ?? tRef.current("loadFailedTitle"));
             return;
           }
           const detail = j.data;
@@ -410,6 +456,11 @@ function ShelfCountModalInner({
           setProducts(sessionProducts);
           setListTotal(sessionProducts.length);
           setHasMore(false);
+          hadSuccessfulLoadRef.current = true;
+          setLoadPhase("loaded");
+          setBaselineValidated(true);
+          setRefreshWarning(null);
+          setError(null);
           return;
         }
 
@@ -417,10 +468,14 @@ function ShelfCountModalInner({
         setSessionNumber(null);
 
         if (!shelfName.trim() && !locationId?.trim()) {
+          if (ac.signal.aborted) return;
           setProducts([]);
           setWorkers([]);
           setActualById({});
           setWorkerQtyByProduct({});
+          hadSuccessfulLoadRef.current = true;
+          setLoadPhase("loaded");
+          setBaselineValidated(true);
           return;
         }
 
@@ -430,7 +485,6 @@ function ShelfCountModalInner({
         });
         if (locationId?.trim()) params.set("locationId", locationId.trim());
         if (shelfName.trim()) params.set("location", shelfName.trim());
-        // מסנן בשרת מוצרים שהוסרו מסבב הספירה של אותו יום
         if (countDate) params.set("countDate", countDate);
         const res = await fetch(`/api/inventory/monthly-count?${params}`, {
           credentials: "same-origin",
@@ -450,14 +504,9 @@ function ShelfCountModalInner({
           ok?: boolean;
           error?: string;
         };
-        if (cancelled) return;
+        if (ac.signal.aborted) return;
         if (!res.ok) {
-          setError(j.error ?? tRef.current("saveFailed"));
-          setProducts([]);
-          setWorkers([]);
-          setActualById({});
-          setWorkerQtyByProduct({});
-          setExistingCountToday(null);
+          fail(j.error ?? tRef.current("loadFailedTitle"));
           return;
         }
         const rows = j.data ?? [];
@@ -465,49 +514,78 @@ function ShelfCountModalInner({
         const prefill = buildPrefillFromLastCount(rows, nextWorkers);
         setProducts(rows);
         setWorkers(nextWorkers);
-        setActualById(prefill.actual);
-        setWorkerQtyByProduct(prefill.workerQty);
-        setTouchedIds(new Set());
-        setCountBaseByProduct(buildBaseCountsFromProducts(rows));
+        if (mode === "revalidate" && hadSuccessfulLoadRef.current) {
+          // שמירת הזנות המשתמש; baseline מתעדכן מהשרת
+          setActualById((prev) => ({ ...prefill.actual, ...prev }));
+          setWorkerQtyByProduct((prev) => ({ ...prefill.workerQty, ...prev }));
+          setCountBaseByProduct(buildBaseCountsFromProducts(rows));
+        } else {
+          setActualById(prefill.actual);
+          setWorkerQtyByProduct(prefill.workerQty);
+          setTouchedIds(new Set());
+          setCountBaseByProduct(buildBaseCountsFromProducts(rows));
+        }
         setExistingCountToday(j.meta?.existingCountToday ?? null);
         setListTotal(j.meta?.total ?? rows.length);
         setHasMore(Boolean(j.meta?.hasMore));
         setNextPage(2);
-        if (locationId?.trim() && !sessionId) {
+        hadSuccessfulLoadRef.current = true;
+        setLoadPhase("loaded");
+        setBaselineValidated(true);
+        setRefreshWarning(null);
+        setError(null);
+
+        if (mode !== "revalidate" && locationId?.trim() && !sessionId) {
           const draft = loadCountDraft(locationId.trim(), countDate);
           if (draft && draft.touchedIds.length > 0) {
-            if (isCountDraftStale(draft, rows)) {
+            if (isLegacyCountDraft(draft)) {
+              setDraftLegacy(draft);
+              setDraftOffer(null);
+              setDraftStale(null);
+            } else if (isCountDraftStale(draft, rows)) {
               setDraftStale(draft);
               setDraftOffer(null);
-            } else {
+              setDraftLegacy(null);
+            } else if (canOfferDraftRestore(draft, rows)) {
               setDraftOffer(draft);
               setDraftStale(null);
+              setDraftLegacy(null);
+            } else {
+              setDraftOffer(null);
+              setDraftStale(null);
+              setDraftLegacy(null);
             }
           } else {
             setDraftOffer(null);
             setDraftStale(null);
+            setDraftLegacy(null);
           }
-        } else {
+        } else if (mode !== "revalidate") {
           setDraftOffer(null);
           setDraftStale(null);
+          setDraftLegacy(null);
         }
       } catch (e) {
-        if (cancelled || (e instanceof DOMException && e.name === "AbortError")) return;
-        setProducts([]);
-        setWorkers([]);
-        setError(tRef.current("saveFailed"));
+        if (ac.signal.aborted || (e instanceof DOMException && e.name === "AbortError")) return;
+        fail(tRef.current("loadFailedTitle"));
       } finally {
-        finish();
+        if (!ac.signal.aborted) setLoading(false);
       }
-    })();
+    },
+    [countDate, locationId, sessionId, shelfName],
+  );
 
+  useEffect(() => {
+    if (!open) return;
+    void runCountLoad("initial");
     return () => {
-      cancelled = true;
-      ac.abort();
+      loadAbortRef.current?.abort();
     };
-    // countDate הוא מחרוזת יציבה (יום נוכחי) — לא גורם ל-refetch מחזורי
-  }, [open, shelfName, locationId, sessionId, countDate]);
+  }, [open, runCountLoad]);
 
+  const retryCountLoad = useCallback(() => {
+    void runCountLoad(hadSuccessfulLoadRef.current ? "revalidate" : "retry");
+  }, [runCountLoad]);
   const loadMoreProducts = useCallback(async () => {
     if (sessionId || readOnly) return;
     if (!hasMore || loading || loadingMoreRef.current) return;
@@ -593,9 +671,10 @@ function ShelfCountModalInner({
     }
   }, [open, loading, sessionId, readOnly, hasMore, loadingMore, products.length, loadMoreProducts]);
 
-  /** Draft מקומי — לא DB */
+  /** Draft מקומי — לא DB; רק אחרי load תקין (לא מ-state כושל) */
   useEffect(() => {
     if (!open || sessionId || readOnly || !locationId?.trim()) return;
+    if (loadPhase !== "loaded" || !baselineValidated) return;
     if (touchedIds.size === 0) return;
     const timer = window.setTimeout(() => {
       const baseLatestCountsByProduct: Record<string, CountDraftBaseCount> = {};
@@ -604,7 +683,7 @@ function ShelfCountModalInner({
         if (base) baseLatestCountsByProduct[pid] = base;
       }
       saveCountDraft({
-        version: 2,
+        version: CURRENT_COUNT_DRAFT_VERSION,
         locationId: locationId.trim(),
         countDate,
         actualById,
@@ -625,23 +704,29 @@ function ShelfCountModalInner({
     workerQtyByProduct,
     touchedIds,
     countBaseByProduct,
+    loadPhase,
+    baselineValidated,
   ]);
 
   const applyDraft = useCallback(() => {
-    if (!draftOffer) return;
+    if (!draftOffer || !canOfferDraftRestore(draftOffer, products)) return;
     setActualById({ ...draftOffer.actualById });
     setWorkerQtyByProduct({ ...draftOffer.workerQtyByProduct });
     setTouchedIds(new Set(draftOffer.touchedIds));
     setSessionCountedIds(new Set(draftOffer.touchedIds));
     setDraftOffer(null);
     setNotice(t("draftRestored"));
-  }, [draftOffer, t]);
+  }, [draftOffer, products, t]);
 
   const dismissStaleDraft = useCallback(() => {
     if (locationId?.trim()) clearCountDraft(locationId.trim(), countDate);
     setDraftStale(null);
   }, [locationId, countDate]);
 
+  const dismissLegacyDraft = useCallback(() => {
+    if (locationId?.trim()) clearCountDraft(locationId.trim(), countDate);
+    setDraftLegacy(null);
+  }, [locationId, countDate]);
   const transferTargets = useMemo(
     () => locations.filter((l) => l.id && l.id !== locationId?.trim()),
     [locations, locationId],
@@ -1209,6 +1294,10 @@ function ShelfCountModalInner({
 
   const saveCount = useCallback(
     async (opts?: { closeAfterSave?: boolean }) => {
+      if (!canSaveWithLoadGuards({ loadPhase, baselineValidated })) {
+        setError(t("refreshFailedWarning"));
+        return false;
+      }
       type SaveLine = {
         inventoryProductId: string;
         currentQuantity: number;
@@ -1417,6 +1506,8 @@ function ShelfCountModalInner({
       countBaseByProduct,
       dirtyProductIds,
       hasWorkers,
+      loadPhase,
+      baselineValidated,
       locationId,
       onClose,
       products,
@@ -1467,7 +1558,19 @@ function ShelfCountModalInner({
   const isReadOnly = readOnly || !!sessionId;
   const canRemoveRow = canRemoveRows && !isReadOnly;
   const saveDisabled =
-    savingAll || !hasDirtyChanges || hasInvalidChanges || hasIncompleteDirtyCounts;
+    savingAll ||
+    !hasDirtyChanges ||
+    hasInvalidChanges ||
+    hasIncompleteDirtyCounts ||
+    !canSaveWithLoadGuards({ loadPhase, baselineValidated });
+  const showInitialLoadError = shouldShowInitialLoadError({
+    loadPhase,
+    hadSuccessfulLoad: hadSuccessfulLoadRef.current,
+  });
+  const showEmptyInventory = shouldShowEmptyInventoryMessage({
+    loadPhase,
+    productCount: sortedProducts.length,
+  });
   const dirtyCount = dirtyProductIds.size;
   /**
    * שמירה נוספת יוצרת סבב ספירה חדש ולא מעדכנת את הקיים. האזהרה מתריעה בלבד —
@@ -1703,7 +1806,21 @@ function ShelfCountModalInner({
             </div>
           ) : null}
 
-          {draftOffer && !draftStale && !isReadOnly ? (
+          {draftLegacy && !draftStale && !isReadOnly ? (
+            <div className="mt-2 rounded-xl bg-amber-50 px-3 py-2 text-end ring-1 ring-amber-300/60">
+              <p className="text-[11px] font-black text-amber-950">{t("draftLegacyPrompt")}</p>
+              <p className="mt-0.5 text-[11px] font-bold text-amber-900">{t("draftLegacyBody")}</p>
+              <button
+                type="button"
+                onClick={dismissLegacyDraft}
+                className="mt-2 rounded-lg bg-amber-700 px-3 py-1.5 text-[11px] font-black text-white"
+              >
+                {t("draftLegacyDiscard")}
+              </button>
+            </div>
+          ) : null}
+
+          {draftOffer && !draftStale && !draftLegacy && !isReadOnly ? (
             <div className="mt-2 flex flex-wrap items-center justify-end gap-2 rounded-xl bg-[#f5f3ff] px-3 py-2 ring-1 ring-[#6c4cff]/25">
               <p className="text-[11px] font-bold text-slate-700">{t("draftRestorePrompt")}</p>
               <button
@@ -1726,13 +1843,27 @@ function ShelfCountModalInner({
             </div>
           ) : null}
 
+          {refreshWarning ? (
+            <div className="mt-2 flex flex-wrap items-center justify-end gap-2 rounded-xl bg-amber-50 px-3 py-2 ring-1 ring-amber-300/60">
+              <p className="text-[11px] font-bold text-amber-900">{refreshWarning}</p>
+              <button
+                type="button"
+                onClick={retryCountLoad}
+                disabled={loading}
+                className="rounded-lg bg-amber-700 px-3 py-1.5 text-[11px] font-black text-white disabled:opacity-50"
+              >
+                {t("loadRetry")}
+              </button>
+            </div>
+          ) : null}
+
           {notice ? (
             <p className="mt-2 inline-flex items-center gap-1 rounded-full bg-emerald-50 px-3 py-1 text-xs font-black text-emerald-700 ring-1 ring-emerald-200">
               <CheckCircle2 className="h-4 w-4" aria-hidden />
               {notice}
             </p>
           ) : null}
-          {error ? (
+          {error && !showInitialLoadError ? (
             <p className="mt-2 inline-flex items-center gap-1 rounded-full bg-rose-50 px-3 py-1 text-xs font-black text-rose-700 ring-1 ring-rose-200">
               <AlertTriangle className="h-4 w-4" aria-hidden />
               {error}
@@ -1857,11 +1988,26 @@ function ShelfCountModalInner({
             if (nearBottom) void loadMoreProducts();
           }}
         >
-          {loading ? (
+          {loading && loadPhase === "loading" ? (
             <div className="flex justify-center py-16">
               <Loader2 className="h-8 w-8 animate-spin text-[#6c4cff]" />
             </div>
-          ) : sortedProducts.length === 0 ? (
+          ) : showInitialLoadError ? (
+            <div className="mx-auto flex max-w-md flex-col items-center gap-3 py-16 text-center">
+              <AlertTriangle className="h-10 w-10 text-rose-500" aria-hidden />
+              <p className="text-base font-black text-slate-900">{t("loadFailedTitle")}</p>
+              <p className="text-sm font-semibold text-slate-600">{t("loadFailedBody")}</p>
+              <button
+                type="button"
+                onClick={retryCountLoad}
+                disabled={loading}
+                className="mt-1 inline-flex min-h-11 items-center justify-center gap-2 rounded-2xl bg-[#6c4cff] px-5 text-sm font-black text-white disabled:opacity-50"
+              >
+                {loading ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : null}
+                {t("loadRetry")}
+              </button>
+            </div>
+          ) : showEmptyInventory ? (
             <p className="py-12 text-center text-sm font-semibold text-slate-500">{t("empty")}</p>
           ) : (
             <div

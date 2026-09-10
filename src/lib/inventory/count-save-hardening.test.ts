@@ -3,8 +3,9 @@ import { pickLatestCountForLocation } from "./count-latest";
 import {
   buildBaseCountsFromProducts,
   countDraftStorageKey,
+  CURRENT_COUNT_DRAFT_VERSION,
   isCountDraftStale,
-  type CountDraftPayloadV2,
+  type CountDraftPayloadV3,
 } from "./count-draft";
 
 function runConcurrencyLogic() {
@@ -34,8 +35,8 @@ function runConcurrencyLogic() {
 }
 
 function runDraftStale() {
-  const draft: CountDraftPayloadV2 = {
-    version: 2,
+  const draft: CountDraftPayloadV3 = {
+    version: CURRENT_COUNT_DRAFT_VERSION,
     locationId: "loc1",
     countDate: "2026-08-26",
     actualById: {},
@@ -65,8 +66,8 @@ function runDraftStale() {
     { id: "p1", latestCountId: "c100", latestCountCreatedAt: "t1" },
     { id: "p2", latestCountId: "c200", latestCountCreatedAt: "t2" },
   ]);
-  assert.equal(bases.p1.countId, "c100");
-  assert.equal(bases.p2.countId, "c200");
+  assert.equal(bases.p1!.countId, "c100");
+  assert.equal(bases.p2!.countId, "c200");
 
   // בידוד מיקומים — מפתח Draft שונה
   assert.notEqual(
