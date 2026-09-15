@@ -2,15 +2,13 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireDb } from "@/lib/api-route";
 import type { EntityType, LedgerOverviewRow } from "@/lib/finance/types";
+import {
+  buildLedgerOverviewPage,
+  LEDGER_MASTER_SAFETY_CAP,
+  type LedgerMasterEntity,
+} from "@/lib/finance/ledger-overview-entities";
 
 export const dynamic = "force-dynamic";
-
-type UnifiedEntity = {
-  entity_type: EntityType;
-  id: string;
-  name: string;
-  opening_balance: number;
-};
 
 function docEntryDate(d: { docDate: Date | null; createdAt: Date }): string {
   return (d.docDate ?? d.createdAt).toISOString().slice(0, 10);
@@ -60,118 +58,74 @@ export async function GET(req: NextRequest) {
   const page = Math.max(1, parseInt(sp.get("page") ?? "1", 10) || 1);
   const pageSize = Math.min(100, Math.max(5, parseInt(sp.get("pageSize") ?? "10", 10) || 10));
 
-  const nameWhere = qRaw
-    ? ({ name: { contains: qRaw, mode: "insensitive" as const } } as const)
-    : undefined;
-
   try {
-    const listCap = entityIdFilter
-      ? 1
-      : Math.min(500, page * pageSize + pageSize);
-
     const fetchCustomers =
-      !entityTypeFilter || entityTypeFilter === "all" || entityTypeFilter === "customer";
+      entityTypeFilter === "all" || entityTypeFilter === "customer";
     const fetchSuppliers =
-      !entityTypeFilter || entityTypeFilter === "all" || entityTypeFilter === "supplier";
+      entityTypeFilter === "all" || entityTypeFilter === "supplier";
     const fetchEmployees =
-      !entityTypeFilter || entityTypeFilter === "all" || entityTypeFilter === "employee";
+      entityTypeFilter === "all" || entityTypeFilter === "employee";
 
-    const [customers, suppliers, employees, customerCount, supplierCount, employeeCount] =
-      await Promise.all([
-        fetchCustomers
-          ? prisma.customer.findMany({
-              where: nameWhere,
-              orderBy: { name: "asc" },
-              take: listCap,
-              select: { id: true, name: true, openingBalance: true },
-            })
-          : Promise.resolve([]),
-        fetchSuppliers
-          ? prisma.supplier.findMany({
-              where: nameWhere,
-              orderBy: { name: "asc" },
-              take: listCap,
-              select: { id: true, name: true, openingBalance: true },
-            })
-          : Promise.resolve([]),
-        fetchEmployees
-          ? prisma.employee.findMany({
-              where: nameWhere,
-              orderBy: { name: "asc" },
-              take: listCap,
-              select: { id: true, name: true, openingBalance: true },
-            })
-          : Promise.resolve([]),
-        fetchCustomers ? prisma.customer.count({ where: nameWhere }) : Promise.resolve(0),
-        fetchSuppliers ? prisma.supplier.count({ where: nameWhere }) : Promise.resolve(0),
-        fetchEmployees ? prisma.employee.count({ where: nameWhere }) : Promise.resolve(0),
-      ]);
+    /**
+     * Master-first: טוענים את כל הישויות (עד safety cap) ואז מחפשים/ממיינים/עמודים.
+     * אסור לחתוך ב־take לפי עמוד לפני המיזוג — זה גרם לספקים «להיעלם» מהכרטסת.
+     */
+    const [customerRows, supplierRows, employeeRows] = await Promise.all([
+      fetchCustomers
+        ? prisma.customer.findMany({
+            orderBy: { name: "asc" },
+            take: LEDGER_MASTER_SAFETY_CAP,
+            select: { id: true, name: true, openingBalance: true },
+          })
+        : Promise.resolve([]),
+      fetchSuppliers
+        ? prisma.supplier.findMany({
+            orderBy: { name: "asc" },
+            take: LEDGER_MASTER_SAFETY_CAP,
+            select: { id: true, name: true, openingBalance: true, notes: true },
+          })
+        : Promise.resolve([]),
+      fetchEmployees
+        ? prisma.employee.findMany({
+            orderBy: { name: "asc" },
+            take: LEDGER_MASTER_SAFETY_CAP,
+            select: { id: true, name: true, openingBalance: true },
+          })
+        : Promise.resolve([]),
+    ]);
 
-    const merged: UnifiedEntity[] = [];
+    const customers: LedgerMasterEntity[] = customerRows.map((c) => ({
+      entity_type: "customer" as const,
+      id: c.id,
+      name: c.name,
+      opening_balance: c.openingBalance,
+    }));
+    const suppliers: LedgerMasterEntity[] = supplierRows.map((s) => ({
+      entity_type: "supplier" as const,
+      id: s.id,
+      name: s.name,
+      opening_balance: s.openingBalance,
+      notes: s.notes,
+    }));
+    const employees: LedgerMasterEntity[] = employeeRows.map((e) => ({
+      entity_type: "employee" as const,
+      id: e.id,
+      name: e.name,
+      opening_balance: e.openingBalance,
+    }));
 
-    if (!entityTypeFilter || entityTypeFilter === "all") {
-      merged.push(
-        ...customers.map((c) => ({
-          entity_type: "customer" as const,
-          id: c.id,
-          name: c.name,
-          opening_balance: c.openingBalance,
-        })),
-        ...suppliers.map((s) => ({
-          entity_type: "supplier" as const,
-          id: s.id,
-          name: s.name,
-          opening_balance: s.openingBalance,
-        })),
-        ...employees.map((e) => ({
-          entity_type: "employee" as const,
-          id: e.id,
-          name: e.name,
-          opening_balance: e.openingBalance,
-        })),
-      );
-    } else if (entityTypeFilter === "customer") {
-      merged.push(
-        ...customers.map((c) => ({
-          entity_type: "customer" as const,
-          id: c.id,
-          name: c.name,
-          opening_balance: c.openingBalance,
-        })),
-      );
-    } else if (entityTypeFilter === "supplier") {
-      merged.push(
-        ...suppliers.map((s) => ({
-          entity_type: "supplier" as const,
-          id: s.id,
-          name: s.name,
-          opening_balance: s.openingBalance,
-        })),
-      );
-    } else if (entityTypeFilter === "employee") {
-      merged.push(
-        ...employees.map((e) => ({
-          entity_type: "employee" as const,
-          id: e.id,
-          name: e.name,
-          opening_balance: e.openingBalance,
-        })),
-      );
-    }
+    const overview = buildLedgerOverviewPage({
+      customers,
+      suppliers,
+      employees,
+      q: qRaw,
+      entityType: entityTypeFilter,
+      entityId: entityIdFilter,
+      page,
+      pageSize,
+    });
 
-    let filtered = merged;
-    if (entityIdFilter) {
-      filtered = merged.filter((e) => e.id === entityIdFilter);
-    }
-
-    filtered.sort((a, b) => a.name.localeCompare(b.name, "he"));
-
-    const total = entityIdFilter
-      ? filtered.length
-      : customerCount + supplierCount + employeeCount;
-    const start = (page - 1) * pageSize;
-    const pageRows = filtered.slice(start, start + pageSize);
-
+    const pageRows = overview.rows;
     const custIds = pageRows.filter((r) => r.entity_type === "customer").map((r) => r.id);
     const supIds = pageRows.filter((r) => r.entity_type === "supplier").map((r) => r.id);
     const empIds = pageRows.filter((r) => r.entity_type === "employee").map((r) => r.id);
@@ -180,14 +134,7 @@ export async function GET(req: NextRequest) {
     const docDateFrom = dateFrom?.trim() ? new Date(`${dateFrom.trim()}T00:00:00.000Z`) : null;
     const docDateTo = dateTo?.trim() ? new Date(`${dateTo.trim()}T23:59:59.999Z`) : null;
 
-    const [
-      orderSums,
-      paySums,
-      periodDocs,
-      periodPays,
-      supLedger,
-      empLedger,
-    ] = await Promise.all([
+    const [orderSums, paySums, periodDocs, periodPays, supLedger, empLedger] = await Promise.all([
       custIds.length > 0
         ? prisma.financialDocument.groupBy({
             by: ["customerId"],
@@ -262,6 +209,7 @@ export async function GET(req: NextRequest) {
             select: { customerId: true, amount: true, createdAt: true },
           })
         : Promise.resolve([]),
+      // LEFT JOIN financial state — ספק בלי תנועות עדיין מופיע (supIds מהמסטר)
       supIds.length > 0
         ? prisma.ledgerEntry.findMany({
             where: { supplierId: { in: supIds } },
@@ -389,12 +337,8 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({
       ok: true,
-      counts: {
-        customers: customerCount,
-        suppliers: supplierCount,
-        employees: employeeCount,
-      },
-      total,
+      counts: overview.counts,
+      total: overview.total,
       page,
       pageSize,
       rows,

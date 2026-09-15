@@ -50,9 +50,12 @@ export async function fetchLedgerOverview(params: {
 
   const res = await fetch(`/api/ledger/overview?${q}`, { credentials: "same-origin", cache: "no-store" });
   try {
-    const j = (await res.json()) as { ok?: boolean } & Partial<LedgerOverviewResponse>;
-    if (!j.ok) {
-      return { counts: { customers: 0, suppliers: 0, employees: 0 }, total: 0, page: 1, pageSize: 10, rows: [] };
+    const j = (await res.json()) as {
+      ok?: boolean;
+      error?: string;
+    } & Partial<LedgerOverviewResponse>;
+    if (!res.ok || !j.ok) {
+      throw new Error(j.error || `ledger overview failed (${res.status})`);
     }
     return {
       counts: j.counts ?? { customers: 0, suppliers: 0, employees: 0 },
@@ -61,8 +64,9 @@ export async function fetchLedgerOverview(params: {
       pageSize: j.pageSize ?? 10,
       rows: j.rows ?? [],
     };
-  } catch {
-    return { counts: { customers: 0, suppliers: 0, employees: 0 }, total: 0, page: 1, pageSize: 10, rows: [] };
+  } catch (e) {
+    if (e instanceof Error) throw e;
+    throw new Error("ledger overview failed");
   }
 }
 
