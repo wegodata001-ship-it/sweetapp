@@ -270,7 +270,7 @@ export function CountCopyModal({ open, onClose, locations }: Props) {
                       </div>
                     </div>
                     <pre
-                      className="max-h-56 overflow-auto whitespace-pre-wrap break-words px-3 py-2 text-[12px] font-semibold leading-relaxed text-slate-800"
+                      className="max-h-[min(28rem,55dvh)] overflow-y-auto overflow-x-hidden overscroll-contain whitespace-pre-wrap break-words px-3 py-2 text-[12px] font-semibold leading-relaxed text-slate-800"
                       dir="auto"
                     >
                       {preview}

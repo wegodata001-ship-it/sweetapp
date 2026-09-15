@@ -1,12 +1,22 @@
 /**
  * העתקת ספירות היסטוריות לפי טווח תאריכים — Read Only.
- * SSOT: InventoryCountSession + InventoryCount (שורות שנשמרו בפועל).
+ * מקור רשימת מוצרים: מוצרים פעילים על המיקום (כמו מסך הספירה).
+ * כמויות: מ־InventoryCount של הסשן; מוצר בלי שורה = לא נספר (לא 0).
  * לא יוצר/מעדכן/מוחק ספירות או מלאי.
  */
 
 import { prismaAny } from "@/lib/prisma";
 import { ACTIVE_SESSION_WHERE } from "@/lib/inventory/count-session-status";
 import { daySpanRange } from "@/lib/inventory/daily-count-report";
+import {
+  loadExcludedProductIds,
+  normalizeCountDay,
+  resolveCountRoundScope,
+} from "@/lib/inventory/count-exclusions";
+import {
+  orderedProductIdsOnShelf,
+  resolveShelf,
+} from "@/lib/inventory/shelf-service";
 
 export type CountCopyProduct = {
   inventoryProductId: string;
@@ -14,8 +24,11 @@ export type CountCopyProduct = {
   nameHe: string | null;
   nameAr: string | null;
   nameEn: string | null;
-  /** הכמות שנשמרה בספירה ההיסטורית (כולל 0) */
-  quantity: number;
+  /**
+   * הכמות שנשמרה בספירה ההיסטורית (כולל 0 מפורש).
+   * null = אין רשומת ספירה ליום/סשן → «לא נספר».
+   */
+  quantity: number | null;
 };
 
 export type CountCopySession = {
@@ -42,9 +55,166 @@ export function isValidCopyYmd(value: string): boolean {
   );
 }
 
+type ProductNameMeta = {
+  name: string;
+  nameHe: string | null;
+  nameAr: string | null;
+  nameEn: string | null;
+};
+
+type SessionLineQty = {
+  inventoryProductId: string;
+  currentQuantity: number;
+  createdAt?: Date | string | null;
+  countDate?: Date | string | null;
+  id?: string | null;
+};
+
+/**
+ * האם a «חדש יותר» מ־b לפי LATEST_COUNT_ORDER_BY:
+ * createdAt desc → countDate desc → id desc
+ */
+export function isNewerCopyCountLine(
+  a: Pick<SessionLineQty, "createdAt" | "countDate" | "id">,
+  b: Pick<SessionLineQty, "createdAt" | "countDate" | "id">,
+): boolean {
+  const aCreated = a.createdAt != null ? new Date(a.createdAt).getTime() : -1;
+  const bCreated = b.createdAt != null ? new Date(b.createdAt).getTime() : -1;
+  if (aCreated !== bCreated) return aCreated > bCreated;
+  const aCount = a.countDate != null ? new Date(a.countDate).getTime() : -1;
+  const bCount = b.countDate != null ? new Date(b.countDate).getTime() : -1;
+  if (aCount !== bCount) return aCount > bCount;
+  const aId = a.id ?? "";
+  const bId = b.id ?? "";
+  return aId > bId;
+}
+
+/**
+ * מפה productId → כמות מפורשת מהסשן.
+ * כפילות: latest לפי LATEST_COUNT_ORDER_BY (createdAt/countDate/id).
+ */
+export function sessionLinesToExplicitCountMap(
+  lines: SessionLineQty[],
+): Map<string, number> {
+  const best = new Map<string, { qty: number; meta: SessionLineQty }>();
+  for (const line of lines) {
+    const pid = line.inventoryProductId?.trim();
+    if (!pid) continue;
+    const qty = Number(line.currentQuantity);
+    if (!Number.isFinite(qty) || qty < 0) continue;
+    const prev = best.get(pid);
+    if (!prev || isNewerCopyCountLine(line, prev.meta)) {
+      best.set(pid, { qty, meta: line });
+    }
+  }
+  const out = new Map<string, number>();
+  for (const [pid, row] of best) out.set(pid, row.qty);
+  return out;
+}
+
+/**
+ * בונה שורות העתקה: כל מוצרי המיקום בסדר מסך הספירה,
+ * עם כמות מהסשן או null (= לא נספר).
+ */
+export function buildCopyProductRows(params: {
+  orderedProductIds: string[];
+  productsById: Map<string, ProductNameMeta>;
+  explicitCountsByProductId: Map<string, number>;
+}): CountCopyProduct[] {
+  const rows: CountCopyProduct[] = [];
+  for (const id of params.orderedProductIds) {
+    const meta = params.productsById.get(id);
+    if (!meta) continue;
+    const hasCount = params.explicitCountsByProductId.has(id);
+    rows.push({
+      inventoryProductId: id,
+      name: meta.nameHe?.trim() || meta.name,
+      nameHe: meta.nameHe,
+      nameAr: meta.nameAr,
+      nameEn: meta.nameEn,
+      quantity: hasCount ? params.explicitCountsByProductId.get(id)! : null,
+    });
+  }
+  return rows;
+}
+
+/** תאריך להעתקה: 13/8 (ללא אפס מוביל) */
+export function formatCopyCountDate(isoOrDate: string | Date): string {
+  const d = typeof isoOrDate === "string" ? new Date(isoOrDate) : isoOrDate;
+  if (Number.isNaN(d.getTime())) return "—";
+  return `${d.getDate()}/${d.getMonth() + 1}`;
+}
+
+export function formatCopyQuantity(qty: number): string {
+  if (!Number.isFinite(qty)) return "0";
+  if (Number.isInteger(qty)) return String(qty);
+  const rounded = Math.round(qty * 1000) / 1000;
+  return String(rounded);
+}
+
+export function notCountedCopyLabel(language?: string | null): string {
+  const lang = (language || "").toLowerCase();
+  if (lang.startsWith("ar")) return "لم يتم الجرد";
+  if (lang.startsWith("en")) return "Not counted";
+  return "לא נספר";
+}
+
+/** כמות להעתקה — 0 מפורש נשאר "0"; null → לא נספר */
+export function formatCopyQuantityOrStatus(
+  quantity: number | null,
+  language?: string | null,
+): string {
+  if (quantity === null) return notCountedCopyLabel(language);
+  return formatCopyQuantity(quantity);
+}
+
+export function resolveCopyProductName(
+  product: Pick<CountCopyProduct, "name" | "nameHe" | "nameAr" | "nameEn">,
+  language?: string | null,
+): string {
+  const lang = (language || "").toLowerCase();
+  if (lang.startsWith("ar") && product.nameAr?.trim()) return product.nameAr.trim();
+  if (lang.startsWith("en") && product.nameEn?.trim()) return product.nameEn.trim();
+  if (lang.startsWith("he") && product.nameHe?.trim()) return product.nameHe.trim();
+  return (
+    product.nameAr?.trim() ||
+    product.nameHe?.trim() ||
+    product.nameEn?.trim() ||
+    product.name ||
+    "—"
+  );
+}
+
+/** טקסט מסודר להדבקה ב־WhatsApp / מייל */
+export function formatCountSessionCopyText(
+  session: CountCopySession,
+  language?: string | null,
+): string {
+  const header = [
+    session.locationName.trim() || "—",
+    formatCopyCountDate(session.countDate),
+    "",
+  ];
+  const body = session.products.map((p, index) => {
+    const name = resolveCopyProductName(p, language);
+    const qty = formatCopyQuantityOrStatus(p.quantity, language);
+    return `${index + 1}. ${name} — ${qty}`;
+  });
+  return [...header, ...body].join("\n");
+}
+
+export function formatAllCountSessionsCopyText(
+  sessions: CountCopySession[],
+  language?: string | null,
+): string {
+  return sessions
+    .map((s) => formatCountSessionCopyText(s, language))
+    .join("\n\n---\n\n");
+}
+
 /**
  * ספירות COMPLETED (לא VOID) בטווח לפי countDate.
- * מוצרים בסדר placement.displayOrder של המיקום; כמויות 0 נשמרות.
+ * רשימת מוצרים = מוצרי המיקום בסדר displayOrder (SSOT של מסך הספירה).
  */
 export async function listSessionsForCopy(params: {
   from: string;
@@ -88,8 +258,11 @@ export async function listSessionsForCopy(params: {
       createdAt: true,
       lines: {
         select: {
+          id: true,
           inventoryProductId: true,
           currentQuantity: true,
+          createdAt: true,
+          countDate: true,
           inventoryProduct: {
             select: {
               name: true,
@@ -103,148 +276,134 @@ export async function listSessionsForCopy(params: {
     },
   });
 
+  type SessionRow = {
+    id: string;
+    sessionNumber: number;
+    locationId: string | null;
+    locationName: string;
+    countDate: Date;
+    createdAt: Date;
+    lines: Array<{
+      id: string;
+      inventoryProductId: string;
+      currentQuantity: number;
+      createdAt: Date;
+      countDate: Date;
+      inventoryProduct: ProductNameMeta;
+    }>;
+  };
+
+  const typedSessions = sessions as SessionRow[];
   const locationIds = [
     ...new Set(
-      sessions
-        .map((s: { locationId: string | null }) => s.locationId)
-        .filter((id: string | null): id is string => Boolean(id)),
+      typedSessions
+        .map((s) => s.locationId)
+        .filter((id): id is string => Boolean(id)),
     ),
   ];
 
-  const orderByLocation = new Map<string, Map<string, number>>();
-  if (locationIds.length > 0) {
-    const placements = await prismaAny.inventoryProductOnLocation.findMany({
-      where: { locationId: { in: locationIds } },
-      select: {
-        locationId: true,
-        inventoryProductId: true,
-        displayOrder: true,
-      },
-      orderBy: [{ displayOrder: "asc" }, { createdAt: "asc" }],
+  /** locationId → ordered product ids (אחרי exclusions לפי יום — נבנה per-session) */
+  const shelfByLocationId = new Map<
+    string,
+    { shelf: NonNullable<Awaited<ReturnType<typeof resolveShelf>>>; orderedIds: string[] }
+  >();
+
+  for (const lid of locationIds) {
+    const shelf = await resolveShelf(lid);
+    if (!shelf) continue;
+    const orderedIds = await orderedProductIdsOnShelf(shelf);
+    shelfByLocationId.set(lid, { shelf, orderedIds });
+  }
+
+  const allProductIds = new Set<string>();
+  for (const { orderedIds } of shelfByLocationId.values()) {
+    for (const id of orderedIds) allProductIds.add(id);
+  }
+  for (const session of typedSessions) {
+    for (const line of session.lines) allProductIds.add(line.inventoryProductId);
+  }
+
+  const productRows =
+    allProductIds.size === 0
+      ? []
+      : ((await prismaAny.inventoryProduct.findMany({
+          where: { id: { in: [...allProductIds] } },
+          select: {
+            id: true,
+            name: true,
+            nameHe: true,
+            nameAr: true,
+            nameEn: true,
+          },
+        })) as Array<ProductNameMeta & { id: string }>);
+
+  const productsById = new Map<string, ProductNameMeta>();
+  for (const p of productRows) {
+    productsById.set(p.id, {
+      name: p.name,
+      nameHe: p.nameHe,
+      nameAr: p.nameAr,
+      nameEn: p.nameEn,
     });
-    for (const pl of placements as Array<{
-      locationId: string;
-      inventoryProductId: string;
-      displayOrder: number;
-    }>) {
-      let map = orderByLocation.get(pl.locationId);
-      if (!map) {
-        map = new Map();
-        orderByLocation.set(pl.locationId, map);
-      }
-      if (!map.has(pl.inventoryProductId)) {
-        map.set(pl.inventoryProductId, pl.displayOrder);
+  }
+  // fallback משורות הסשן אם המוצר נמחק מהקטלוג
+  for (const session of typedSessions) {
+    for (const line of session.lines) {
+      if (!productsById.has(line.inventoryProductId)) {
+        productsById.set(line.inventoryProductId, line.inventoryProduct);
       }
     }
   }
 
-  return sessions.map(
-    (session: {
-      id: string;
-      sessionNumber: number;
-      locationId: string | null;
-      locationName: string;
-      countDate: Date;
-      createdAt: Date;
-      lines: Array<{
-        inventoryProductId: string;
-        currentQuantity: number;
-        inventoryProduct: {
-          name: string;
-          nameHe: string | null;
-          nameAr: string | null;
-          nameEn: string | null;
-        };
-      }>;
-    }) => {
-      const orderMap = session.locationId
-        ? orderByLocation.get(session.locationId)
-        : undefined;
+  const exclusionCache = new Map<string, string[]>();
 
-      const products: CountCopyProduct[] = session.lines.map((line) => ({
-        inventoryProductId: line.inventoryProductId,
-        name: line.inventoryProduct.nameHe?.trim() || line.inventoryProduct.name,
-        nameHe: line.inventoryProduct.nameHe,
-        nameAr: line.inventoryProduct.nameAr,
-        nameEn: line.inventoryProduct.nameEn,
-        quantity: Number(line.currentQuantity) || 0,
-      }));
+  const result: CountCopySession[] = [];
+  for (const session of typedSessions) {
+    const explicitCounts = sessionLinesToExplicitCountMap(session.lines);
+    const shelfInfo = session.locationId
+      ? shelfByLocationId.get(session.locationId)
+      : undefined;
 
-      products.sort((a, b) => {
-        const ao = orderMap?.get(a.inventoryProductId);
-        const bo = orderMap?.get(b.inventoryProductId);
-        if (ao != null && bo != null && ao !== bo) return ao - bo;
-        if (ao != null && bo == null) return -1;
-        if (ao == null && bo != null) return 1;
-        return a.name.localeCompare(b.name, "he", { sensitivity: "base" });
+    let orderedIds: string[];
+    if (shelfInfo) {
+      const countDay = normalizeCountDay(session.countDate.toISOString());
+      const scope = resolveCountRoundScope(shelfInfo.shelf, countDay);
+      const cacheKey = `${scope.locationKey}|${scope.countDay}`;
+      let excluded = exclusionCache.get(cacheKey);
+      if (!excluded) {
+        excluded = await loadExcludedProductIds(scope);
+        exclusionCache.set(cacheKey, excluded);
+      }
+      const excludedSet = new Set(excluded);
+      orderedIds = shelfInfo.orderedIds.filter((id) => !excludedSet.has(id));
+    } else {
+      // מדף ללא locationId — נשארים עם שורות הסשן בלבד (legacy)
+      orderedIds = session.lines.map((l) => l.inventoryProductId);
+      // ייחודיות תוך שמירת סדר הופעה
+      const seen = new Set<string>();
+      orderedIds = orderedIds.filter((id) => {
+        if (seen.has(id)) return false;
+        seen.add(id);
+        return true;
       });
+    }
 
-      return {
-        id: session.id,
-        sessionNumber: session.sessionNumber,
-        locationId: session.locationId,
-        locationName: session.locationName,
-        countDate: session.countDate.toISOString(),
-        createdAt: session.createdAt.toISOString(),
-        products,
-      };
-    },
-  );
-}
+    const products = buildCopyProductRows({
+      orderedProductIds: orderedIds,
+      productsById,
+      explicitCountsByProductId: explicitCounts,
+    });
 
-/** תאריך להעתקה: 13/8 (ללא אפס מוביל) */
-export function formatCopyCountDate(isoOrDate: string | Date): string {
-  const d = typeof isoOrDate === "string" ? new Date(isoOrDate) : isoOrDate;
-  if (Number.isNaN(d.getTime())) return "—";
-  return `${d.getDate()}/${d.getMonth() + 1}`;
-}
+    result.push({
+      id: session.id,
+      sessionNumber: session.sessionNumber,
+      locationId: session.locationId,
+      locationName: session.locationName,
+      countDate: session.countDate.toISOString(),
+      createdAt: session.createdAt.toISOString(),
+      products,
+    });
+  }
 
-export function formatCopyQuantity(qty: number): string {
-  if (!Number.isFinite(qty)) return "0";
-  if (Number.isInteger(qty)) return String(qty);
-  const rounded = Math.round(qty * 1000) / 1000;
-  return String(rounded);
-}
-
-export function resolveCopyProductName(
-  product: Pick<CountCopyProduct, "name" | "nameHe" | "nameAr" | "nameEn">,
-  language?: string | null,
-): string {
-  const lang = (language || "").toLowerCase();
-  if (lang.startsWith("ar") && product.nameAr?.trim()) return product.nameAr.trim();
-  if (lang.startsWith("en") && product.nameEn?.trim()) return product.nameEn.trim();
-  if (lang.startsWith("he") && product.nameHe?.trim()) return product.nameHe.trim();
-  return (
-    product.nameAr?.trim() ||
-    product.nameHe?.trim() ||
-    product.nameEn?.trim() ||
-    product.name ||
-    "—"
-  );
-}
-
-/** טקסט מסודר להדבקה ב־WhatsApp / מייל */
-export function formatCountSessionCopyText(
-  session: CountCopySession,
-  language?: string | null,
-): string {
-  const header = [
-    session.locationName.trim() || "—",
-    formatCopyCountDate(session.countDate),
-    "",
-  ];
-  const body = session.products.map((p, index) => {
-    const name = resolveCopyProductName(p, language);
-    return `${index + 1}. ${name}. ${formatCopyQuantity(p.quantity)}`;
-  });
-  return [...header, ...body].join("\n");
-}
-
-export function formatAllCountSessionsCopyText(
-  sessions: CountCopySession[],
-  language?: string | null,
-): string {
-  return sessions
-    .map((s) => formatCountSessionCopyText(s, language))
-    .join("\n\n---\n\n");
+  return result;
 }
