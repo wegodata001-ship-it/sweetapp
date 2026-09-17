@@ -24,6 +24,7 @@ import type {
   WorkflowRunSummaryDto,
   WorkflowTaskDto,
   WorkflowTemplateDetailDto,
+  WorkflowTemplateItemDto,
   WorkflowTemplateSummaryDto,
 } from "@/lib/workflows/serialize";
 import { InlineTaskCreator, type InlineTaskCreatePayload } from "./inline-task-creator";
@@ -255,8 +256,12 @@ export function CardsWorkflowHub({
   useEffect(() => {
     const parsed = parseKey(expanded);
     if (!parsed) return;
-    if (parsed.kind === "tpl" && !tplDetails[parsed.id]) void loadTemplateDetail(parsed.id);
-    if (parsed.kind === "run" && !runDetails[parsed.id]) void loadRunDetail(parsed.id);
+    if (parsed.kind === "tpl" && !tplDetails[parsed.id]) {
+      queueMicrotask(() => void loadTemplateDetail(parsed.id));
+    }
+    if (parsed.kind === "run" && !runDetails[parsed.id]) {
+      queueMicrotask(() => void loadRunDetail(parsed.id));
+    }
   }, [expanded, tplDetails, runDetails, loadTemplateDetail, loadRunDetail]);
 
   const toggleExpand = (key: ExpandedKey) => {
@@ -412,6 +417,97 @@ export function CardsWorkflowHub({
       return true;
     } finally {
       setBusyGroup(false);
+    }
+  };
+
+  const saveTemplateTask = async (
+    templateId: string,
+    item: WorkflowTemplateItemDto,
+    patch: { title: string; description: string; estimatedMinutes: number },
+  ) => {
+    const prevDetail = tplDetails[templateId];
+    setBusyItemId(item.id);
+    if (prevDetail) {
+      setTplDetails((prev) => ({
+        ...prev,
+        [templateId]: {
+          ...prevDetail,
+          items: prevDetail.items.map((it) =>
+            it.id === item.id
+              ? {
+                  ...it,
+                  display_title: patch.title,
+                  title_override: patch.title,
+                  task_description: patch.description.trim() || null,
+                  effective_minutes: patch.estimatedMinutes,
+                  minutes_override: patch.estimatedMinutes,
+                }
+              : it,
+          ),
+        },
+      }));
+    }
+
+    try {
+      const [taskRes, itemRes] = await Promise.all([
+        fetch(`/api/workflows/tasks/${encodeURIComponent(item.task_id)}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ description: patch.description }),
+          credentials: "same-origin",
+        }),
+        fetch(
+          `/api/workflows/templates/${encodeURIComponent(templateId)}/items/${encodeURIComponent(item.id)}`,
+          {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              titleOverride: patch.title,
+              minutesOverride: patch.estimatedMinutes,
+            }),
+            credentials: "same-origin",
+          },
+        ),
+      ]);
+
+      const taskJson = (await taskRes.json().catch(() => null)) as
+        | { ok: true; data: WorkflowTaskDto }
+        | { ok: false; error?: string }
+        | null;
+      const itemJson = (await itemRes.json().catch(() => null)) as
+        | { ok: true; data: WorkflowTemplateDetailDto }
+        | { ok: false; error?: string }
+        | null;
+
+      if (!taskJson?.ok || !itemJson?.ok) {
+        if (prevDetail) setTplDetails((prev) => ({ ...prev, [templateId]: prevDetail }));
+        showToast({
+          tone: "error",
+          title: taskJson && !taskJson.ok ? taskJson.error ?? t("common.error") : itemJson && !itemJson.ok ? itemJson.error ?? t("common.error") : t("common.error"),
+        });
+        return false;
+      }
+
+      setTasks((prev) =>
+        prev.map((tk) =>
+          tk.id === item.task_id
+            ? { ...tk, description: taskJson.data.description }
+            : tk,
+        ),
+      );
+      setTplDetails((prev) => ({ ...prev, [templateId]: itemJson.data }));
+      setTemplates((prev) =>
+        prev.map((tpl) => (tpl.id === templateId ? summaryFromDetail(itemJson.data) : tpl)),
+      );
+      showToast({ tone: "success", title: t("workflows.templates.toastSaved") });
+      void refreshAll({ force: true });
+      return true;
+    } catch {
+      if (prevDetail) setTplDetails((prev) => ({ ...prev, [templateId]: prevDetail }));
+      showToast({ tone: "error", title: t("common.error") });
+      return false;
+    } finally {
+      setBusyItemId(null);
     }
   };
 
@@ -984,12 +1080,14 @@ export function CardsWorkflowHub({
                         item={it}
                         index={idx}
                         canManage={canManage}
+                        busy={busyItemId === it.id}
                         draggable={canManage}
                         onDragStart={() => setDragTplItemId(it.id)}
                         onDragOver={(e) => {
                           e.preventDefault();
                         }}
                         onDrop={() => void dropReorderTemplate(tpl.id, it.id)}
+                        onSave={(patch) => saveTemplateTask(tpl.id, it, patch)}
                         onMoveUp={() => void reorderTemplateItem(tpl.id, it.id, -1)}
                         onMoveDown={() => void reorderTemplateItem(tpl.id, it.id, 1)}
                         onRemove={() => void removeTemplateItem(tpl.id, it.id)}
@@ -1008,7 +1106,7 @@ export function CardsWorkflowHub({
             {t("workflows.page.hub.tabHistory")} ({historyOnly.length})
           </summary>
           <ul className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4">
-            {historyOnly.map((r, i) => (
+            {historyOnly.map((r) => (
               <li key={r.id}>
                 <button
                   type="button"

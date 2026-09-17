@@ -1,9 +1,14 @@
 "use client";
 
-import { AlertTriangle, Check, GripVertical, Loader2, Play, Timer } from "lucide-react";
+import { AlertTriangle, Check, GripVertical, Loader2, Pencil, Play, Timer } from "lucide-react";
+import { useState } from "react";
 import { useI18n } from "@/components/i18n-provider";
 import { itemElapsedMs, itemIsLate } from "@/lib/workflows/run-helpers";
 import type { WorkflowRunItemDto, WorkflowTemplateItemDto } from "@/lib/workflows/serialize";
+import {
+  TemplateTaskEditModal,
+  type TemplateTaskEditPatch,
+} from "./template-task-edit-modal";
 import { TaskStatusPill } from "./task-status-pill";
 
 function formatHMS(ms: number): string {
@@ -35,9 +40,11 @@ type TemplateItemProps = {
   item: WorkflowTemplateItemDto;
   index: number;
   canManage?: boolean;
+  busy?: boolean;
   onRemove?: () => void;
   onMoveUp?: () => void;
   onMoveDown?: () => void;
+  onSave?: (patch: TemplateTaskEditPatch) => Promise<boolean> | boolean;
   draggable?: boolean;
   onDragStart?: () => void;
   onDragOver?: (e: React.DragEvent) => void;
@@ -49,48 +56,103 @@ type Props = RunItemProps | TemplateItemProps;
 /** Compact task row inside a group card. */
 export function TaskMiniCard(props: Props) {
   const { t } = useI18n();
+  const [editOpen, setEditOpen] = useState(false);
 
   if (props.kind === "template") {
-    const { item, index, canManage, onRemove, onMoveUp, onMoveDown, draggable, onDragStart, onDragOver, onDrop } =
+    const {
+      item,
+      index,
+      canManage,
+      busy,
+      onRemove,
+      onMoveUp,
+      onMoveDown,
+      onSave,
+      draggable,
+      onDragStart,
+      onDragOver,
+      onDrop,
+    } =
       props;
     const color = item.task_color || "#64748b";
     return (
-      <li
-        className="tcg-mini-card flex items-center gap-1.5 rounded-xl bg-white/85 px-2 py-1.5 shadow-sm ring-1 ring-white/50"
-        draggable={draggable}
-        onDragStart={onDragStart}
-        onDragOver={onDragOver}
-        onDrop={onDrop}
-      >
-        {canManage ? (
-          <GripVertical className="h-3.5 w-3.5 shrink-0 cursor-grab text-slate-400" aria-hidden />
-        ) : null}
-        <span
-          className="grid h-7 w-7 shrink-0 place-items-center rounded-lg text-[10px] font-black text-white"
-          style={{ background: color }}
+      <>
+        <li
+          className="tcg-mini-card rounded-xl bg-white/90 px-2.5 py-2.5 shadow-sm ring-1 ring-white/50"
+          draggable={draggable}
+          onDragStart={onDragStart}
+          onDragOver={onDragOver}
+          onDrop={onDrop}
         >
-          {index + 1}
-        </span>
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-[11px] font-black text-slate-900">{item.display_title}</p>
-          <p className="text-[9px] font-bold text-slate-500">
-            {item.effective_minutes}&apos; {item.require_late_reason ? "· ⚠" : ""}
-          </p>
-        </div>
-        {canManage ? (
-          <div className="flex shrink-0 flex-col gap-0.5">
-            <button type="button" onClick={onMoveUp} className="text-[9px] text-slate-500 hover:text-slate-800">
-              ▲
-            </button>
-            <button type="button" onClick={onMoveDown} className="text-[9px] text-slate-500 hover:text-slate-800">
-              ▼
-            </button>
-            <button type="button" onClick={onRemove} className="text-[9px] font-bold text-rose-600">
-              ×
-            </button>
+          <div className="flex items-start gap-2">
+            {canManage ? (
+              <GripVertical className="mt-1 h-4 w-4 shrink-0 cursor-grab text-slate-400" aria-hidden />
+            ) : null}
+            <span
+              className="mt-0.5 grid min-h-8 min-w-8 shrink-0 place-items-center rounded-lg px-1 text-[10px] font-black text-white"
+              style={{ background: color }}
+            >
+              {index + 1}
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0 flex-1">
+                  <p className="break-words text-[13px] font-black leading-5 text-slate-900">
+                    {item.display_title}
+                  </p>
+                  {item.task_description ? (
+                    <p className="mt-1 whitespace-pre-line break-words text-[12px] leading-6 text-slate-700">
+                      {item.task_description}
+                    </p>
+                  ) : canManage ? (
+                    <p className="mt-1 text-[11px] font-medium text-slate-400">
+                      {t("workflows.cards.noDescription")}
+                    </p>
+                  ) : null}
+                  <p className="mt-2 text-[10px] font-bold text-slate-500">
+                    {t("workflows.cards.taskMeta", {
+                      minutes: item.effective_minutes,
+                    })}
+                    {item.require_late_reason ? " · ⚠" : ""}
+                  </p>
+                </div>
+                {canManage ? (
+                  <button
+                    type="button"
+                    onClick={() => setEditOpen(true)}
+                    className="grid h-9 w-9 shrink-0 place-items-center rounded-xl border border-slate-200 bg-white text-slate-600 shadow-sm hover:bg-slate-50"
+                    aria-label={t("workflows.cards.editAria")}
+                    title={t("workflows.cards.editAria")}
+                  >
+                    <Pencil className="h-4 w-4" aria-hidden />
+                  </button>
+                ) : null}
+              </div>
+            </div>
+            {canManage ? (
+              <div className="flex shrink-0 flex-col items-center gap-0.5 pt-0.5">
+                <button type="button" onClick={onMoveUp} className="text-[10px] text-slate-500 hover:text-slate-800">
+                  ▲
+                </button>
+                <button type="button" onClick={onMoveDown} className="text-[10px] text-slate-500 hover:text-slate-800">
+                  ▼
+                </button>
+                <button type="button" onClick={onRemove} className="text-[10px] font-bold text-rose-600">
+                  ×
+                </button>
+              </div>
+            ) : null}
           </div>
-        ) : null}
-      </li>
+          {canManage && editOpen ? (
+            <TemplateTaskEditModal
+              busy={busy}
+              item={item}
+              onCancel={() => setEditOpen(false)}
+              onSave={(patch) => onSave?.(patch) ?? false}
+            />
+          ) : null}
+        </li>
+      </>
     );
   }
 
@@ -163,12 +225,17 @@ export function TaskMiniCard(props: Props) {
         </span>
         <div className="min-w-0 flex-1">
           <p
-            className={`truncate text-[11px] font-black ${
+            className={`break-words text-[12px] font-black leading-5 ${
               item.status === "COMPLETED" ? "text-emerald-800 line-through" : "text-slate-950"
             }`}
           >
             {item.title}
           </p>
+          {item.description ? (
+            <p className="mt-1 whitespace-pre-line break-words text-[11px] leading-5 text-slate-700">
+              {item.description}
+            </p>
+          ) : null}
           <div className="mt-0.5 flex flex-wrap items-center gap-1">
             <TaskStatusPill variant={statusVariant} label={statusLabel} compact />
             <span className="text-[9px] font-bold tabular-nums text-slate-600">

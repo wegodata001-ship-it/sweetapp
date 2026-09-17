@@ -48,6 +48,7 @@ export function InlineTaskCreator({
   const [assigneeId, setAssigneeId] = useState("");
   const [libraryTaskId, setLibraryTaskId] = useState("");
   const [mode, setMode] = useState<"new" | "library">("new");
+  const selectedLibraryTask = libraryTasks.find((task) => task.id === libraryTaskId) ?? null;
 
   const reset = () => {
     setTitle("");
@@ -181,13 +182,28 @@ export function InlineTaskCreator({
         </label>
       </div>
 
-      <textarea
-        value={notes}
-        onChange={(e) => setNotes(e.target.value)}
-        rows={2}
-        placeholder={t("workflows.cards.notesPh")}
-        className="w-full resize-none rounded-lg border-0 bg-white px-2 py-1.5 text-xs font-semibold text-slate-800 shadow-sm ring-1 ring-slate-200 focus:ring-2 focus:ring-blue-300"
-      />
+      {mode === "new" ? (
+        <textarea
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+          rows={4}
+          placeholder={t("workflows.cards.notesPh")}
+          className="w-full resize-none rounded-lg border-0 bg-white px-2 py-2 text-sm leading-6 text-slate-800 shadow-sm ring-1 ring-slate-200 focus:ring-2 focus:ring-blue-300"
+        />
+      ) : selectedLibraryTask ? (
+        <div className="rounded-lg bg-slate-50 px-2.5 py-2 ring-1 ring-slate-200">
+          <p className="text-[9px] font-black uppercase tracking-wide text-slate-500">
+            {t("common.description")}
+          </p>
+          {selectedLibraryTask.description ? (
+            <p className="mt-1 whitespace-pre-line break-words text-xs leading-5 text-slate-700">
+              {selectedLibraryTask.description}
+            </p>
+          ) : (
+            <p className="mt-1 text-xs text-slate-400">{t("workflows.cards.noDescription")}</p>
+          )}
+        </div>
+      ) : null}
 
       {showAssignee && employees.length > 0 ? (
         <select
