@@ -4157,8 +4157,17 @@
       "statTasks": "{{n}} משימות",
       "statDone": "{{n}} הושלמו",
       "statMinutes": "{{n}} דק׳ סה״כ",
+      "editTaskTitle": "עריכת משימה",
+      "editTaskAria": "ערוך משימה",
+      "saveChanges": "שמור שינויים",
+      "taskDescriptionPlaceholder": "הסבר / תיאור המשימה (אופציונלי)",
+      "colorLabel": "צבע משימה",
       "fields": {
-        "materials": "חומרים"
+        "materials": "חומרים",
+        "taskTitle": "שם המשימה",
+        "taskOrder": "מספר / סדר המשימה",
+        "minutes": "משך בדקות",
+        "dueTime": "שעת יעד"
       },
       "status": {
         "pending": "ממתין",

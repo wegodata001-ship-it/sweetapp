@@ -4161,8 +4161,17 @@
       "statTasks": "{{n}} مهام",
       "statDone": "{{n}} منجزة",
       "statMinutes": "{{n}} دقيقة",
+      "editTaskTitle": "تعديل المهمة",
+      "editTaskAria": "عدّل المهمة",
+      "saveChanges": "حفظ التغييرات",
+      "taskDescriptionPlaceholder": "شرح / وصف المهمة (اختياري)",
+      "colorLabel": "لون المهمة",
       "fields": {
-        "materials": "مواد"
+        "materials": "مواد",
+        "taskTitle": "اسم المهمة",
+        "taskOrder": "رقم / ترتيب المهمة",
+        "minutes": "المدة بالدقائق",
+        "dueTime": "وقت الاستحقاق"
       },
       "status": {
         "pending": "قيد الانتظار",

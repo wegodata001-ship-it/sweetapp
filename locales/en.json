@@ -4161,8 +4161,17 @@
       "statTasks": "{{n}} tasks",
       "statDone": "{{n}} done",
       "statMinutes": "{{n}} min total",
+      "editTaskTitle": "Edit task",
+      "editTaskAria": "Edit task",
+      "saveChanges": "Save changes",
+      "taskDescriptionPlaceholder": "Task explanation / description (optional)",
+      "colorLabel": "Task color",
       "fields": {
-        "materials": "Materials"
+        "materials": "Materials",
+        "taskTitle": "Task name",
+        "taskOrder": "Task number / order",
+        "minutes": "Duration in minutes",
+        "dueTime": "Due time"
       },
       "status": {
         "pending": "Pending",

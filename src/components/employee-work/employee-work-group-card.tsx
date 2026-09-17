@@ -42,6 +42,7 @@ type Props = {
   onDuplicateGroup: () => void;
   onAddTask: (params: {
     title: string;
+    description: string;
     estimatedMinutes: number;
     taskTemplateId?: string;
     color?: string | null;
@@ -90,6 +91,7 @@ export function EmployeeWorkGroupCard({
   const [editColor, setEditColor] = useState(group.color);
   const [addOpen, setAddOpen] = useState(false);
   const [newTitle, setNewTitle] = useState("");
+  const [newDescription, setNewDescription] = useState("");
   const [newMin, setNewMin] = useState("15");
   const [newColor, setNewColor] = useState<string | null>(null);
   const [pickedTemplateId, setPickedTemplateId] = useState<string | undefined>();
@@ -131,11 +133,13 @@ export function EmployeeWorkGroupCard({
     if (!newTitle.trim()) return;
     onAddTask({
       title: newTitle.trim(),
+      description: newDescription.trim(),
       estimatedMinutes: Number(newMin) || 15,
       taskTemplateId: pickedTemplateId,
       color: newColor,
     });
     setNewTitle("");
+    setNewDescription("");
     setNewMin("15");
     setNewColor(null);
     setPickedTemplateId(undefined);
@@ -145,6 +149,7 @@ export function EmployeeWorkGroupCard({
 
   const onLibraryPick = (opt: LibraryTaskOption) => {
     setNewTitle(opt.title);
+    setNewDescription(opt.description ?? "");
     setNewMin(String(opt.estimatedMinutes));
     setPickedTemplateId(opt.id);
   };
@@ -293,15 +298,26 @@ export function EmployeeWorkGroupCard({
                   task={task}
                   canManage={canManage}
                   busy={busy}
+                  listLength={group.tasks.length}
                   nested
                   lock={lockMap.get(task.id)}
                   draggable={canManage}
                   onDragStart={() => setDragTaskId(task.id)}
                   onDragOver={(e) => e.preventDefault()}
                   onDrop={() => reorderDrop(task.id)}
-                  onSave={(patch) =>
-                    onSaveTask(task.id, { ...patch, color: patch.color ?? task.color })
-                  }
+                  onSave={async ({ orderNumber, ...patch }) => {
+                    await onSaveTask(task.id, { ...patch, color: patch.color ?? task.color });
+                    const currentOrder = task.order_index + 1;
+                    if (orderNumber === currentOrder) return;
+                    const ids = [...group.tasks]
+                      .sort((a, b) => a.order_index - b.order_index)
+                      .map((x) => x.id);
+                    const from = ids.indexOf(task.id);
+                    if (from < 0) return;
+                    ids.splice(from, 1);
+                    ids.splice(Math.max(0, Math.min(ids.length, orderNumber - 1)), 0, task.id);
+                    onReorderTask(ids);
+                  }}
                   onDelete={() => onDeleteTask(task.id)}
                   onStart={
                     !canManage && task.status === "PENDING"
@@ -325,6 +341,13 @@ export function EmployeeWorkGroupCard({
                     value={newTitle}
                     onChange={setNewTitle}
                     onPick={onLibraryPick}
+                  />
+                  <textarea
+                    value={newDescription}
+                    onChange={(e) => setNewDescription(e.target.value)}
+                    rows={3}
+                    placeholder={t("workflows.employeeWork.taskDescriptionPlaceholder")}
+                    className="w-full resize-none rounded-xl bg-slate-50 px-3 py-2 text-sm text-slate-900 ring-1 ring-slate-200"
                   />
                   <div className="flex gap-2">
                     <input

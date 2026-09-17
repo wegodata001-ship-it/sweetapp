@@ -129,6 +129,7 @@ export function reorderGroupsInDay(
 export function buildOptimisticTask(params: {
   day: SerializedEmployeeWorkDay;
   title: string;
+  description?: string;
   estimatedMinutes: number;
   taskGroupId?: string | null;
   color?: string | null;
@@ -147,7 +148,7 @@ export function buildOptimisticTask(params: {
     task_group_id: params.taskGroupId ?? null,
     task_template_id: null,
     title: params.title,
-    description: null,
+    description: params.description?.trim() || null,
     materials: null,
     target_due_at: null,
     estimated_minutes: params.estimatedMinutes,

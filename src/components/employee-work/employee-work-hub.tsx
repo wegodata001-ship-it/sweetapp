@@ -59,6 +59,7 @@ export function EmployeeWorkHub({
   const [groupOpen, setGroupOpen] = useState(false);
   const [addTaskOpen, setAddTaskOpen] = useState(false);
   const [newTitle, setNewTitle] = useState("");
+  const [newDescription, setNewDescription] = useState("");
   const [newMin, setNewMin] = useState("15");
   const [pickedTemplateId, setPickedTemplateId] = useState<string | undefined>();
   const [dragGroupId, setDragGroupId] = useState<string | null>(null);
@@ -188,6 +189,7 @@ export function EmployeeWorkHub({
       optimistic = buildOptimisticTask({
         day,
         title: String(body.title ?? ""),
+        description: String(body.description ?? ""),
         estimatedMinutes: Number(body.estimatedMinutes) || 15,
         taskGroupId: (body.taskGroupId as string | null) ?? null,
         color: (body.color as string | null) ?? null,
@@ -246,21 +248,31 @@ export function EmployeeWorkHub({
       kind: "task",
       title: newTitle.trim(),
       estimatedMinutes: Number(newMin) || 15,
+      description: newDescription.trim(),
       taskTemplateId: pickedTemplateId,
     });
     setNewTitle("");
+    setNewDescription("");
+    setNewMin("15");
     setPickedTemplateId(undefined);
     setAddTaskOpen(false);
   };
 
   const addTaskToGroup = async (
     groupId: string,
-    params: { title: string; estimatedMinutes: number; taskTemplateId?: string; color?: string | null },
+    params: {
+      title: string;
+      description: string;
+      estimatedMinutes: number;
+      taskTemplateId?: string;
+      color?: string | null;
+    },
   ) => {
     await postDay({
       kind: "task",
       taskGroupId: groupId,
       title: params.title,
+      description: params.description,
       estimatedMinutes: params.estimatedMinutes,
       taskTemplateId: params.taskTemplateId,
       color: params.color,
@@ -661,9 +673,17 @@ export function EmployeeWorkHub({
                 onChange={setNewTitle}
                 onPick={(opt: LibraryTaskOption) => {
                   setNewTitle(opt.title);
+                  setNewDescription(opt.description ?? "");
                   setNewMin(String(opt.estimatedMinutes));
                   setPickedTemplateId(opt.id);
                 }}
+              />
+              <textarea
+                value={newDescription}
+                onChange={(e) => setNewDescription(e.target.value)}
+                rows={3}
+                placeholder={t("workflows.employeeWork.taskDescriptionPlaceholder")}
+                className="w-full resize-none rounded-xl bg-white px-3 py-2 text-sm text-slate-900 ring-1 ring-slate-200"
               />
               <div className="flex gap-2">
                 <input
@@ -735,12 +755,23 @@ export function EmployeeWorkHub({
                         task={task}
                         canManage={canManage}
                         busy={busy}
+                        listLength={sortedLoose.length}
                         lock={lockMap.get(task.id)}
                         draggable={canManage}
                         onDragStart={() => setDragLooseId(task.id)}
                         onDragOver={(e) => e.preventDefault()}
                         onDrop={() => void reorderLooseDrop(task.id)}
-                        onSave={(patch) => void saveTask(task.id, patch)}
+                        onSave={async ({ orderNumber, ...patch }) => {
+                          await saveTask(task.id, patch);
+                          const currentOrder = task.order_index + 1;
+                          if (orderNumber === currentOrder) return;
+                          const ids = sortedLoose.map((x) => x.id);
+                          const from = ids.indexOf(task.id);
+                          if (from < 0) return;
+                          ids.splice(from, 1);
+                          ids.splice(Math.max(0, Math.min(ids.length, orderNumber - 1)), 0, task.id);
+                          await reorderTasks(ids, null);
+                        }}
                         onDelete={() => void deleteTask(task.id)}
                         onStart={
                           !canManage && task.status === "PENDING"

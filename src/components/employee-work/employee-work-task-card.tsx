@@ -5,14 +5,17 @@ import {
   ChevronDown,
   ChevronUp,
   GripVertical,
-  Loader2,
   Lock,
+  Pencil,
   Play,
   Trash2,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import {
+  EmployeeWorkTaskEditModal,
+  type EmployeeWorkTaskEditPatch,
+} from "@/components/employee-work/employee-work-task-edit-modal";
 import { useI18n } from "@/components/i18n-provider";
-import { TaskColorPicker } from "@/components/employee-work/task-color-picker";
 import { TaskStatusPill } from "@/components/tasks/cards/task-status-pill";
 import type { TaskLockState } from "@/lib/work-tasks/employee-work-lock";
 import { getTaskAccentStyle } from "@/lib/work-tasks/task-color-presets";
@@ -41,14 +44,8 @@ type Props = {
   onStart?: () => void;
   onComplete?: () => void;
   onDelete?: () => void;
-  onSave?: (patch: {
-    title: string;
-    estimatedMinutes: number;
-    description: string;
-    materials: string;
-    targetDueAt: string;
-    color: string | null;
-  }) => void;
+  onSave?: (patch: EmployeeWorkTaskEditPatch) => void;
+  listLength?: number;
   draggable?: boolean;
   onDragStart?: () => void;
   onDragOver?: (e: React.DragEvent) => void;
@@ -67,6 +64,7 @@ export function EmployeeWorkTaskCard({
   onComplete,
   onDelete,
   onSave,
+  listLength = 1,
   draggable,
   onDragStart,
   onDragOver,
@@ -74,30 +72,14 @@ export function EmployeeWorkTaskCard({
 }: Props) {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
   const [justDone, setJustDone] = useState(false);
   const expanded = expandedProp ?? open;
   const late = isLate(task);
   const variant = statusVariant(task.status, late);
   const locked = !canManage && (lock?.locked ?? false);
   const accent = getTaskAccentStyle(task.color);
-
-  const [title, setTitle] = useState(task.title);
-  const [minutes, setMinutes] = useState(String(task.estimated_minutes));
-  const [desc, setDesc] = useState(task.description ?? "");
-  const [materials, setMaterials] = useState(task.materials ?? "");
-  const [color, setColor] = useState<string | null>(task.color);
-  const [due, setDue] = useState(
-    task.target_due_at ? new Date(task.target_due_at).toISOString().slice(11, 16) : "",
-  );
-
-  useEffect(() => {
-    setTitle(task.title);
-    setMinutes(String(task.estimated_minutes));
-    setDesc(task.description ?? "");
-    setMaterials(task.materials ?? "");
-    setColor(task.color);
-    setDue(task.target_due_at ? new Date(task.target_due_at).toISOString().slice(11, 16) : "");
-  }, [task]);
+  const due = task.target_due_at ? new Date(task.target_due_at).toISOString().slice(11, 16) : "";
 
   const toggle = () => {
     if (locked && !canManage) return;
@@ -129,169 +111,164 @@ export function EmployeeWorkTaskCard({
 
   return (
     <li
-      className={`ew-task-card rounded-xl bg-white shadow-sm ring-1 transition ${
-        justDone ? "ew-task-complete-pop" : ""
-      } ${locked ? "ew-task-locked opacity-60" : ""} ${
-        nested ? "ms-0 sm:ms-1" : ""
-      } ${
-        task.status === "IN_PROGRESS"
-          ? late
-            ? "ring-rose-200"
-            : "ring-blue-200"
-          : "ring-slate-100"
-      } ${lock?.isNext && !canManage ? "ew-task-unlock-glow ring-violet-300" : ""}`}
-      style={accent as React.CSSProperties}
-      draggable={draggable && canManage && !locked}
-      onDragStart={onDragStart}
-      onDragOver={onDragOver}
-      onDrop={onDrop}
-    >
-      <div className="flex items-stretch gap-1 p-2">
-        {task.color ? (
-          <span
-            className="mt-2 h-3 w-3 shrink-0 rounded-full ring-2 ring-white"
-            style={{ backgroundColor: task.color }}
-            aria-hidden
-          />
-        ) : null}
-        {canManage ? (
-          <span className="flex cursor-grab items-center px-0.5 text-slate-300">
-            <GripVertical className="h-4 w-4" aria-hidden />
-          </span>
-        ) : locked ? (
-          <span className="flex items-center px-0.5 text-slate-400" title={t("workflows.employeeWork.lockHint")}>
-            <Lock className="h-4 w-4" aria-hidden />
-          </span>
-        ) : null}
-        <button
-          type="button"
-          onClick={toggle}
-          disabled={locked && !canManage}
-          className={`min-w-0 flex-1 text-start ${locked && !canManage ? "cursor-not-allowed" : ""}`}
-          title={locked ? t("workflows.employeeWork.lockHint") : undefined}
-        >
-          <div className="flex items-start justify-between gap-2">
-            <div className="min-w-0">
-              <p className="truncate text-sm font-black text-slate-900">{task.title}</p>
-              <p className="mt-0.5 text-[10px] font-bold text-slate-500">
-                {task.estimated_minutes}&apos; {due ? `· ${due}` : ""}
-              </p>
-            </div>
-            <TaskStatusPill variant={locked ? "PENDING" : variant} label={statusLabel} compact />
-          </div>
-        </button>
-        <div className="flex shrink-0 flex-col gap-1">
-          {expanded ? (
-            <ChevronUp className="h-4 w-4 text-slate-400" aria-hidden />
-          ) : (
-            <ChevronDown className="h-4 w-4 text-slate-400" aria-hidden />
-          )}
-        </div>
-      </div>
-
-      {expanded ? (
-        <div className="border-t border-slate-100 px-2 pb-2 pt-1.5">
+        className={`ew-task-card rounded-xl bg-white shadow-sm ring-1 transition ${
+          justDone ? "ew-task-complete-pop" : ""
+        } ${locked ? "ew-task-locked opacity-60" : ""} ${
+          nested ? "ms-0 sm:ms-1" : ""
+        } ${
+          task.status === "IN_PROGRESS"
+            ? late
+              ? "ring-rose-200"
+              : "ring-blue-200"
+            : "ring-slate-100"
+        } ${lock?.isNext && !canManage ? "ew-task-unlock-glow ring-violet-300" : ""}`}
+        style={accent as React.CSSProperties}
+        draggable={draggable && canManage && !locked}
+        onDragStart={onDragStart}
+        onDragOver={onDragOver}
+        onDrop={onDrop}
+      >
+        <div className="flex items-start gap-2 p-2.5">
+          {task.color ? (
+            <span
+              className="mt-2 h-3 w-3 shrink-0 rounded-full ring-2 ring-white"
+              style={{ backgroundColor: task.color }}
+              aria-hidden
+            />
+          ) : null}
           {canManage ? (
-            <div className="space-y-1.5">
-              <input
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                className="h-9 w-full rounded-lg border-0 bg-slate-50 px-2 text-xs font-bold ring-1 ring-slate-200"
-              />
-              <TaskColorPicker value={color} onChange={setColor} compact />
-              <div className="grid grid-cols-2 gap-1">
-                <input
-                  type="number"
-                  min={0}
-                  value={minutes}
-                  onChange={(e) => setMinutes(e.target.value)}
-                  className="h-8 rounded-lg bg-slate-50 px-2 text-xs font-bold ring-1 ring-slate-200"
-                />
-                <input
-                  type="time"
-                  value={due}
-                  onChange={(e) => setDue(e.target.value)}
-                  className="h-8 rounded-lg bg-slate-50 px-2 text-xs font-bold ring-1 ring-slate-200"
-                />
-              </div>
-              <textarea
-                value={desc}
-                onChange={(e) => setDesc(e.target.value)}
-                rows={2}
-                placeholder={t("workflows.cards.notesPh")}
-                className="w-full resize-none rounded-lg bg-slate-50 px-2 py-1 text-xs ring-1 ring-slate-200"
-              />
-              <input
-                value={materials}
-                onChange={(e) => setMaterials(e.target.value)}
-                placeholder={t("workflows.employeeWork.fields.materials")}
-                className="h-8 w-full rounded-lg bg-slate-50 px-2 text-xs font-bold ring-1 ring-slate-200"
-              />
+            <span className="flex cursor-grab items-center px-0.5 pt-1 text-slate-300">
+              <GripVertical className="h-4 w-4" aria-hidden />
+            </span>
+          ) : locked ? (
+            <span className="flex items-center px-0.5 pt-1 text-slate-400" title={t("workflows.employeeWork.lockHint")}>
+              <Lock className="h-4 w-4" aria-hidden />
+            </span>
+          ) : null}
+
+          <div className="min-w-0 flex-1">
+            <div className="flex items-start gap-2">
               <button
                 type="button"
-                disabled={busy}
-                onClick={() =>
-                  onSave?.({
-                    title,
-                    estimatedMinutes: Number(minutes) || 15,
-                    description: desc,
-                    materials,
-                    targetDueAt: due,
-                    color,
-                  })
-                }
-                className="flex h-9 w-full items-center justify-center gap-1 rounded-lg bg-slate-900 text-xs font-black text-white"
+                onClick={toggle}
+                disabled={locked && !canManage}
+                className={`min-w-0 flex-1 text-start ${locked && !canManage ? "cursor-not-allowed" : ""}`}
+                title={locked ? t("workflows.employeeWork.lockHint") : undefined}
               >
-                {busy ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
-                {t("common.save")}
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-start gap-2">
+                      <span className="mt-0.5 inline-flex min-w-7 items-center justify-center rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-black text-slate-700">
+                        {task.order_index + 1}
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <p className="break-words text-sm font-black leading-5 text-slate-900 sm:text-[15px]">
+                          {task.title}
+                        </p>
+                        {task.description ? (
+                          <p className="mt-1 whitespace-pre-line break-words text-xs leading-5 text-slate-500">
+                            {task.description}
+                          </p>
+                        ) : null}
+                        <p className="mt-1 text-[10px] font-bold text-slate-500">
+                          {task.estimated_minutes}&apos; {due ? `· ${due}` : ""}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                  <TaskStatusPill variant={locked ? "PENDING" : variant} label={statusLabel} compact />
+                </div>
               </button>
+
+              <div className="flex shrink-0 items-center gap-1">
+                {canManage ? (
+                  <button
+                    type="button"
+                    onClick={() => setEditOpen(true)}
+                    className="grid h-9 w-9 place-items-center rounded-xl border border-slate-200 bg-white text-slate-600 shadow-sm hover:bg-slate-50"
+                    aria-label={t("workflows.employeeWork.editTaskAria")}
+                    title={t("common.edit")}
+                  >
+                    <Pencil className="h-4 w-4" aria-hidden />
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={toggle}
+                  className="grid h-9 w-9 place-items-center rounded-xl text-slate-400 hover:bg-slate-50"
+                  aria-label={expanded ? t("common.close") : t("common.details")}
+                >
+                  {expanded ? (
+                    <ChevronUp className="h-4 w-4" aria-hidden />
+                  ) : (
+                    <ChevronDown className="h-4 w-4" aria-hidden />
+                  )}
+                </button>
+              </div>
             </div>
-          ) : (
+          </div>
+        </div>
+
+        {expanded ? (
+          <div className="border-t border-slate-100 px-2.5 pb-2.5 pt-2">
             <div className="space-y-1 text-xs text-slate-600">
-              {task.description ? <p>{task.description}</p> : null}
               {task.materials ? (
-                <p>
+                <p className="break-words">
                   <strong>{t("workflows.employeeWork.fields.materials")}:</strong> {task.materials}
                 </p>
               ) : null}
             </div>
-          )}
 
-          <div className="mt-2 flex gap-1">
-            {!canManage && task.status === "PENDING" && !locked ? (
-              <button
-                type="button"
-                onClick={handleStart}
-                disabled={busy}
-                className="flex flex-1 items-center justify-center gap-1 rounded-lg bg-blue-600 py-2.5 text-xs font-black text-white"
-              >
-                <Play className="h-3.5 w-3.5" />
-                {t("workflows.page.steps.start")}
-              </button>
-            ) : null}
-            {!canManage && task.status === "IN_PROGRESS" ? (
-              <button
-                type="button"
-                onClick={handleComplete}
-                disabled={busy}
-                className="flex flex-1 items-center justify-center gap-1 rounded-lg bg-emerald-600 py-2.5 text-xs font-black text-white"
-              >
-                <Check className="h-3.5 w-3.5" />
-                {t("workflows.page.steps.complete")}
-              </button>
-            ) : null}
-            {canManage ? (
-              <button
-                type="button"
-                onClick={onDelete}
-                disabled={busy}
-                className="flex items-center justify-center gap-1 rounded-lg border border-rose-200 px-3 py-2 text-xs font-bold text-rose-700"
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-              </button>
-            ) : null}
+            <div className="mt-2 flex gap-1">
+              {!canManage && task.status === "PENDING" && !locked ? (
+                <button
+                  type="button"
+                  onClick={handleStart}
+                  disabled={busy}
+                  className="flex flex-1 items-center justify-center gap-1 rounded-lg bg-blue-600 py-2.5 text-xs font-black text-white"
+                >
+                  <Play className="h-3.5 w-3.5" />
+                  {t("workflows.page.steps.start")}
+                </button>
+              ) : null}
+              {!canManage && task.status === "IN_PROGRESS" ? (
+                <button
+                  type="button"
+                  onClick={handleComplete}
+                  disabled={busy}
+                  className="flex flex-1 items-center justify-center gap-1 rounded-lg bg-emerald-600 py-2.5 text-xs font-black text-white"
+                >
+                  <Check className="h-3.5 w-3.5" />
+                  {t("workflows.page.steps.complete")}
+                </button>
+              ) : null}
+              {canManage ? (
+                <button
+                  type="button"
+                  onClick={onDelete}
+                  disabled={busy}
+                  className="flex items-center justify-center gap-1 rounded-lg border border-rose-200 px-3 py-2 text-xs font-bold text-rose-700"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                  {t("common.delete")}
+                </button>
+              ) : null}
+            </div>
           </div>
-        </div>
+        ) : null}
+
+      {canManage ? (
+        <EmployeeWorkTaskEditModal
+          open={editOpen}
+          busy={busy}
+          task={task}
+          listLength={listLength}
+          onCancel={() => setEditOpen(false)}
+          onSave={(patch) => {
+            onSave?.(patch);
+            setEditOpen(false);
+          }}
+        />
       ) : null}
     </li>
   );
