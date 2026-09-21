@@ -80,6 +80,7 @@ export const PAGE_ACCESS_RULES: { prefix: string; permission: PagePermission }[]
 
 /** API — נתיב לפי קידומת */
 export const API_ACCESS_RULES: { prefix: string; permission: PermissionKey | "SUPER_ADMIN_ONLY" }[] = [
+  { prefix: "/api/admin/ledger-forensic-audit", permission: "SUPER_ADMIN_ONLY" },
   { prefix: "/api/admin/users", permission: "SUPER_ADMIN_ONLY" },
   { prefix: "/api/procurement", permission: "financial_registration" },
   { prefix: "/api/documents", permission: "financial_registration" },
