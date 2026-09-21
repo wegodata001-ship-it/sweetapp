@@ -68,6 +68,7 @@ export async function GET() {
     }, 0);
     const totalOrders = incomeDocRows.reduce((sum, row) => sum + Math.max(0, row.totalAmount), 0);
     const openInvoices = await countOpenInvoices({ log: true });
+    // Open-invoice / operational KPI — not the entity ledger SSOT.
     const openBalancesTotal = Math.max(0, totalOrders - totalPayments);
 
     return NextResponse.json({

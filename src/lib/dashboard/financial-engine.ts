@@ -448,6 +448,7 @@ export function aggregateSupplierPayments(
       }
     } else if (status === "partial") {
       pendingCount += 1;
+      // Supplier-payment document remaining — not entity ledger SSOT.
       openDebtAmount += Math.max(0, net - paid);
     } else {
       const due = doc.docDate ? new Date(doc.docDate).getTime() : null;

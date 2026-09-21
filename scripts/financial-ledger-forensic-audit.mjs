@@ -1,22 +1,88 @@
 /**
- * READ-ONLY forensic reconciliation: Customer + Supplier ledgers vs source events.
+ * READ-ONLY forensic reconciliation: Customer + Supplier + Employee ledgers vs source events.
  *
  * Allowed: findMany / findFirst / count / aggregate / groupBy / $queryRaw SELECT
  * Forbidden: create / update / delete / upsert / executeRaw / migration / seed / backfill
  *
- * Fails closed if Production DB is not configured. Does not fall back to local.
+ * Env: ONLY `.env.production.audit`
+ * No fallback to .env.local, development, preview, or Prisma default URL.
  *
  * Usage:
- *   npx vercel env run -e production -- node scripts/financial-ledger-forensic-audit.mjs
+ *   node scripts/financial-ledger-forensic-audit.mjs
  *
- * Never prints DATABASE_URL / credentials.
+ * Never prints DATABASE_URL / credentials / host / username.
  */
+import fs from "node:fs";
+import path from "node:path";
 import { PrismaClient } from "@prisma/client";
 
-const prisma = new PrismaClient();
+const AUDIT_ENV_FILE = ".env.production.audit";
 const EPS = 0.005;
 const ROUND_EPS = 0.02;
 const SAFETY_CAP = 10_000;
+
+function parseEnvFile(filePath) {
+  const text = fs.readFileSync(filePath, "utf8");
+  const out = {};
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line || line.startsWith("#")) continue;
+    const m = line.match(/^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/);
+    if (!m) continue;
+    let val = m[2];
+    if (
+      (val.startsWith('"') && val.endsWith('"')) ||
+      (val.startsWith("'") && val.endsWith("'"))
+    ) {
+      val = val.slice(1, -1);
+    }
+    out[m[1]] = val;
+  }
+  return out;
+}
+
+function loadProductionAuditEnv() {
+  const envPath = path.join(process.cwd(), AUDIT_ENV_FILE);
+  if (!fs.existsSync(envPath)) {
+    return { ok: false, reason: "MISSING_AUDIT_ENV_FILE", present: false };
+  }
+  const parsed = parseEnvFile(envPath);
+  const url = String(parsed.DATABASE_URL || "").trim();
+  if (!url) return { ok: false, reason: "NO_DATABASE_URL", present: false };
+  if (url.length < 20 || /SENSITIVE|placeholder/i.test(url)) {
+    return { ok: false, reason: "PLACEHOLDER_DATABASE_URL", present: false };
+  }
+  if (!/^postgres/i.test(url)) {
+    return { ok: false, reason: "UNEXPECTED_DB_PROVIDER", present: true };
+  }
+  try {
+    const u = new URL(url.replace(/^postgresql:/i, "postgres:"));
+    const host = (u.hostname || "").toLowerCase();
+    if (!host) return { ok: false, reason: "NO_DB_HOST", present: true };
+    if (
+      host === "localhost" ||
+      host === "127.0.0.1" ||
+      host === "::1" ||
+      host.endsWith(".local")
+    ) {
+      return { ok: false, reason: "LOCAL_DB_REJECTED", present: true };
+    }
+  } catch {
+    return { ok: false, reason: "UNPARSEABLE_DATABASE_URL", present: true };
+  }
+  delete process.env.DIRECT_URL;
+  process.env.DATABASE_URL = url;
+  const direct = String(parsed.DIRECT_URL || "").trim();
+  if (direct.length >= 20 && /^postgres/i.test(direct) && !/SENSITIVE|placeholder/i.test(direct)) {
+    process.env.DIRECT_URL = direct;
+  }
+  return { ok: true, present: true };
+}
+
+const auditEnv = loadProductionAuditEnv();
+const prisma = auditEnv.ok
+  ? new PrismaClient({ datasources: { db: { url: process.env.DATABASE_URL } } })
+  : null;
 
 function money(n) {
   const v = Number(n);
@@ -29,28 +95,6 @@ function isoDay(d) {
   const dt = d instanceof Date ? d : new Date(d);
   if (Number.isNaN(dt.getTime())) return null;
   return dt.toISOString().slice(0, 10);
-}
-
-function hasProductionDb() {
-  const url = process.env.DATABASE_URL || process.env.DIRECT_URL || "";
-  if (!url || url.length < 20) return { ok: false, reason: "NO_DATABASE_URL" };
-  if (/SENSITIVE|placeholder/i.test(url)) return { ok: false, reason: "PLACEHOLDER_DATABASE_URL" };
-  try {
-    const u = new URL(url.replace(/^postgresql:/i, "postgres:"));
-    const host = (u.hostname || "").toLowerCase();
-    if (!host) return { ok: false, reason: "NO_DB_HOST" };
-    if (
-      host === "localhost" ||
-      host === "127.0.0.1" ||
-      host === "::1" ||
-      host.endsWith(".local")
-    ) {
-      return { ok: false, reason: "LOCAL_DB_REJECTED" };
-    }
-    return { ok: true, hostHint: host.split(".").slice(-2).join(".") };
-  } catch {
-    return { ok: false, reason: "UNPARSEABLE_DATABASE_URL" };
-  }
 }
 
 function classifyDiff(expected, actual) {
@@ -266,22 +310,29 @@ function auditCustomers(data) {
     const pays = paysByCustomer.get(c.id) ?? [];
     const incomeDocs = docs.filter((d) => d.category === "הכנסה");
     const otherDocs = docs.filter((d) => d.category !== "הכנסה");
-    const creditNotes = incomeDocs.filter((d) => /זיכוי|credit/i.test(d.documentType || ""));
+    const creditNotes = docs.filter((d) => isCustomerCreditNote(d.documentType));
     const zDocs = incomeDocs.filter((d) => d.documentType === "דוח Z");
+    const chargeDocs = incomeDocs.filter((d) => !isCustomerCreditNote(d.documentType));
 
     const ledgerPays = pays.filter((p) => !p.documentId || incomeDocIds.has(p.documentId));
     const excludedPays = pays.filter((p) => p.documentId && !incomeDocIds.has(p.documentId));
     const unlinkedPays = pays.filter((p) => !p.documentId);
 
-    const charges = money(incomeDocs.reduce((s, d) => s + money(d.totalAmount), 0));
+    const oldCharges = money(incomeDocs.reduce((s, d) => s + money(d.totalAmount), 0));
+    const charges = money(chargeDocs.reduce((s, d) => s + money(d.totalAmount), 0));
+    const creditNoteTotal = money(creditNotes.reduce((s, d) => s + money(d.totalAmount), 0));
     const paymentsApplied = money(ledgerPays.reduce((s, p) => s + money(p.amount), 0));
     const opening = money(c.openingBalance);
-    const signed = money(opening + charges - paymentsApplied);
-    const expectedDebt = money(Math.max(0, signed));
-    const expectedCredit = money(Math.max(0, -signed));
+    const newSigned = money(opening + charges - paymentsApplied - creditNoteTotal);
+    const newSplit = splitSigned(newSigned);
+    const expectedDebt = newSplit.debt;
+    const expectedCredit = newSplit.credit;
 
-    const uiDebt = money(Math.max(0, charges - paymentsApplied));
-    const uiCreditHidden = money(Math.max(0, paymentsApplied - charges));
+    const oldSigned = money(oldCharges - paymentsApplied);
+    const oldDebt = money(Math.max(0, oldSigned));
+    const oldCredit = 0;
+    const uiDebt = oldDebt;
+    const uiCreditHidden = money(Math.max(0, -oldSigned));
     const movementsOpening = 0;
 
     moneyBox.charges += charges;
@@ -420,14 +471,18 @@ function auditCustomers(data) {
       name: c.name,
       opening,
       charges,
+      creditNotes: creditNoteTotal,
       payments: paymentsApplied,
+      expectedSigned: newSigned,
       expectedDebt,
       expectedCredit,
       ledgerDebt: uiDebt,
       ledgerCredit: 0,
       uiDebt,
       uiCredit: 0,
-      difference: money(uiDebt - expectedDebt),
+      oldEngine: { debt: oldDebt, credit: oldCredit, signed: oldSigned },
+      newEngine: { debt: expectedDebt, credit: expectedCredit, signed: newSigned },
+      difference: money(newSigned - oldSigned),
       status,
       issueCount: entityIssues.length,
       issues: entityIssues,
@@ -635,6 +690,7 @@ function auditSuppliers(data) {
 
     issues.push(...entityIssues.map((i) => ({ ...i, entityType: "supplier", entityId: s.id, name: s.name })));
 
+    const newSplit = splitSigned(actualNet);
     entities.push({
       entityType: "supplier",
       id: s.id,
@@ -644,7 +700,9 @@ function auditSuppliers(data) {
       actualNet,
       expectedCredit: expectedCreditSide,
       uiBalance,
-      difference: money(actualNet - expectedNet),
+      oldEngine: { debt: uiBalance, credit: 0, signed: actualNet },
+      newEngine: { debt: newSplit.debt, credit: newSplit.credit, signed: actualNet },
+      difference: money(newSplit.signedBalance - uiBalance),
       status,
       issueCount: entityIssues.length,
       issues: entityIssues,
@@ -682,7 +740,17 @@ function auditSuppliers(data) {
 
 function auditEmployees(data) {
   const empIds = new Set(data.employees.map((e) => e.id));
+  const entriesByEmp = new Map();
+  for (const e of data.ledgerEntries) {
+    if (!e.employeeId) continue;
+    const list = entriesByEmp.get(e.employeeId) ?? [];
+    list.push(e);
+    entriesByEmp.set(e.employeeId, list);
+  }
   const issues = [];
+  const entities = [];
+  let pass = 0;
+  let fail = 0;
   for (const e of data.ledgerEntries) {
     if (e.employeeId && !empIds.has(e.employeeId)) {
       issues.push({
@@ -695,9 +763,58 @@ function auditEmployees(data) {
       });
     }
   }
+  for (const emp of data.employees) {
+    const entries = entriesByEmp.get(emp.id) ?? [];
+    const opening = money(emp.openingBalance);
+    const debit = money(entries.reduce((s, row) => s + money(row.debit), 0));
+    const credit = money(entries.reduce((s, row) => s + money(row.credit), 0));
+    const newSigned = money(opening + debit - credit);
+    const newSplit = splitSigned(newSigned);
+    const oldSigned = money(opening + debit - credit);
+    const oldDebt = money(Math.max(0, oldSigned));
+    const oldCredit = 0;
+    const entityIssues = [];
+    if (newSplit.credit > EPS) {
+      entityIssues.push({
+        code: "CREDIT_CLAMPED",
+        severity: "CRITICAL",
+        detail: `Employee credit ${newSplit.credit} hidden by Math.max(0, opening+net)`,
+      });
+    }
+    const status = entityIssues.some((i) => i.severity === "CRITICAL" || i.severity === "HIGH")
+      ? "FAIL"
+      : entityIssues.length
+        ? "WARN"
+        : "PASS";
+    if (status === "FAIL") fail += 1;
+    else pass += 1;
+    issues.push(...entityIssues.map((i) => ({ ...i, entityType: "employee", entityId: emp.id, name: emp.name })));
+    entities.push({
+      entityType: "employee",
+      id: emp.id,
+      name: emp.name,
+      opening,
+      totalDebit: debit,
+      totalCredit: credit,
+      expectedSigned: newSigned,
+      expectedDebt: newSplit.debt,
+      expectedCredit: newSplit.credit,
+      oldEngine: { debt: oldDebt, credit: oldCredit, signed: oldSigned },
+      newEngine: { debt: newSplit.debt, credit: newSplit.credit, signed: newSigned },
+      difference: money(newSigned - oldSigned),
+      status,
+      issueCount: entityIssues.length,
+      issues: entityIssues,
+      ledgerCount: entries.length,
+    });
+  }
   return {
     master: data.employees.length,
+    audited: entities.length,
+    pass,
+    fail,
     withLedger: new Set(data.ledgerEntries.filter((e) => e.employeeId).map((e) => e.employeeId)).size,
+    entities,
     issues,
   };
 }
@@ -818,16 +935,109 @@ function systemMap() {
   };
 }
 
+function isCustomerCreditNote(documentType) {
+  const raw = String(documentType || "").trim();
+  if (!raw) return false;
+  const n = raw.toLowerCase().replace(/\s+/g, " ");
+  return (
+    raw === "חשבונית זיכוי" ||
+    n === "חשבונית זיכוי" ||
+    n === "credit note" ||
+    n === "creditnote" ||
+    n.includes("credit note") ||
+    /إشعار\s*دائن/.test(raw) ||
+    /اشعار\s*دائن/.test(raw) ||
+    /זיכוי/.test(raw)
+  );
+}
+
+function splitSigned(signed) {
+  const s = money(signed);
+  return { signedBalance: s, debt: money(Math.max(s, 0)), credit: money(Math.max(-s, 0)) };
+}
+
+function auditNameDuplicates(data) {
+  const groups = new Map();
+  const add = (type, row) => {
+    const key = String(row.name || "").trim().toLowerCase();
+    if (!key) return;
+    const list = groups.get(key) ?? [];
+    list.push({ type, id: row.id, name: row.name, phone: row.phone ?? null });
+    groups.set(key, list);
+  };
+  for (const c of data.customers) add("customer", c);
+  for (const s of data.suppliers) add("supplier", s);
+  for (const e of data.employees) add("employee", e);
+
+  const possible = [];
+  const confirmed = [];
+  const legitimateMultiRole = [];
+  for (const [, list] of groups) {
+    if (list.length < 2) continue;
+    const types = new Set(list.map((x) => x.type));
+    const sameType = list.length > 1 && types.size === 1;
+    const phones = list.map((x) => String(x.phone || "").replace(/\D/g, "")).filter((p) => p.length >= 7);
+    const samePhone = phones.length >= 2 && new Set(phones).size === 1;
+    if (sameType && samePhone) {
+      confirmed.push({ classification: "CONFIRMED_DUPLICATE", entities: list });
+    } else if (sameType) {
+      possible.push({ classification: "POSSIBLE_DUPLICATE", entities: list });
+    } else {
+      legitimateMultiRole.push({ classification: "LEGITIMATE_MULTI_ROLE", entities: list });
+    }
+  }
+  return { possible, confirmed, legitimateMultiRole };
+}
+
+function carmelPaymentGap(customerEntity, data) {
+  if (!customerEntity) return null;
+  const pays = data.payments.filter((p) => p.customerId === customerEntity.id);
+  const amounts = pays.map((p) => money(p.amount)).sort((a, b) => b - a);
+  const hit1530 = pays.filter((p) => Math.abs(money(p.amount) - 1530) <= EPS);
+  const hit152938 = pays.filter((p) => Math.abs(money(p.amount) - 1529.38) <= EPS);
+  const docs = data.documents.filter((d) => d.customerId === customerEntity.id);
+  const docHit1530 = docs.filter((d) => Math.abs(money(d.totalAmount) - 1530) <= EPS);
+  const docHit152938 = docs.filter((d) => Math.abs(money(d.totalAmount) - 1529.38) <= EPS);
+  const gap = money(1530 - 1529.38);
+  return {
+    customerId: customerEntity.id,
+    name: customerEntity.name,
+    paymentCount: pays.length,
+    paymentAmounts: amounts,
+    paymentsEqual1530: hit1530.map((p) => p.id),
+    paymentsEqual1529_38: hit152938.map((p) => p.id),
+    documentsEqual1530: docHit1530.map((d) => ({ id: d.id, type: d.documentType })),
+    documentsEqual1529_38: docHit152938.map((d) => ({ id: d.id, type: d.documentType })),
+    historicalGap: gap,
+    gapStillPresent: hit1530.length > 0 && hit152938.length > 0,
+    explanation:
+      hit1530.length && hit152938.length
+        ? `Both 1530 and 1529.38 exist as stored amounts. Difference ${gap} is in source records, not rounding applied by this audit.`
+        : hit1530.length
+          ? "1530 exists; 1529.38 was not found on this customer."
+          : hit152938.length
+            ? "1529.38 exists; 1530 was not found on this customer."
+            : "Neither 1530 nor 1529.38 found as stored payment/document amounts on this customer.",
+  };
+}
+
 async function main() {
-  const db = hasProductionDb();
-  if (!db.ok) {
+  console.log(
+    JSON.stringify({
+      DATABASE_URL_PRESENT: auditEnv.present ? "YES" : "NO",
+      AUDIT_ENV_FILE: AUDIT_ENV_FILE,
+      READ_ONLY: true,
+    }),
+  );
+  if (!auditEnv.ok || !prisma) {
     const blocked = {
       ok: false,
       finalStatus: "AUDIT_BLOCKED",
       environment: "blocked",
       dbConnection: "FAIL",
-      dbReason: db.reason,
-      system: systemMap(),
+      dbReason: auditEnv.reason,
+      envFile: AUDIT_ENV_FILE,
+      fallbackUsed: "NONE",
       generatedAt: new Date().toISOString(),
     };
     console.log(JSON.stringify(blocked, null, 2));
@@ -850,6 +1060,36 @@ async function main() {
     imnan: pickSpecial(customers.entities, ["imnan", "עימנאן", "امنان", "#109"]),
     omar: pickSpecial(customers.entities, ["omar", "עומר", "عمر", "#102"]),
     hani: pickSpecial(suppliers.entities, ["هاني كعك", "هاني", "האני", "hani", "كعك"]),
+    albabi: [
+      ...pickSpecial(customers.entities, ["אלבאבי", "البابي"]),
+      ...pickSpecial(suppliers.entities, ["אלבאבי", "البابي"]),
+    ],
+    salama: [
+      ...pickSpecial(customers.entities, ["סלאמה", "سلامة"]),
+      ...pickSpecial(suppliers.entities, ["סלאמה", "سلامة"]),
+    ],
+    superAdmin: pickSpecial(employees.entities, ["super admin", "Super Admin"]),
+    abuYasser: [
+      ...pickSpecial(customers.entities, ["ابو ياسر", "אבו יאסר"]),
+      ...pickSpecial(suppliers.entities, ["ابو ياسر", "אבו יאסר"]),
+      ...pickSpecial(employees.entities, ["ابو ياسر", "אבו יאסר"]),
+    ],
+  };
+  const duplicates = auditNameDuplicates(data);
+  const carmelGap = carmelPaymentGap(special.carmel[0], data);
+  const oldVsNew = {
+    customersChanged: customers.entities.filter(
+      (e) => Math.abs(e.oldEngine.debt - e.newEngine.debt) > EPS || Math.abs(e.oldEngine.credit - e.newEngine.credit) > EPS,
+    ).length,
+    suppliersChanged: suppliers.entities.filter(
+      (e) => Math.abs(e.oldEngine.debt - e.newEngine.debt) > EPS || Math.abs(e.oldEngine.credit - e.newEngine.credit) > EPS,
+    ).length,
+    employeesChanged: employees.entities.filter(
+      (e) => Math.abs(e.oldEngine.debt - e.newEngine.debt) > EPS || Math.abs(e.oldEngine.credit - e.newEngine.credit) > EPS,
+    ).length,
+    clampAffected: allIssues.filter((i) => i.code === "CREDIT_CLAMPED" || i.code === "CREDIT_NOT_SURFACED_IN_UI").length,
+    openingAffected: allIssues.filter((i) => i.code === "OPENING_IGNORED_BY_LEDGER_API").length,
+    creditNoteAffected: allIssues.filter((i) => i.code === "CREDIT_NOTE_TREATED_AS_CHARGE").length,
   };
 
   const supplierMasterIds = new Set(data.suppliers.map((s) => s.id));
@@ -869,9 +1109,10 @@ async function main() {
       custFail.length || supFail.length ? "LEDGER_INCONSISTENCIES_FOUND" : "LEDGER_VERIFIED",
     environment: "production",
     dbConnection: "PASS",
-    dbHostHint: db.hostHint,
     generatedAt: new Date().toISOString(),
     readOnly: true,
+    envFile: AUDIT_ENV_FILE,
+    fallbackUsed: "NONE",
     system: systemMap(),
     customers: {
       totalMaster: data.customers.length,
@@ -933,9 +1174,34 @@ async function main() {
     },
     employees: {
       totalMaster: employees.master,
+      audited: employees.audited,
+      pass: employees.pass,
+      fail: employees.fail,
       withLedger: employees.withLedger,
       issueCount: employees.issues.length,
+      failures: employees.entities
+        .filter((e) => e.status === "FAIL")
+        .slice(0, 80)
+        .map((e) => ({
+          name: e.name,
+          id: e.id,
+          expectedDebt: e.expectedDebt,
+          expectedCredit: e.expectedCredit,
+          oldEngine: e.oldEngine,
+          newEngine: e.newEngine,
+          issues: e.issues.map((i) => i.code),
+        })),
     },
+    oldVsNew,
+    duplicates: {
+      possible: duplicates.possible.length,
+      confirmed: duplicates.confirmed.length,
+      legitimateMultiRole: duplicates.legitimateMultiRole.length,
+      possibleRows: duplicates.possible,
+      confirmedRows: duplicates.confirmed,
+      legitimateMultiRoleRows: duplicates.legitimateMultiRole,
+    },
+    carmelGap,
     special,
     integrity: {
       sourceWithoutLedger: allIssues.filter((i) => i.code === "SOURCE_WITHOUT_LEDGER_ENTRY").length,
@@ -979,12 +1245,14 @@ main()
         finalStatus: "AUDIT_BLOCKED",
         environment: "blocked",
         dbConnection: "FAIL",
-        error: e instanceof Error ? e.message : String(e),
-        system: systemMap(),
+        error: String(e instanceof Error ? e.message : e).replace(
+          /postgres(?:ql)?:\/\/\S+/gi,
+          "[redacted]",
+        ),
       }),
     );
     process.exit(1);
   })
   .finally(async () => {
-    await prisma.$disconnect();
+    if (prisma) await prisma.$disconnect();
   });
