@@ -111,6 +111,15 @@
     "warningTitle": "تنبيه",
     "infoTitle": "معلومة"
   },
+  "liveRefresh": {
+    "updated": "✓ محدّث",
+    "refreshing": "جارٍ التحديث…",
+    "failed": "⚠ تعذر التحديث حالياً",
+    "saved": "✓ تم الحفظ",
+    "saving": "جارٍ الحفظ…",
+    "saveFailed": "⚠ فشل الحفظ",
+    "unsaved": "● تغييرات غير محفوظة"
+  },
   "language": {
     "he": "עברית",
     "ar": "العربية",
@@ -3133,7 +3142,11 @@
           "copiedAll": "تم نسخ الجرد بنجاح",
           "copyFailed": "فشل النسخ",
           "loadFailed": "فشل تحميل الجرد",
-          "close": "إغلاق"
+          "close": "إغلاق",
+          "total": "الإجمالي",
+          "notCounted": "لم يتم الجرد",
+          "counted": "تم الجرد",
+          "countedQty": "الكمية التي تم جردها"
         },
         "weekdayMinimums": {
           "open": "حد أدنى حسب الأيام",

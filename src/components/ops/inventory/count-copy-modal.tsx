@@ -7,7 +7,9 @@ import { useToast } from "@/components/toast-provider";
 import {
   formatAllCountSessionsCopyText,
   formatCopyCountDate,
+  formatCopyQuantity,
   formatCountSessionCopyText,
+  resolveCopyProductName,
   type CountCopySession,
 } from "@/lib/inventory/count-copy-service";
 import { localYmd } from "@/components/ops/inventory-count/utils";
@@ -241,7 +243,6 @@ export function CountCopyModal({ open, onClose, locations }: Props) {
                 {tC("found", { n: sessions.length })}
               </p>
               {sessions.map((session) => {
-                const preview = formatCountSessionCopyText(session, locale);
                 return (
                   <article
                     key={session.id}
@@ -269,12 +270,38 @@ export function CountCopyModal({ open, onClose, locations }: Props) {
                         </p>
                       </div>
                     </div>
-                    <pre
-                      className="max-h-[min(28rem,55dvh)] overflow-y-auto overflow-x-hidden overscroll-contain whitespace-pre-wrap break-words px-3 py-2 text-[12px] font-semibold leading-relaxed text-slate-800"
-                      dir="auto"
-                    >
-                      {preview}
-                    </pre>
+                    <ul className="max-h-[min(28rem,55dvh)] space-y-2 overflow-y-auto overflow-x-hidden overscroll-contain px-3 py-2">
+                      {session.products.map((product, index) => {
+                        const name = resolveCopyProductName(product, locale);
+                        const countedQty = product.quantity;
+                        const counted = countedQty !== null;
+                        return (
+                          <li
+                            key={product.inventoryProductId}
+                            className="rounded-xl bg-white px-3 py-2.5 ring-1 ring-[#e7ecf5]"
+                          >
+                            <p className="break-words text-sm font-black leading-5 text-slate-900">
+                              {index + 1}. {name}
+                            </p>
+                            <p className="mt-1 text-[15px] font-black tabular-nums leading-6 text-slate-900">
+                              {tC("total")}: {formatCopyQuantity(product.totalQuantity)}
+                            </p>
+                            {counted ? (
+                              <p className="mt-0.5 break-words text-xs font-bold tabular-nums text-slate-600">
+                                {tC("countedQty")}: {formatCopyQuantity(countedQty)}
+                              </p>
+                            ) : null}
+                            <p
+                              className={`mt-0.5 text-xs font-bold ${
+                                counted ? "text-emerald-700" : "text-slate-500"
+                              }`}
+                            >
+                              {counted ? tC("counted") : tC("notCounted")}
+                            </p>
+                          </li>
+                        );
+                      })}
+                    </ul>
                   </article>
                 );
               })}

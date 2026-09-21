@@ -3,8 +3,11 @@
 import { BookMarked, ChevronLeft, ChevronRight, Eye, Filter, Pencil, Wallet } from "lucide-react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useI18n } from "@/components/i18n-provider";
+import { LiveRefreshStatus } from "@/components/live-refresh-status";
+import { useLiveRefresh } from "@/hooks/use-live-refresh";
+import { signalLiveRefresh } from "@/lib/client/live-data";
 import {
   fetchEntitiesByType,
   fetchLedgerForFilters,
@@ -73,6 +76,14 @@ function LedgersPageInner() {
   const [editRow, setEditRow] = useState<LedgerOverviewRow | null>(null);
   const [editOpeningInput, setEditOpeningInput] = useState("");
   const [savingEdit, setSavingEdit] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
+
+  const overviewRef = useRef(overview);
+  const detailReadyRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    overviewRef.current = overview;
+  }, [overview]);
 
   useEffect(() => {
     const parsed = parseDetailParam(searchParams.get("detail"));
@@ -95,10 +106,12 @@ function LedgersPageInner() {
     };
   }, [draft.entityType]);
 
-  const loadOverview = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    setOverview(null);
+  const loadOverview = useCallback(async (opts?: { silent?: boolean }) => {
+    const silent = Boolean(opts?.silent) && overviewRef.current !== null;
+    if (!silent) {
+      setLoading(true);
+      setError(null);
+    }
     try {
       const res = await fetchLedgerOverview({
         q: applied.q || undefined,
@@ -110,31 +123,34 @@ function LedgersPageInner() {
         pageSize,
       });
       setOverview(res);
+      setError(null);
     } catch {
-      setError(t("ledgers.loadFailed"));
-      setOverview(null);
+      if (!overviewRef.current) {
+        setError(t("ledgers.loadFailed"));
+      }
+      throw new Error("ledger overview refresh failed");
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, [applied, page, pageSize, t]);
 
   useEffect(() => {
     queueMicrotask(() => {
-      void loadOverview();
+      void loadOverview().catch(() => undefined);
     });
   }, [loadOverview]);
 
-  const loadDetail = useCallback(async () => {
+  const loadDetail = useCallback(async (opts?: { silent?: boolean }) => {
     if (!detail) {
+      detailReadyRef.current = null;
       setDetailOpening(0);
       setDetailMovements([]);
       setDetailName("");
       return;
     }
-    setDetailLoading(true);
-    setDetailOpening(0);
-    setDetailMovements([]);
-    setDetailName("");
+    const key = `${detail.type}:${detail.id}:${applied.dateFrom}:${applied.dateTo}`;
+    const silent = Boolean(opts?.silent) && detailReadyRef.current === key;
+    if (!silent) setDetailLoading(true);
     try {
       const res = await fetchLedgerForFilters({
         entityType: detail.type,
@@ -145,19 +161,30 @@ function LedgersPageInner() {
       setDetailOpening(res.opening);
       setDetailMovements(res.movements);
       setDetailName(res.entityName);
+      detailReadyRef.current = key;
     } catch {
-      setDetailMovements([]);
-      setDetailName("");
+      throw new Error("ledger detail refresh failed");
     } finally {
-      setDetailLoading(false);
+      if (!silent) setDetailLoading(false);
     }
   }, [detail, applied.dateFrom, applied.dateTo]);
 
   useEffect(() => {
     queueMicrotask(() => {
-      void loadDetail();
+      void loadDetail().catch(() => undefined);
     });
   }, [loadDetail]);
+
+  const silentRefresh = useCallback(async () => {
+    await loadOverview({ silent: true });
+    await loadDetail({ silent: true });
+  }, [loadOverview, loadDetail]);
+
+  const { status: liveStatus } = useLiveRefresh({
+    refresh: silentRefresh,
+    paused: Boolean(editRow),
+    scope: "finance",
+  });
 
   const rowsWithBalance = useMemo(
     () => withLedgerRunningBalances(detailMovements, detailOpening),
@@ -199,6 +226,7 @@ function LedgersPageInner() {
       return;
     }
     setSavingEdit(true);
+    setSaveStatus("saving");
     try {
       const url =
         editRow.entity_type === "customer"
@@ -215,11 +243,17 @@ function LedgersPageInner() {
       const j = (await res.json()) as { ok?: boolean };
       if (j.ok) {
         setEditRow(null);
-        await loadOverview();
+        setSaveStatus("saved");
+        signalLiveRefresh("finance");
+        await loadOverview().catch(() => undefined);
         if (detail?.id === editRow.id && detail.type === editRow.entity_type) {
-          await loadDetail();
+          await loadDetail().catch(() => undefined);
         }
+      } else {
+        setSaveStatus("error");
       }
+    } catch {
+      setSaveStatus("error");
     } finally {
       setSavingEdit(false);
     }
@@ -286,6 +320,12 @@ function LedgersPageInner() {
           <h1 className="mt-1 text-[32px] font-black leading-tight text-slate-950">{t("ledgers.title")}</h1>
           <p className="mt-1 max-w-2xl text-xs text-slate-600">{t("ledgers.subtitle")}</p>
         </div>
+        <LiveRefreshStatus
+          status={liveStatus}
+          ready={overview !== null}
+          unsaved={Boolean(editRow)}
+          saveStatus={saveStatus}
+        />
       </div>
 
       {overview && (

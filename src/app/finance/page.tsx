@@ -1,8 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useI18n } from "@/components/i18n-provider";
+import { LiveRefreshStatus } from "@/components/live-refresh-status";
+import { useLiveRefresh } from "@/hooks/use-live-refresh";
 import type { FinanceDocumentRow } from "@/lib/finance/types";
 
 type Stats = {
@@ -29,18 +31,27 @@ export default function FinancePortalPage() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [recent, setRecent] = useState<FinanceDocumentRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [docsReady, setDocsReady] = useState(false);
+  const statsRef = useRef(stats);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setStats(null);
-    setRecent([]);
+  useEffect(() => {
+    statsRef.current = stats;
+  }, [stats]);
+
+  const load = useCallback(async (opts?: { silent?: boolean }) => {
+    const silent = Boolean(opts?.silent) && statsRef.current !== null;
+    if (!silent) setLoading(true);
     try {
       const [sRes, dRes] = await Promise.all([
         fetch("/api/finance/stats", { credentials: "same-origin", cache: "no-store" }),
         fetch("/api/documents", { credentials: "same-origin", cache: "no-store" }),
       ]);
       const sj = (await sRes.json()) as { ok?: boolean; data?: Stats };
-      if (sj.ok && sj.data) setStats(sj.data);
+      if (sj.ok && sj.data) {
+        setStats(sj.data);
+      } else {
+        throw new Error("finance stats failed");
+      }
       if (dRes.ok) {
         const dj = (await dRes.json()) as { ok?: boolean; data?: FinanceDocumentRow[] };
         const list = dj.data ?? [];
@@ -49,17 +60,27 @@ export default function FinancePortalPage() {
             .filter((r) => r.category === "הכנסה")
             .slice(0, 12),
         );
+        setDocsReady(true);
+      } else {
+        throw new Error("finance documents failed");
       }
+    } catch (e) {
+      throw e instanceof Error ? e : new Error("finance refresh failed");
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, []);
 
   useEffect(() => {
     queueMicrotask(() => {
-      void load();
+      void load().catch(() => undefined);
     });
   }, [load]);
+
+  const { status: liveStatus } = useLiveRefresh({
+    refresh: () => load({ silent: true }),
+    scope: "finance",
+  });
 
   const income = stats?.income ?? 0;
   const expenses = stats?.expenses ?? 0;
@@ -81,6 +102,7 @@ export default function FinancePortalPage() {
             <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-500">
               {t("financePortal.subtitle")}
             </p>
+            <LiveRefreshStatus status={liveStatus} ready={stats !== null} />
           </div>
           <Link
             href="/finance/income"
@@ -95,31 +117,31 @@ export default function FinancePortalPage() {
         <div className="app-panel p-6">
           <p className="text-sm font-semibold text-slate-500">{t("financePortal.totalIncome")}</p>
           <p className="mt-3 text-3xl font-black">
-            {loading ? "…" : currencyFormatter.format(income)}
+            {loading ? "…" : stats ? currencyFormatter.format(income) : "—"}
           </p>
         </div>
         <div className="app-panel p-6">
           <p className="text-sm font-semibold text-slate-500">{t("financePortal.totalExpenses")}</p>
           <p className="mt-3 text-3xl font-black">
-            {loading ? "…" : currencyFormatter.format(expenses)}
+            {loading ? "…" : stats ? currencyFormatter.format(expenses) : "—"}
           </p>
         </div>
         <div className="app-panel p-6">
           <p className="text-sm font-semibold text-slate-500">{t("financePortal.cashflow")}</p>
           <p className="mt-3 text-3xl font-black">
-            {loading ? "…" : currencyFormatter.format(cashflow)}
+            {loading ? "…" : stats ? currencyFormatter.format(cashflow) : "—"}
           </p>
         </div>
         <div className="app-panel border-orange-200 bg-orange-50/60 p-6">
           <p className="text-sm font-semibold text-orange-950">{t("financePortal.openBalances")}</p>
           <p className="mt-3 text-3xl font-black text-orange-950">
-            {loading ? "…" : currencyFormatter.format(openBalancesTotal)}
+            {loading ? "…" : stats ? currencyFormatter.format(openBalancesTotal) : "—"}
           </p>
         </div>
         <div className="app-panel border-amber-200 bg-amber-50/50 p-6">
           <p className="text-sm font-semibold text-amber-900">{t("financePortal.openDeposits")}</p>
           <p className="mt-3 text-3xl font-black text-amber-950">
-            {loading ? "…" : currencyFormatter.format(openDeposits)}
+            {loading ? "…" : stats ? currencyFormatter.format(openDeposits) : "—"}
           </p>
         </div>
       </section>
@@ -159,7 +181,7 @@ export default function FinancePortalPage() {
               </div>
             </div>
           ))}
-          {!loading && recent.length === 0 && (
+          {!loading && docsReady && recent.length === 0 && (
             <p className="text-sm font-semibold text-slate-500">{t("financePortal.noIncomeDocs")}</p>
           )}
         </div>

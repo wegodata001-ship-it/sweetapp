@@ -111,6 +111,15 @@
     "warningTitle": "אזהרה",
     "infoTitle": "מידע"
   },
+  "liveRefresh": {
+    "updated": "✓ מעודכן",
+    "refreshing": "מרענן…",
+    "failed": "⚠ לא ניתן לרענן כרגע",
+    "saved": "✓ נשמר",
+    "saving": "שומר…",
+    "saveFailed": "⚠ השמירה נכשלה",
+    "unsaved": "● שינויים שלא נשמרו"
+  },
   "language": {
     "he": "עברית",
     "ar": "العربية",
@@ -2865,7 +2874,11 @@
           "copiedAll": "הספירות הועתקו בהצלחה",
           "copyFailed": "ההעתקה נכשלה",
           "loadFailed": "טעינת הספירות נכשלה",
-          "close": "סגור"
+          "close": "סגור",
+          "total": "סה״כ",
+          "notCounted": "לא נספר",
+          "counted": "נספר",
+          "countedQty": "כמות שנספרה"
         },
         "weekdayMinimums": {
           "open": "מינימום לפי ימים",

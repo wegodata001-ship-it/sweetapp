@@ -1,3 +1,4 @@
+import { signalLiveRefresh } from "@/lib/client/live-data";
 import type {
   AccountantTransferLogRow,
   CashFlowRow,
@@ -102,7 +103,7 @@ export async function fetchLedgerForFilters(params: {
       balance?: number;
     };
     if (!j.ok) {
-      return { opening: 0, movements: [], entityName: "", openDebt: 0, totalCredit: 0, balance: 0 };
+      throw new Error("ledger movements failed");
     }
     return {
       opening: j.opening ?? 0,
@@ -112,8 +113,9 @@ export async function fetchLedgerForFilters(params: {
       totalCredit: j.totalCredit ?? 0,
       balance: j.balance ?? j.openDebt ?? 0,
     };
-  } catch {
-    return { opening: 0, movements: [], entityName: "", openDebt: 0, totalCredit: 0, balance: 0 };
+  } catch (e) {
+    if (e instanceof Error) throw e;
+    throw new Error("ledger movements failed");
   }
 }
 
@@ -140,13 +142,17 @@ export async function fetchCashFlowEntries(filters?: CashFlowFetchFilters): Prom
     params.set("expenseType", filters.expenseType);
   }
   const qs = params.toString();
-  const res = await fetch(`/api/cashflow${qs ? `?${qs}` : ""}`, { credentials: "same-origin" });
+  const res = await fetch(`/api/cashflow${qs ? `?${qs}` : ""}`, {
+    credentials: "same-origin",
+    cache: "no-store",
+  });
   try {
     const j = (await res.json()) as { ok?: boolean; data?: CashFlowRow[] };
-    if (!j.ok || !j.data) return [];
+    if (!j.ok || !j.data) throw new Error("cashflow entries failed");
     return j.data;
-  } catch {
-    return [];
+  } catch (e) {
+    if (e instanceof Error) throw e;
+    throw new Error("cashflow entries failed");
   }
 }
 
@@ -157,6 +163,7 @@ export async function deleteCashFlowEntry(id: string): Promise<{ ok: boolean; er
   });
   try {
     const j = (await res.json()) as { ok?: boolean; error?: string };
+    if (j.ok) signalLiveRefresh("finance");
     return { ok: Boolean(j.ok), error: j.error };
   } catch {
     return { ok: false, error: "תגובת שרת לא תקינה" };
@@ -188,6 +195,7 @@ export async function updateCashFlowEntry(
   });
   try {
     const j = (await res.json()) as { ok?: boolean; error?: string };
+    if (j.ok) signalLiveRefresh("finance");
     return { ok: Boolean(j.ok), error: j.error };
   } catch {
     return { ok: false, error: "תגובת שרת לא תקינה" };
@@ -219,6 +227,7 @@ export async function insertDirectCashFlow(params: {
   });
   try {
     const j = (await res.json()) as { ok?: boolean; error?: string };
+    if (j.ok) signalLiveRefresh("finance");
     return { ok: Boolean(j.ok), error: j.error };
   } catch {
     return { ok: false, error: "תגובת שרת לא תקינה" };
@@ -259,15 +268,16 @@ export async function fetchFinanceDocumentsWithCounts(params: {
       accountantRecipientEmail?: string | null;
     };
     if (!j.ok) {
-      return { rows: [], counts: { total: 0, sent: 0, notSent: 0 }, accountantRecipientEmail: null };
+      throw new Error("finance documents failed");
     }
     return {
       rows: j.data ?? [],
       counts: j.counts ?? { total: 0, sent: 0, notSent: 0 },
       accountantRecipientEmail: j.accountantRecipientEmail ?? null,
     };
-  } catch {
-    return { rows: [], counts: { total: 0, sent: 0, notSent: 0 }, accountantRecipientEmail: null };
+  } catch (e) {
+    if (e instanceof Error) throw e;
+    throw new Error("finance documents failed");
   }
 }
 
@@ -302,6 +312,7 @@ export async function updateFinanceDocument(
   });
   try {
     const j = (await res.json()) as { ok?: boolean; error?: string };
+    if (j.ok) signalLiveRefresh("finance");
     return { ok: Boolean(j.ok), error: j.error };
   } catch {
     return { ok: false, error: "תגובת שרת לא תקינה" };
@@ -315,6 +326,7 @@ export async function deleteFinanceDocument(id: string): Promise<{ ok: boolean; 
   });
   try {
     const j = (await res.json()) as { ok?: boolean; error?: string };
+    if (j.ok) signalLiveRefresh("finance");
     return { ok: Boolean(j.ok), error: j.error };
   } catch {
     return { ok: false, error: "תגובת שרת לא תקינה" };
@@ -337,6 +349,7 @@ export async function setDocumentAccountantSent(
   });
   try {
     const j = (await res.json()) as { ok?: boolean; data?: FinanceDocumentRow; error?: string };
+    if (j.ok) signalLiveRefresh("finance");
     return { ok: Boolean(j.ok), data: j.data, error: j.error };
   } catch {
     return { ok: false, error: "תגובת שרת לא תקינה" };
@@ -355,6 +368,7 @@ export async function bulkSetDocumentsAccountantSent(
   });
   try {
     const j = (await res.json()) as { ok?: boolean; updated?: number; error?: string };
+    if (j.ok) signalLiveRefresh("finance");
     return { ok: Boolean(j.ok), updated: j.updated, error: j.error };
   } catch {
     return { ok: false, error: "תגובת שרת לא תקינה" };
@@ -518,6 +532,7 @@ export async function insertFinanceDocument(params: {
   });
   try {
     const j = (await res.json()) as { ok?: boolean; error?: string; id?: string };
+    if (j.ok) signalLiveRefresh("finance");
     return { ok: Boolean(j.ok), error: j.error, id: j.id };
   } catch {
     return { ok: false, error: "תגובת שרת לא תקינה" };

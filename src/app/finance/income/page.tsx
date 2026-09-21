@@ -1,33 +1,48 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useI18n } from "@/components/i18n-provider";
+import { LiveRefreshStatus } from "@/components/live-refresh-status";
+import { useLiveRefresh } from "@/hooks/use-live-refresh";
 import type { FinanceDocumentRow } from "@/lib/finance/types";
 
 export default function IncomeDocumentPage() {
   const { t } = useI18n();
   const [docs, setDocs] = useState<FinanceDocumentRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [dataReady, setDataReady] = useState(false);
+  const loadedOnceRef = useRef(false);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setDocs([]);
+  const load = useCallback(async (opts?: { silent?: boolean }) => {
+    const silent = Boolean(opts?.silent) && loadedOnceRef.current;
+    if (!silent) setLoading(true);
     try {
       const res = await fetch("/api/documents", { credentials: "same-origin", cache: "no-store" });
-      const j = (await res.json()) as { data?: FinanceDocumentRow[] };
+      if (!res.ok) throw new Error("income documents failed");
+      const j = (await res.json()) as { ok?: boolean; data?: FinanceDocumentRow[] };
+      if (j.ok === false) throw new Error("income documents failed");
       const list = j.data ?? [];
       setDocs(list.filter((r) => r.category === "הכנסה"));
+      loadedOnceRef.current = true;
+      setDataReady(true);
+    } catch (e) {
+      throw e instanceof Error ? e : new Error("income refresh failed");
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, []);
 
   useEffect(() => {
     queueMicrotask(() => {
-      void load();
+      void load().catch(() => undefined);
     });
   }, [load]);
+
+  const { status: liveStatus } = useLiveRefresh({
+    refresh: () => load({ silent: true }),
+    scope: "finance",
+  });
 
   const sampleInvoice = docs[0];
 
@@ -45,6 +60,7 @@ export default function IncomeDocumentPage() {
             <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-500">
               {t("incomePage.subtitle")}
             </p>
+            <LiveRefreshStatus status={liveStatus} ready={dataReady} />
           </div>
           <span className="w-fit rounded-full bg-luxury-gold px-4 py-2 text-xs font-bold uppercase tracking-[0.18em] text-luxury-charcoal">
             Source_Type: INVOICE
@@ -181,7 +197,11 @@ export default function IncomeDocumentPage() {
               {t("incomePage.dbRecords")}
             </p>
             <pre className="mt-4 overflow-auto rounded-xl bg-luxury-charcoal p-4 text-xs leading-6 text-luxury-gold/90">
-              {loading ? t("common.loading") : t("incomePage.incomeRowsN", { count: docs.length })}
+              {loading
+                ? t("common.loading")
+                : dataReady
+                  ? t("incomePage.incomeRowsN", { count: docs.length })
+                  : t("liveRefresh.failed")}
             </pre>
           </div>
 
@@ -198,8 +218,10 @@ export default function IncomeDocumentPage() {
                     Source_ID: {sampleInvoice.id}
                   </p>
                 </>
-              ) : (
+              ) : dataReady ? (
                 <p className="text-sm text-slate-500">{t("incomePage.noIncomeDocsYet")}</p>
+              ) : (
+                <p className="text-sm text-slate-500">{t("liveRefresh.failed")}</p>
               )}
             </div>
           </div>

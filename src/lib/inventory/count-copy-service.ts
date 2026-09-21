@@ -6,7 +6,14 @@
  */
 
 import { prismaAny } from "@/lib/prisma";
-import { ACTIVE_SESSION_WHERE } from "@/lib/inventory/count-session-status";
+import {
+  ACTIVE_COUNT_LINE_WHERE,
+  ACTIVE_SESSION_WHERE,
+} from "@/lib/inventory/count-session-status";
+import {
+  LATEST_COUNT_ORDER_BY,
+  productTotalsFromLatestCounts,
+} from "@/lib/inventory/count-latest";
 import { daySpanRange } from "@/lib/inventory/daily-count-report";
 import {
   loadExcludedProductIds,
@@ -29,6 +36,11 @@ export type CountCopyProduct = {
    * null = אין רשומת ספירה ליום/סשן → «לא נספר».
    */
   quantity: number | null;
+  /**
+   * מלאי נוכחי אמיתי = SUM הספירה האחרונה בכל מיקום אחסון.
+   * נפרד מסטטוס הספירה של הסשן — מוצר יכול להיות «לא נספר» ועדיין סה״כ > 0.
+   */
+  totalQuantity: number;
 };
 
 export type CountCopySession = {
@@ -120,12 +132,14 @@ export function buildCopyProductRows(params: {
   orderedProductIds: string[];
   productsById: Map<string, ProductNameMeta>;
   explicitCountsByProductId: Map<string, number>;
+  totalsByProductId?: Map<string, number>;
 }): CountCopyProduct[] {
   const rows: CountCopyProduct[] = [];
   for (const id of params.orderedProductIds) {
     const meta = params.productsById.get(id);
     if (!meta) continue;
     const hasCount = params.explicitCountsByProductId.has(id);
+    const totalRaw = params.totalsByProductId?.get(id);
     rows.push({
       inventoryProductId: id,
       name: meta.nameHe?.trim() || meta.name,
@@ -133,6 +147,7 @@ export function buildCopyProductRows(params: {
       nameAr: meta.nameAr,
       nameEn: meta.nameEn,
       quantity: hasCount ? params.explicitCountsByProductId.get(id)! : null,
+      totalQuantity: Number.isFinite(totalRaw) ? Number(totalRaw) : 0,
     });
   }
   return rows;
@@ -157,6 +172,20 @@ export function notCountedCopyLabel(language?: string | null): string {
   if (lang.startsWith("ar")) return "لم يتم الجرد";
   if (lang.startsWith("en")) return "Not counted";
   return "לא נספר";
+}
+
+export function countedCopyLabel(language?: string | null): string {
+  const lang = (language || "").toLowerCase();
+  if (lang.startsWith("ar")) return "تم الجرد";
+  if (lang.startsWith("en")) return "Counted";
+  return "נספר";
+}
+
+export function totalCopyLabel(language?: string | null): string {
+  const lang = (language || "").toLowerCase();
+  if (lang.startsWith("ar")) return "الإجمالي";
+  if (lang.startsWith("en")) return "Total";
+  return "סה״כ";
 }
 
 /** כמות להעתקה — 0 מפורש נשאר "0"; null → לא נספר */
@@ -193,14 +222,17 @@ export function formatCountSessionCopyText(
   const header = [
     session.locationName.trim() || "—",
     formatCopyCountDate(session.countDate),
-    "",
-  ];
+  ].join("\n");
   const body = session.products.map((p, index) => {
     const name = resolveCopyProductName(p, language);
-    const qty = formatCopyQuantityOrStatus(p.quantity, language);
-    return `${index + 1}. ${name} — ${qty}`;
+    const total = `${totalCopyLabel(language)}: ${formatCopyQuantity(p.totalQuantity)}`;
+    const status =
+      p.quantity === null
+        ? notCountedCopyLabel(language)
+        : `${formatCopyQuantity(p.quantity)}\n${countedCopyLabel(language)}`;
+    return `${index + 1}. ${name}\n${total}\n${status}`;
   });
-  return [...header, ...body].join("\n");
+  return [header, ...body].join("\n\n");
 }
 
 export function formatAllCountSessionsCopyText(
@@ -346,6 +378,28 @@ export async function listSessionsForCopy(params: {
       nameEn: p.nameEn,
     });
   }
+
+  const latestCountRows =
+    allProductIds.size === 0
+      ? []
+      : ((await prismaAny.inventoryCount.findMany({
+          where: {
+            inventoryProductId: { in: [...allProductIds] },
+            ...ACTIVE_COUNT_LINE_WHERE,
+          },
+          orderBy: LATEST_COUNT_ORDER_BY,
+          distinct: ["inventoryProductId", "locationId"],
+          select: {
+            inventoryProductId: true,
+            locationId: true,
+            currentQuantity: true,
+          },
+        })) as Array<{
+          inventoryProductId: string;
+          locationId: string | null;
+          currentQuantity: number;
+        }>);
+  const totalsByProductId = productTotalsFromLatestCounts(latestCountRows);
   // fallback משורות הסשן אם המוצר נמחק מהקטלוג
   for (const session of typedSessions) {
     for (const line of session.lines) {
@@ -392,6 +446,7 @@ export async function listSessionsForCopy(params: {
       orderedProductIds: orderedIds,
       productsById,
       explicitCountsByProductId: explicitCounts,
+      totalsByProductId,
     });
 
     result.push({

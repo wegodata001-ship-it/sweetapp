@@ -26,6 +26,9 @@ import {
 } from "@/lib/finance/cashflow-z-report";
 import { PdfPreviewModal } from "@/components/pdf-preview-modal";
 import { useI18n } from "@/components/i18n-provider";
+import { LiveRefreshStatus } from "@/components/live-refresh-status";
+import { useLiveRefresh } from "@/hooks/use-live-refresh";
+import { signalLiveRefresh } from "@/lib/client/live-data";
 import {
   deleteCashFlowEntry,
   fetchCashFlowEntries,
@@ -51,6 +54,8 @@ export default function CashflowPage() {
   const [rows, setRows] = useState<CashFlowRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [notice, setNotice] = useState<string | null>(null);
+  const [dataReady, setDataReady] = useState(false);
+  const loadedOnceRef = useRef(false);
 
   const [filterCustomer, setFilterCustomer] = useState("");
   const [filterType, setFilterType] = useState<"all" | "income" | "expense">("all");
@@ -89,8 +94,9 @@ export default function CashflowPage() {
   const [directSide, setDirectSide] = useState<"debit" | "credit">("credit");
   const [savingDirect, setSavingDirect] = useState(false);
 
-  const loadAll = useCallback(async () => {
-    setLoading(true);
+  const loadAll = useCallback(async (opts?: { silent?: boolean }) => {
+    const silent = Boolean(opts?.silent) && loadedOnceRef.current;
+    if (!silent) setLoading(true);
     try {
       const list = await fetchCashFlowEntries(
         filterType === "all"
@@ -102,16 +108,27 @@ export default function CashflowPage() {
             },
       );
       setRows(list);
+      loadedOnceRef.current = true;
+      setDataReady(true);
+    } catch {
+      if (!loadedOnceRef.current) setNotice(t("liveRefresh.failed"));
+      throw new Error("cashflow refresh failed");
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
-  }, [filterType, filterExpenseType]);
+  }, [filterType, filterExpenseType, t]);
 
   useEffect(() => {
     queueMicrotask(() => {
-      void loadAll();
+      void loadAll().catch(() => undefined);
     });
   }, [loadAll]);
+
+  const { status: liveStatus } = useLiveRefresh({
+    refresh: () => loadAll({ silent: true }),
+    paused: Boolean(editingRowId) || directOpen,
+    scope: "finance",
+  });
 
   useEffect(() => {
     let cancelled = false;
@@ -135,10 +152,6 @@ export default function CashflowPage() {
       cancelled = true;
     };
   }, []);
-
-  useEffect(() => {
-    if (filterType !== "expense") setFilterExpenseType("");
-  }, [filterType]);
 
   useEffect(() => {
     const close = (e: MouseEvent) => {
@@ -269,7 +282,7 @@ export default function CashflowPage() {
       return false;
     }
     setNotice(null);
-    await loadAll();
+    await loadAll().catch(() => undefined);
     return true;
   };
 
@@ -326,7 +339,7 @@ export default function CashflowPage() {
     setNotice(null);
     if (editingRowId === row.id) cancelEdit();
     setRows((prev) => prev.filter((r) => r.id !== row.id));
-    await loadAll();
+    await loadAll().catch(() => undefined);
   };
 
   const handleDirectSubmit = async (e: React.FormEvent) => {
@@ -353,7 +366,7 @@ export default function CashflowPage() {
     setDirectOpen(false);
     setDirectDesc("");
     setDirectAmount("");
-    await loadAll();
+    await loadAll().catch(() => undefined);
   };
 
   const filterInputClass =
@@ -381,7 +394,7 @@ export default function CashflowPage() {
       return;
     }
     setNotice(null);
-    await loadAll();
+    await loadAll().catch(() => undefined);
   };
 
   const removeZReportDocument = async (documentId: string) => {
@@ -395,6 +408,7 @@ export default function CashflowPage() {
       setNotice(json.error ?? t("common.errorDelete"));
       return;
     }
+    signalLiveRefresh("finance");
     setNotice(null);
     setExpandedZIds((prev) => {
       const next = new Set(prev);
@@ -406,7 +420,7 @@ export default function CashflowPage() {
       delete next[documentId];
       return next;
     });
-    await loadAll();
+    await loadAll().catch(() => undefined);
   };
 
   const openDocumentPdf = async (documentId: string) => {
@@ -814,6 +828,11 @@ export default function CashflowPage() {
           <p className="mt-1 max-w-3xl text-[14px] leading-snug text-slate-600 opacity-80">
             {t("cashflow.journalSubtitle")}
           </p>
+          <LiveRefreshStatus
+            status={liveStatus}
+            ready={dataReady}
+            unsaved={Boolean(editingRowId) || directOpen}
+          />
         </div>
         <div className="flex flex-wrap gap-2 self-start">
           <Link
@@ -913,7 +932,11 @@ export default function CashflowPage() {
         </select>
         <select
           value={filterType}
-          onChange={(e) => setFilterType(e.target.value as "all" | "income" | "expense")}
+          onChange={(e) => {
+            const next = e.target.value as "all" | "income" | "expense";
+            setFilterType(next);
+            if (next !== "expense") setFilterExpenseType("");
+          }}
           className={`${filterInputClass} min-w-[10rem] flex-1`}
           aria-label={t("cashflow.thType")}
         >

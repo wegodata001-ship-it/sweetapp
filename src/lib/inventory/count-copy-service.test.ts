@@ -15,6 +15,8 @@ import {
   notCountedCopyLabel,
   resolveCopyProductName,
   sessionLinesToExplicitCountMap,
+  countedCopyLabel,
+  totalCopyLabel,
   type CountCopySession,
 } from "./count-copy-service";
 
@@ -46,6 +48,7 @@ describe("count-copy-service formatters", () => {
           nameAr: "ريجولاخ",
           nameEn: "Regular",
           quantity: 15,
+          totalQuantity: 15,
         },
         {
           inventoryProductId: "p2",
@@ -54,14 +57,19 @@ describe("count-copy-service formatters", () => {
           nameAr: "كروسون عادي",
           nameEn: null,
           quantity: 0,
+          totalQuantity: 0,
         },
       ],
     };
 
     const text = formatCountSessionCopyText(session, "ar");
     assert.match(text, /^عجوت\n13\/8\n\n/);
-    assert.match(text, /1\. ريجولاخ — 15/);
-    assert.match(text, /2\. كروسون عادي — 0/);
+    assert.match(text, /1\. ريجولاخ/);
+    assert.match(text, /الإجمالي: 15/);
+    assert.match(text, /15\nتم الجرد/);
+    assert.match(text, /2\. كروسون عادي/);
+    assert.match(text, /الإجمالي: 0/);
+    assert.match(text, /\n0\nتم الجرد/);
     assert.equal(formatCopyQuantity(0), "0");
     assert.equal(resolveCopyProductName(session.products[0]!, "ar"), "ريجولاخ");
   });
@@ -82,6 +90,7 @@ describe("count-copy-service formatters", () => {
           nameAr: "أ",
           nameEn: null,
           quantity: 1,
+          totalQuantity: 1,
         },
       ],
     };
@@ -162,7 +171,9 @@ describe("count-copy location products + not counted", () => {
       },
       "he",
     );
-    assert.match(text, /1\. B — 0/);
+    assert.match(text, /1\. B/);
+    assert.match(text, /סה״כ: 0/);
+    assert.match(text, /\n0\nנספר/);
     assert.doesNotMatch(text, /לא נספר/);
   });
 
@@ -193,10 +204,12 @@ describe("count-copy location products + not counted", () => {
       },
       "ar",
     );
-    assert.match(text, /1\. A — 13/);
-    assert.match(text, /2\. B — 0/);
-    assert.match(text, /3\. C — لم يتم الجرد/);
-    assert.doesNotMatch(text, /3\. C — 0/);
+    assert.match(text, /1\. A/);
+    assert.match(text, /2\. B/);
+    assert.match(text, /3\. C/);
+    assert.match(text, /لم يتم الجرد/);
+    assert.match(text, /تم الجرد/);
+    assert.doesNotMatch(text, /3\. C\nالإجمالي: 0\n0/);
   });
 
   it("TEST E: copy order matches count-screen order (not alphabetical)", () => {
@@ -229,7 +242,7 @@ describe("count-copy location products + not counted", () => {
       "en",
     );
     const lines = text.split("\n").filter((l) => /^\d+\./.test(l));
-    assert.deepEqual(lines, ["1. A — 1", "2. C — 2", "3. B — 3", "4. D — 4"]);
+    assert.deepEqual(lines, ["1. A", "2. C", "3. B", "4. D"]);
   });
 
   it("TEST F: inactive / not on ordered list is omitted", () => {
@@ -304,10 +317,51 @@ describe("count-copy location products + not counted", () => {
         nameAr: null,
         nameEn: null,
         quantity: i < 18 ? i : null,
+        totalQuantity: i < 18 ? i : 0,
       })),
     };
     const text = formatAllCountSessionsCopyText([session], "he");
-    assert.match(text, /23\. P23 — לא נספר/);
+    assert.match(text, /23\. P23/);
+    assert.match(text, /לא נספר/);
     assert.equal([...text.matchAll(/^\d+\./gm)].length, 23);
+  });
+
+  it("shows current total even when this session did not count the product", () => {
+    assert.equal(totalCopyLabel("he"), "סה״כ");
+    assert.equal(countedCopyLabel("ar"), "تم الجرد");
+    const rows = buildCopyProductRows({
+      orderedProductIds: ["makrouta", "croissant", "apple"],
+      productsById: new Map([
+        meta("makrouta", "مقروطة"),
+        meta("croissant", "كروسون"),
+        meta("apple", "تفاح"),
+      ]),
+      explicitCountsByProductId: new Map(),
+      totalsByProductId: new Map([
+        ["makrouta", 5],
+        ["croissant", 12],
+        ["apple", 0],
+      ]),
+    });
+    assert.equal(rows[0]!.quantity, null);
+    assert.equal(rows[0]!.totalQuantity, 5);
+    assert.equal(rows[1]!.totalQuantity, 12);
+    assert.equal(rows[2]!.totalQuantity, 0);
+    const text = formatCountSessionCopyText(
+      {
+        id: "s",
+        sessionNumber: 1,
+        locationId: "loc",
+        locationName: "مخزن",
+        countDate: new Date(2026, 8, 15).toISOString(),
+        createdAt: new Date().toISOString(),
+        products: rows,
+      },
+      "ar",
+    );
+    assert.match(text, /مقروطة\nالإجمالي: 5\nلم يتم الجرد/);
+    assert.match(text, /كروسون\nالإجمالي: 12\nلم يتم الجرد/);
+    assert.match(text, /تفاح\nالإجمالي: 0\nلم يتم الجرد/);
+    assert.doesNotMatch(text, /مقروطة\nالإجمالي: 0\nلم يتم الجرد/);
   });
 });

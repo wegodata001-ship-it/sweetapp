@@ -3,6 +3,7 @@ import {
   pickLatestCountForLocation,
   previousQtyFromCounts,
   requiredQtyToMinimum,
+  productTotalsFromLatestCounts,
   systemTotalFromCounts,
 } from "./count-latest";
 
@@ -51,6 +52,15 @@ function run() {
     ]),
     20,
   );
+
+  const totals = productTotalsFromLatestCounts([
+    { inventoryProductId: "makrouta", locationId: "s1", currentQuantity: 3 },
+    { inventoryProductId: "makrouta", locationId: "s2", currentQuantity: 2 },
+    { inventoryProductId: "apple", locationId: "s1", currentQuantity: 0 },
+  ]);
+  assert.equal(totals.get("makrouta"), 5);
+  assert.equal(totals.get("apple"), 0);
+  assert.equal(totals.has("missing"), false);
 
   console.log("count-latest.test.ts: OK (location isolation)");
 }

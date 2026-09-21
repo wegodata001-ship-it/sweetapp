@@ -25,12 +25,15 @@ import {
   Users,
 } from "lucide-react";
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { PdfPreviewModal } from "@/components/pdf-preview-modal";
 import { AccountantEmailModal } from "@/components/finance/accountant-email-modal";
 import { ArchiveCounterpartyFilter } from "@/components/finance/archive-counterparty-filter";
 import { ArchiveSelectionSummary } from "@/components/finance/archive-selection-summary";
 import { useI18n } from "@/components/i18n-provider";
+import { LiveRefreshStatus } from "@/components/live-refresh-status";
+import { useLiveRefresh } from "@/hooks/use-live-refresh";
+import { signalLiveRefresh } from "@/lib/client/live-data";
 import {
   bulkSetDocumentsAccountantSent,
   deleteFinanceDocument,
@@ -209,14 +212,24 @@ export default function FinanceArchivePage() {
   const [deleteTarget, setDeleteTarget] = useState<GeneratedReportRow | null>(null);
   const [deleting, setDeleting] = useState(false);
 
-  const refresh = useCallback(async () => {
-    setLoading(true);
-    const { rows: list, counts: c, accountantRecipientEmail: recipientEmail } =
-      await fetchFinanceDocumentsWithCounts({ accountant: accountantFilter });
-    setRows(sortFinanceDocumentsNewestFirst(list));
-    setCounts(c);
-    setAccountantRecipientEmail(recipientEmail);
-    setLoading(false);
+  const [dataReady, setDataReady] = useState(false);
+  const loadedOnceRef = useRef(false);
+  const refresh = useCallback(async (opts?: { silent?: boolean }) => {
+    const silent = Boolean(opts?.silent) && loadedOnceRef.current;
+    if (!silent) setLoading(true);
+    try {
+      const { rows: list, counts: c, accountantRecipientEmail: recipientEmail } =
+        await fetchFinanceDocumentsWithCounts({ accountant: accountantFilter });
+      setRows(sortFinanceDocumentsNewestFirst(list));
+      setCounts(c);
+      setAccountantRecipientEmail(recipientEmail);
+      loadedOnceRef.current = true;
+      setDataReady(true);
+    } catch {
+      throw new Error("archive refresh failed");
+    } finally {
+      if (!silent) setLoading(false);
+    }
   }, [accountantFilter]);
 
   const loadReports = useCallback(async () => {
@@ -236,8 +249,14 @@ export default function FinanceArchivePage() {
   }, [reportQ, reportType, dateFrom, dateTo]);
 
   useEffect(() => {
-    queueMicrotask(() => void refresh());
+    queueMicrotask(() => void refresh().catch(() => undefined));
   }, [refresh]);
+
+  const { status: liveStatus } = useLiveRefresh({
+    refresh: () => refresh({ silent: true }),
+    paused: emailModalOpen || Boolean(deleteTarget),
+    scope: "finance",
+  });
 
   useEffect(() => {
     queueMicrotask(() => void loadReports());
@@ -350,7 +369,7 @@ export default function FinanceArchivePage() {
           : t("archive.toasts.bulkUnmarked", { count: res.updated ?? 0 }),
       );
       clearSelection();
-      await refresh();
+      await refresh().catch(() => undefined);
     } finally {
       setBulkBusy(false);
     }
@@ -391,7 +410,7 @@ export default function FinanceArchivePage() {
       );
       setEmailModalOpen(false);
       clearSelection();
-      await refresh();
+      await refresh().catch(() => undefined);
     } finally {
       setEmailSending(false);
     }
@@ -411,7 +430,7 @@ export default function FinanceArchivePage() {
 
   const deleteRow = async (id: string) => {
     const res = await deleteFinanceDocument(id);
-    if (res.ok) await refresh();
+    if (res.ok) await refresh().catch(() => undefined);
   };
 
   const openSourceDocument = (row: FinanceDocumentRow) => {
@@ -427,7 +446,10 @@ export default function FinanceArchivePage() {
       body: JSON.stringify({ action }),
       credentials: "same-origin",
     });
-    if (res.ok) await refresh();
+    if (res.ok) {
+      signalLiveRefresh("finance");
+      await refresh().catch(() => undefined);
+    }
   };
 
   const confirmDeleteReport = async () => {
@@ -455,7 +477,7 @@ export default function FinanceArchivePage() {
     }
     return base;
   }, [reports, matchingDocumentIds]);
-  const filteredRows = useMemo(() => {
+  const filteredRows = (() => {
     let base = sortFinanceDocumentsNewestFirst(rows);
     if (archiveCounterpartyRef) {
       base = base.filter((row) =>
@@ -467,7 +489,7 @@ export default function FinanceArchivePage() {
       );
     }
     return base;
-  }, [rows, archiveCounterpartyRef]);
+  })();
 
   const selectionTotals = useMemo(
     () => computeArchiveSelectionTotals(filteredRows, selectedIds),
@@ -508,6 +530,7 @@ export default function FinanceArchivePage() {
         <p className="mt-1 max-w-3xl text-sm text-slate-600">
           {t("archive.intro")}
         </p>
+        <LiveRefreshStatus status={liveStatus} ready={dataReady} />
 
         <div className="mt-4 flex flex-wrap gap-1 border-b border-slate-200">
           {TAB_OPTIONS.map((opt) => (

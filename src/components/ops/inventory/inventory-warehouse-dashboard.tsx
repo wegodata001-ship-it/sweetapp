@@ -19,7 +19,10 @@ import {
 import Link from "next/link";
 import { useAuth } from "@/components/auth-provider";
 import { useI18n } from "@/components/i18n-provider";
+import { LiveRefreshStatus } from "@/components/live-refresh-status";
 import { useToast } from "@/components/toast-provider";
+import { useLiveRefresh } from "@/hooks/use-live-refresh";
+import { signalLiveRefresh } from "@/lib/client/live-data";
 import type { ShelfSummary } from "@/components/ops/inventory-count/types";
 import { localYmd } from "@/components/ops/inventory-count/utils";
 import {
@@ -62,7 +65,7 @@ import {
 type SortKey = "displayOrder" | "name" | "createdAt" | "productCount" | "matchPct" | "lastCountAt";
 type CountFilter = "" | CountLifecycleStatus;
 
-const SHELF_ORDER_SAVE_MS = 400;
+const SHELF_ORDER_SAVE_MS = 800;
 
 function canManageInventory(user: { role: string; permissions: string[] } | null) {
   if (!user) return false;
@@ -135,6 +138,7 @@ export function InventoryWarehouseDashboard() {
   const canVoidSessions = canVoidCountSession(user?.role);
 
   const [shelfSummaries, setShelfSummaries] = useState<ShelfSummary[]>([]);
+  const [shelvesReady, setShelvesReady] = useState(false);
   const [modalShelf, setModalShelf] = useState<string | null>(null);
   const [modalShelfId, setModalShelfId] = useState<string | null>(null);
   const [formOpen, setFormOpen] = useState(false);
@@ -170,7 +174,7 @@ export function InventoryWarehouseDashboard() {
   const [exitingNames, setExitingNames] = useState<Set<string>>(new Set());
   const [enteringNames, setEnteringNames] = useState<Set<string>>(new Set());
   const [countSessions, setCountSessions] = useState<Record<string, ShelfCountSession>>({});
-  const [, setTick] = useState(0);
+  const [nowMs, setNowMs] = useState(0);
   const [dragShelfKey, setDragShelfKey] = useState<string | null>(null);
   const dragShelfKeyRef = useRef<string | null>(null);
   const shelfOrderTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -183,27 +187,49 @@ export function InventoryWarehouseDashboard() {
 
   const loadShelves = useCallback(async () => {
     try {
-      const res = await fetch("/api/inventory/shelf-summaries", { credentials: "same-origin" });
+      const res = await fetch("/api/inventory/shelf-summaries", {
+        credentials: "same-origin",
+        cache: "no-store",
+      });
       const j = (await res.json()) as { ok?: boolean; data?: ShelfSummary[]; error?: string };
       if (!res.ok || j.ok === false) {
         console.error("[shelf-summaries]", j.error ?? res.status);
-        setShelfSummaries([]);
-        return;
+        throw new Error(j.error ?? "shelf-summaries failed");
       }
       setShelfSummaries(j.data ?? []);
+      setShelvesReady(true);
     } catch (e) {
       console.error("[shelf-summaries]", e);
-      setShelfSummaries([]);
+      throw e instanceof Error ? e : new Error("shelf-summaries failed");
     }
   }, []);
 
   useEffect(() => {
-    void loadShelves();
+    queueMicrotask(() => {
+      void loadShelves().catch(() => undefined);
+    });
   }, [loadShelves]);
+
+  const livePaused = Boolean(
+    modalShelf ||
+      viewSessionId ||
+      formOpen ||
+      addProductsOpen ||
+      transferOpen ||
+      copyCountsOpen ||
+      weekdayMinimumsOpen ||
+      dragShelfKey,
+  );
+
+  const { status: liveStatus } = useLiveRefresh({
+    refresh: loadShelves,
+    paused: livePaused,
+    scope: "inventory",
+  });
 
   useEffect(() => {
     if (!modalShelf) return;
-    const id = window.setInterval(() => setTick((n) => n + 1), 1000);
+    const id = window.setInterval(() => setNowMs(Date.now()), 1000);
     return () => window.clearInterval(id);
   }, [modalShelf]);
 
@@ -224,6 +250,8 @@ export function InventoryWarehouseDashboard() {
           });
           if (!res.ok) {
             showToast({ tone: "error", title: tW("reorderFailed"), durationMs: 3000 });
+          } else {
+            signalLiveRefresh("inventory");
           }
         } catch {
           showToast({ tone: "error", title: tW("reorderFailed"), durationMs: 3000 });
@@ -263,6 +291,7 @@ export function InventoryWarehouseDashboard() {
     }));
     setModalShelf(shelf.name);
     setModalShelfId(shelf.locationId ?? null);
+    setNowMs(Date.now());
   }, []);
 
   const closeShelfCount = useCallback(() => {
@@ -525,7 +554,8 @@ export function InventoryWarehouseDashboard() {
         });
       }, 400);
       showToast({ tone: "success", title: tW("toast.duplicated"), durationMs: 2500 });
-      await loadShelves();
+      signalLiveRefresh("inventory");
+      await loadShelves().catch(() => undefined);
     } catch {
       showToast({ tone: "error", title: tW("toast.duplicateFailed"), durationMs: 3000 });
     } finally {
@@ -564,7 +594,8 @@ export function InventoryWarehouseDashboard() {
       setDeleteOpen(false);
       if (j.data?.deactivated) {
         showToast({ tone: "success", title: tW("toast.deactivated"), durationMs: 3000 });
-        await loadShelves();
+        signalLiveRefresh("inventory");
+        await loadShelves().catch(() => undefined);
       } else {
         setExitingNames((prev) => new Set(prev).add(name));
         setTimeout(() => {
@@ -576,6 +607,7 @@ export function InventoryWarehouseDashboard() {
           });
         }, 320);
         showToast({ tone: "success", title: tW("toast.deleted"), durationMs: 2500 });
+        signalLiveRefresh("inventory");
       }
     } catch {
       showToast({ tone: "error", title: tW("toast.deleteFailed"), durationMs: 3000 });
@@ -604,6 +636,11 @@ export function InventoryWarehouseDashboard() {
         <div>
           <h1 className="text-2xl font-black text-slate-900">{t("ops.inventory.title")}</h1>
           <p className="mt-1 text-sm font-semibold text-slate-500">{tW("pageHint")}</p>
+          <LiveRefreshStatus
+            status={liveStatus}
+            ready={shelvesReady}
+            unsaved={livePaused}
+          />
         </div>
         <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto sm:flex-wrap">
           <button
@@ -768,7 +805,7 @@ export function InventoryWarehouseDashboard() {
             const isCounting = modalShelf === shelf.name;
             const elapsed =
               session && isCounting
-                ? formatCountElapsed(Date.now() - new Date(session.startedAt).getTime())
+                ? formatCountElapsed(nowMs - new Date(session.startedAt).getTime())
                 : "00:00";
             const rowKey = shelfRowKey(shelf);
             const canDrag =
@@ -960,7 +997,7 @@ export function InventoryWarehouseDashboard() {
           setHistoryOpen(true);
         }}
         onClose={closeShelfCount}
-        onShelfStatsChange={loadShelves}
+        onShelfStatsChange={() => void loadShelves().catch(() => undefined)}
         onProductPlacementChange={({ sourceSummary, targetSummary }) => {
           if (sourceSummary) upsertSummary(sourceSummary);
           if (targetSummary) upsertSummary(targetSummary);
@@ -1048,7 +1085,7 @@ export function InventoryWarehouseDashboard() {
         allowAllLocations={canSeeFullHistory}
         locations={copyLocations}
         canVoid={canVoidSessions}
-        onVoidChanged={() => void loadShelves()}
+        onVoidChanged={() => void loadShelves().catch(() => undefined)}
         onClose={() => {
           setHistoryOpen(false);
           setActionShelf(null);
@@ -1071,7 +1108,7 @@ export function InventoryWarehouseDashboard() {
         allowAllLocations
         locations={copyLocations}
         canVoid={canVoidSessions}
-        onVoidChanged={() => void loadShelves()}
+        onVoidChanged={() => void loadShelves().catch(() => undefined)}
         onClose={() => setGlobalHistoryOpen(false)}
         onOpenSession={(sessionId, meta) => {
           setViewSessionShelf({
@@ -1096,7 +1133,8 @@ export function InventoryWarehouseDashboard() {
             title: formMode === "edit" ? tW("toast.updated") : tW("toast.created"),
             durationMs: 2200,
           });
-          await loadShelves();
+          signalLiveRefresh("inventory");
+          await loadShelves().catch(() => undefined);
         }}
         t={(k) => t(`ops.inventory.warehouse.addShelf.${k}`)}
         tType={(lt) => t(LOCATION_TYPE_I18N[lt])}

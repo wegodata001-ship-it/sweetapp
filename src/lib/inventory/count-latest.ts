@@ -48,6 +48,36 @@ export function systemTotalFromCounts(
   return total;
 }
 
+/**
+ * סה״כ מלאי נוכחי לפי מוצר = SUM של הספירה האחרונה בכל מיקום אחסון.
+ * לא ממציא 0 למוצר בלי שורות — מחזיר רק מוצרים שיש להם לפחות ספירה אחת;
+ * הקורא יכול fallback ל־0 כשאין היסטוריה (אין מלאי רשום).
+ */
+export function productTotalsFromLatestCounts(
+  counts: Array<{
+    inventoryProductId: string;
+    locationId: string | null;
+    currentQuantity: number;
+  }>,
+): Map<string, number> {
+  const byProduct = new Map<
+    string,
+    { locationId: string | null; currentQuantity: number }[]
+  >();
+  for (const c of counts) {
+    const pid = String(c.inventoryProductId ?? "").trim();
+    if (!pid) continue;
+    const list = byProduct.get(pid) ?? [];
+    list.push({ locationId: c.locationId, currentQuantity: c.currentQuantity });
+    byProduct.set(pid, list);
+  }
+  const out = new Map<string, number>();
+  for (const [pid, list] of byProduct) {
+    out.set(pid, systemTotalFromCounts(list));
+  }
+  return out;
+}
+
 /** כמה חסר כדי להגיע למינימום — לעולם לא שלילי (0 מינימום מפורש = חסר 0) */
 export function requiredQtyToMinimum(
   onHand: number,

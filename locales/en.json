@@ -111,6 +111,15 @@
     "warningTitle": "Warning",
     "infoTitle": "Info"
   },
+  "liveRefresh": {
+    "updated": "✓ Updated",
+    "refreshing": "Refreshing…",
+    "failed": "⚠ Unable to refresh right now",
+    "saved": "✓ Saved",
+    "saving": "Saving…",
+    "saveFailed": "⚠ Save failed",
+    "unsaved": "● Unsaved changes"
+  },
   "language": {
     "he": "עברית",
     "ar": "العربية",
@@ -3133,7 +3142,11 @@
           "copiedAll": "Counts copied successfully",
           "copyFailed": "Copy failed",
           "loadFailed": "Failed to load counts",
-          "close": "Close"
+          "close": "Close",
+          "total": "Total",
+          "notCounted": "Not counted",
+          "counted": "Counted",
+          "countedQty": "Counted quantity"
         },
         "weekdayMinimums": {
           "open": "Weekday minimums",
