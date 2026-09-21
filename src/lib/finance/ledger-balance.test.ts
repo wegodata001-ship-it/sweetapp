@@ -13,7 +13,6 @@ import {
   computeEntryLedger,
   explainTiesToSigned,
   isCustomerCreditNote,
-  overviewRowFromStatement,
   splitSignedBalance,
   type CustomerDocSource,
   type CustomerPaymentSource,
@@ -201,8 +200,8 @@ describe("signed balance SSOT", () => {
   });
 });
 
-describe("overview uses the same statement as movements", () => {
-  it("customer overview row signed balance equals statement", () => {
+describe("statement is internally consistent without live overview types", () => {
+  it("customer signed balance equals last movement running balance", () => {
     const statement = computeCustomerLedger({
       entityId: "c1",
       entityName: "לקוח",
@@ -210,16 +209,11 @@ describe("overview uses the same statement as movements", () => {
       documents: [invoice("d1", 1000, "2026-09-02")],
       payments: [payment("p1", 400, "2026-09-10")],
     });
-    const row = overviewRowFromStatement(
-      { entity_type: "customer", id: "c1", name: "לקוח", opening_balance: 500 },
-      statement,
-    );
-    assert.equal(row.signed_balance, statement.signedBalance);
-    assert.equal(row.open_balance, statement.signedBalance);
-    assert.equal(row.debt, statement.debt);
-    assert.equal(row.credit, statement.credit);
-    assert.equal(row.total_debit, statement.periodDebit);
-    assert.equal(row.total_credit, statement.periodCredit);
+    const last = statement.movements[statement.movements.length - 1];
+    assert.equal(statement.signedBalance, last?.balance_after);
+    assert.equal(statement.signedBalance, statement.debt - statement.credit);
+    assert.equal(statement.periodDebit, 1000);
+    assert.equal(statement.periodCredit, 400);
   });
 });
 

@@ -9,7 +9,7 @@
  * אסור clamp לפני הפיצול (אין Math.max(0, charges − payments) כיתרה).
  */
 
-import type { EntityType, LedgerMovementView, LedgerOverviewRow } from "@/lib/finance/types";
+import type { EntityType, LedgerMovementView } from "@/lib/finance/types";
 
 /** אין מודל מטבע מלא — כל סכומי הכרטסת מטופלים כ־ILS ללא שער המרה. */
 export const MULTI_CURRENCY_LEDGER_SUPPORTED = false;
@@ -414,25 +414,6 @@ export function computeEntryLedger(params: {
     dateFrom: params.dateFrom,
     dateTo: params.dateTo,
   });
-}
-
-export function overviewRowFromStatement(
-  entity: { entity_type: EntityType; id: string; name: string; opening_balance: number },
-  statement: LedgerStatement,
-): LedgerOverviewRow {
-  return {
-    entity_type: entity.entity_type,
-    id: entity.id,
-    name: entity.name,
-    opening_balance: finiteAmount(entity.opening_balance),
-    open_balance: statement.signedBalance,
-    signed_balance: statement.signedBalance,
-    debt: statement.debt,
-    credit: statement.credit,
-    total_debit: statement.periodDebit,
-    total_credit: statement.periodCredit,
-    movement_count: statement.movementCount,
-  };
 }
 
 export function amountsNearlyEqual(a: number, b: number): boolean {
