@@ -7,6 +7,7 @@ export type TaskPillVariant =
   | WorkflowItemStatus
   | WorkflowRunStatus
   | "LATE"
+  | "COMPLETED_LATE"
   | "OPEN"
   | "ARCHIVED";
 
@@ -20,6 +21,7 @@ const STYLES: Record<string, string> = {
   PENDING: "bg-white/70 text-slate-700",
   ACTIVE: "bg-blue-600 text-white shadow-sm",
   COMPLETED: "bg-emerald-600 text-white",
+  COMPLETED_LATE: "bg-amber-600 text-white",
   SKIPPED: "bg-slate-400 text-white",
   IN_PROGRESS: "bg-blue-600 text-white",
   ABORTED: "bg-slate-500 text-white",
@@ -32,6 +34,7 @@ function PillIcon({ variant }: { variant: TaskPillVariant }) {
   const cls = "h-3 w-3 shrink-0";
   switch (variant) {
     case "COMPLETED":
+    case "COMPLETED_LATE":
       return <CheckCircle2 className={cls} aria-hidden />;
     case "ACTIVE":
     case "IN_PROGRESS":

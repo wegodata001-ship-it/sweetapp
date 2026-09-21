@@ -3,7 +3,14 @@
 import { Calendar, Loader2, Plus, RefreshCw, Search, User, Shield } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useI18n } from "@/components/i18n-provider";
+import { CompleteTaskModal, type CompleteTaskModalModel } from "@/components/tasks/complete-task-modal";
 import { useToast } from "@/components/toast-provider";
+import {
+  describeLateness,
+  formatTaskDateTime,
+  isEmployeeWorkTaskLate,
+  taskDeadlineAt,
+} from "@/lib/tasks/completion";
 import { CardsWorkflowHub } from "@/components/tasks/cards/cards-workflow-hub";
 import type { WorkflowEmployeeOption } from "@/components/tasks/cards/workflow-types";
 import { EmployeeWorkGroupCard } from "@/components/employee-work/employee-work-group-card";
@@ -46,7 +53,7 @@ export function EmployeeWorkHub({
   canManage: boolean;
   isSuperAdmin?: boolean;
 }) {
-  const { t, dir } = useI18n();
+  const { t, dir, bcp47 } = useI18n();
   const { showToast } = useToast();
   const [tab, setTab] = useState<HubTab>("work");
   const [employees, setEmployees] = useState<EmployeeRow[]>([]);
@@ -64,6 +71,13 @@ export function EmployeeWorkHub({
   const [pickedTemplateId, setPickedTemplateId] = useState<string | undefined>();
   const [dragGroupId, setDragGroupId] = useState<string | null>(null);
   const [dragLooseId, setDragLooseId] = useState<string | null>(null);
+  const [completeModal, setCompleteModal] = useState<{
+    task: SerializedEmployeeTask;
+    lateReason: string;
+    completionNote: string;
+    submitting: boolean;
+    error: string | null;
+  } | null>(null);
   const dayFetchRef = useRef<AbortController | null>(null);
   const loadDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -493,26 +507,38 @@ export function EmployeeWorkHub({
     }
   };
 
+  const findTask = (taskId: string): SerializedEmployeeTask | null => {
+    if (!day) return null;
+    for (const g of day.groups) {
+      const hit = g.tasks.find((x) => x.id === taskId);
+      if (hit) return hit;
+    }
+    return day.loose_tasks.find((x) => x.id === taskId) ?? null;
+  };
+
   const employeeStartComplete = async (taskId: string, action: "start" | "complete") => {
     if (!day) return;
-    const prev = day;
-    if (action === "start") {
-      setDay(
-        patchTaskInDay(day, taskId, {
-          status: "IN_PROGRESS",
-          started_at: new Date().toISOString(),
-        }),
-      );
-    } else {
-      setDay(
-        patchTaskInDay(day, taskId, {
-          status: "COMPLETED",
-          completed_at: new Date().toISOString(),
-        }),
-      );
+    if (action === "complete") {
+      const task = findTask(taskId);
+      if (!task) return;
+      setCompleteModal({
+        task,
+        lateReason: "",
+        completionNote: "",
+        submitting: false,
+        error: null,
+      });
+      return;
     }
+    const prev = day;
+    setDay(
+      patchTaskInDay(day, taskId, {
+        status: "IN_PROGRESS",
+        started_at: new Date().toISOString(),
+      }),
+    );
     try {
-      const res = await fetch(`/api/work/tasks/${encodeURIComponent(taskId)}/${action}`, {
+      const res = await fetch(`/api/work/tasks/${encodeURIComponent(taskId)}/start`, {
         method: "POST",
         credentials: "same-origin",
       });
@@ -526,6 +552,85 @@ export function EmployeeWorkHub({
       showToast({ tone: "error", title: t("common.error") });
     }
   };
+
+  const submitHubComplete = async () => {
+    if (!completeModal || completeModal.submitting || !day) return;
+    const task = completeModal.task;
+    const late = isEmployeeWorkTaskLate({
+      status: task.status,
+      startedAt: task.started_at,
+      estimatedMinutes: task.estimated_minutes,
+      targetDueAt: task.target_due_at,
+    });
+    const lateReason = completeModal.lateReason.trim();
+    const note = completeModal.completionNote.trim();
+    if (late && !lateReason) {
+      setCompleteModal({ ...completeModal, error: t("completeTask.lateReasonRequiredHint") });
+      return;
+    }
+    setCompleteModal({ ...completeModal, submitting: true, error: null });
+    const prev = day;
+    const delayReason = late ? lateReason : note;
+    setDay(
+      patchTaskInDay(day, task.id, {
+        status: "COMPLETED",
+        completed_at: new Date().toISOString(),
+        delay_reason: delayReason || null,
+      }),
+    );
+    try {
+      const res = await fetch(`/api/work/tasks/${encodeURIComponent(task.id)}/complete`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify(delayReason ? { delay_reason: delayReason } : {}),
+      });
+      const j = (await res.json()) as { ok?: boolean; error?: string };
+      if (!j.ok) {
+        setDay(prev);
+        setCompleteModal((cur) =>
+          cur ? { ...cur, submitting: false, error: j.error ?? t("completeTask.failed") } : cur,
+        );
+        return;
+      }
+      setCompleteModal(null);
+      showToast({ tone: "success", title: t("completeTask.success") });
+      await loadDay({ force: true, silent: true });
+    } catch {
+      setDay(prev);
+      setCompleteModal((cur) =>
+        cur ? { ...cur, submitting: false, error: t("completeTask.failed") } : cur,
+      );
+    }
+  };
+
+  const hubCompleteModel = useMemo((): CompleteTaskModalModel | null => {
+    if (!completeModal) return null;
+    const task = completeModal.task;
+    const deadline = taskDeadlineAt({
+      startedAt: task.started_at,
+      estimatedMinutes: task.estimated_minutes,
+      targetDueAt: task.target_due_at,
+    });
+    const late = isEmployeeWorkTaskLate({
+      status: task.status,
+      startedAt: task.started_at,
+      estimatedMinutes: task.estimated_minutes,
+      targetDueAt: task.target_due_at,
+    });
+    return {
+      title: task.title,
+      dueLabel: formatTaskDateTime(deadline, bcp47),
+      statusLabel: t("completeTask.statusInProgress"),
+      isLate: late,
+      lateParts: describeLateness({
+        startedAt: task.started_at,
+        estimatedMinutes: task.estimated_minutes,
+        targetDueAt: task.target_due_at,
+      }),
+      completeAtLabel: formatTaskDateTime(new Date(), bcp47),
+    };
+  }, [completeModal, bcp47, t]);
 
   if (tab === "templates" && canManage) {
     return (
@@ -794,6 +899,27 @@ export function EmployeeWorkHub({
       </div>
 
       <PickGroupDrawer open={groupOpen} onClose={() => setGroupOpen(false)} onPick={(o) => void pickGroup(o)} busy={busy} />
+      {completeModal && hubCompleteModel ? (
+        <CompleteTaskModal
+          open
+          task={hubCompleteModel}
+          lateReason={completeModal.lateReason}
+          completionNote={completeModal.completionNote}
+          submitting={completeModal.submitting}
+          error={completeModal.error}
+          requireLateReason={hubCompleteModel.isLate}
+          onLateReasonChange={(lateReason) =>
+            setCompleteModal((cur) => (cur ? { ...cur, lateReason, error: null } : cur))
+          }
+          onCompletionNoteChange={(completionNote) =>
+            setCompleteModal((cur) => (cur ? { ...cur, completionNote } : cur))
+          }
+          onCancel={() => {
+            if (!completeModal.submitting) setCompleteModal(null);
+          }}
+          onSubmit={() => void submitHubComplete()}
+        />
+      ) : null}
     </div>
   );
 }

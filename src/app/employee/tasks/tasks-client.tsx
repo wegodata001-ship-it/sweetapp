@@ -11,7 +11,13 @@ import { EmployeeTasksSession } from "@/components/tasks/employee-tasks-session"
 import { EmployeeDailyProgress } from "@/components/employee/employee-daily-progress";
 import { EmployeeEmptyTasks } from "@/components/employee/employee-empty-tasks";
 import { EmployeeGreetingHeader } from "@/components/employee/employee-greeting-header";
-import { EmployeeLateReasonModal } from "@/components/employee/employee-late-reason-modal";
+import { CompleteTaskModal, type CompleteTaskModalModel } from "@/components/tasks/complete-task-modal";
+import {
+  describeLateness,
+  formatTaskDateTime,
+  isEmployeeWorkTaskLate,
+  taskDeadlineAt,
+} from "@/lib/tasks/completion";
 import { EmployeeLiveStatus } from "@/components/employee/employee-live-status";
 import { EmployeeMotivationCard } from "@/components/employee/employee-motivation-card";
 import { EmployeeProfileStrip } from "@/components/employee/employee-profile-strip";
@@ -24,22 +30,13 @@ import { TaskCelebrationOverlay } from "@/components/employee/task-celebration-o
 import { useEmployeeMiddayToast } from "@/hooks/use-employee-midday-toast";
 import { useEmployeeTodayMinutes } from "@/hooks/use-employee-today-minutes";
 
-type LateModalState = {
-  taskId: string;
-  taskTitle: string;
-  estimated: number | null;
-  reason: string;
+type CompleteModalState = {
+  task: SerializedWorkEmployeeTask;
+  lateReason: string;
+  completionNote: string;
   submitting: boolean;
   error: string | null;
 };
-
-const QUICK_DELAY_REASON_KEYS = [
-  "customerLoad",
-  "outOfStock",
-  "cashRegisterIssue",
-  "technicalIssue",
-  "waitingExtra",
-] as const;
 
 function sortTasksForFocus(tasks: SerializedWorkEmployeeTask[]): SerializedWorkEmployeeTask[] {
   const rank = (s: string) => {
@@ -56,7 +53,7 @@ function sortTasksForFocus(tasks: SerializedWorkEmployeeTask[]): SerializedWorkE
 }
 
 export function EmployeeTasksClient() {
-  const { t, dir } = useI18n();
+  const { t, dir, bcp47 } = useI18n();
   const { showToast } = useToast();
   const { user, refresh: refreshAuth } = useAuth();
   const [tasks, setTasks] = useState<SerializedWorkEmployeeTask[]>([]);
@@ -64,7 +61,7 @@ export function EmployeeTasksClient() {
   const [error, setError] = useState<string | null>(null);
   const [needAuth, setNeedAuth] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
-  const [lateModal, setLateModal] = useState<LateModalState | null>(null);
+  const [completeModal, setCompleteModal] = useState<CompleteModalState | null>(null);
   const [pwOpen, setPwOpen] = useState(false);
   const [celebration, setCelebration] = useState(false);
   const [completedEarly, setCompletedEarly] = useState(false);
@@ -149,7 +146,17 @@ export function EmployeeTasksClient() {
     }
   };
 
-  const completeWork = async (task: SerializedWorkEmployeeTask, providedReason?: string) => {
+  const openCompleteModal = (task: SerializedWorkEmployeeTask) => {
+    setCompleteModal({
+      task,
+      lateReason: "",
+      completionNote: "",
+      submitting: false,
+      error: null,
+    });
+  };
+
+  const completeWork = async (task: SerializedWorkEmployeeTask, delayReason: string) => {
     const snapBefore =
       task.started_at && task.estimated_minutes
         ? computeCountdownTimer({
@@ -161,7 +168,12 @@ export function EmployeeTasksClient() {
         : null;
     const wasOnTime = snapBefore
       ? !snapBefore.isOverdue && snapBefore.statusKey !== "LATE" && snapBefore.statusKey !== "OVERDUE"
-      : true;
+      : !isEmployeeWorkTaskLate({
+          status: task.status,
+          startedAt: task.started_at,
+          estimatedMinutes: task.estimated_minutes,
+          targetDueAt: task.target_due_at,
+        });
 
     setBusyId(task.id);
     try {
@@ -169,77 +181,86 @@ export function EmployeeTasksClient() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "same-origin",
-        body: JSON.stringify(providedReason ? { delay_reason: providedReason } : {}),
+        body: JSON.stringify(delayReason ? { delay_reason: delayReason } : {}),
       });
       const raw = (await res.json().catch(() => ({}))) as {
         ok?: boolean;
         error?: string;
         code?: string;
-        notificationSent?: boolean;
       };
 
       if (res.ok && raw.ok !== false) {
-        setLateModal(null);
+        setCompleteModal(null);
         playEmployeeSound("complete");
-        setCompletedEarly(wasOnTime && !providedReason);
+        setCompletedEarly(wasOnTime && !delayReason);
         setCelebration(true);
-        if (providedReason) {
-          showToast({
-            tone: "success",
-            title: t("employee.experience.lateCompleteToast"),
-          });
-        } else if (wasOnTime) {
-          showToast({
-            tone: "success",
-            title: t("employee.experience.onTimeToast"),
-          });
-        } else {
-          showToast({
-            tone: "success",
-            title: t("employee.experience.completeToast"),
-          });
-        }
+        showToast({ tone: "success", title: t("completeTask.success") });
         dispatchNotificationsRefresh();
         await load();
-        return;
+        return true;
       }
 
-      if (raw.code === "NEED_DELAY_REASON") {
-        setLateModal({
-          taskId: task.id,
-          taskTitle: task.title,
-          estimated: task.estimated_minutes,
-          reason: providedReason ?? "",
-          submitting: false,
-          error: raw.error ?? t("employee.tasks.requiresDelayReason"),
-        });
-        return;
-      }
-      let msg = raw.error?.trim() ?? t("employee.tasks.errors.completeFailed");
-      if (raw.code === "NOT_YOUR_TASK" || raw.code === "NO_EMPLOYEE_CARD") {
-        msg = t("employee.tasks.errors.ownershipMismatch");
-      }
-      setError(msg);
+      const msg =
+        raw.code === "NOT_YOUR_TASK" || raw.code === "NO_EMPLOYEE_CARD"
+          ? t("employee.tasks.errors.ownershipMismatch")
+          : raw.error?.trim() || t("completeTask.failed");
+      setCompleteModal((cur) => (cur ? { ...cur, submitting: false, error: msg } : cur));
+      return false;
+    } catch {
+      setCompleteModal((cur) =>
+        cur ? { ...cur, submitting: false, error: t("completeTask.failed") } : cur,
+      );
+      return false;
     } finally {
       setBusyId(null);
     }
   };
 
-  const submitLateReason = async () => {
-    if (!lateModal) return;
-    const reason = lateModal.reason.trim();
-    if (!reason) {
-      setLateModal({ ...lateModal, error: t("employee.tasks.lateReasonRequired") });
+  const submitCompleteModal = async () => {
+    if (!completeModal || completeModal.submitting) return;
+    const late = isEmployeeWorkTaskLate({
+      status: completeModal.task.status,
+      startedAt: completeModal.task.started_at,
+      estimatedMinutes: completeModal.task.estimated_minutes,
+      targetDueAt: completeModal.task.target_due_at,
+    });
+    const lateReason = completeModal.lateReason.trim();
+    const note = completeModal.completionNote.trim();
+    if (late && !lateReason) {
+      setCompleteModal({ ...completeModal, error: t("completeTask.lateReasonRequiredHint") });
       return;
     }
-    setLateModal({ ...lateModal, submitting: true, error: null });
-    const target = tasks.find((x) => x.id === lateModal.taskId);
-    if (!target) {
-      setLateModal(null);
-      return;
-    }
-    await completeWork(target, reason);
+    setCompleteModal({ ...completeModal, submitting: true, error: null });
+    await completeWork(completeModal.task, late ? lateReason : note);
   };
+
+  const completeModalModel = useMemo((): CompleteTaskModalModel | null => {
+    if (!completeModal) return null;
+    const task = completeModal.task;
+    const deadline = taskDeadlineAt({
+      startedAt: task.started_at,
+      estimatedMinutes: task.estimated_minutes,
+      targetDueAt: task.target_due_at,
+    });
+    const late = isEmployeeWorkTaskLate({
+      status: task.status,
+      startedAt: task.started_at,
+      estimatedMinutes: task.estimated_minutes,
+      targetDueAt: task.target_due_at,
+    });
+    return {
+      title: task.title,
+      dueLabel: formatTaskDateTime(deadline, bcp47),
+      statusLabel: t("completeTask.statusInProgress"),
+      isLate: late,
+      lateParts: describeLateness({
+        startedAt: task.started_at,
+        estimatedMinutes: task.estimated_minutes,
+        targetDueAt: task.target_due_at,
+      }),
+      completeAtLabel: formatTaskDateTime(new Date(), bcp47),
+    };
+  }, [completeModal, bcp47, t]);
 
   const activeTask = useMemo(
     () => tasks.find((x) => x.status === "IN_PROGRESS") ?? null,
@@ -339,7 +360,8 @@ export function EmployeeTasksClient() {
                   canStart={canStart}
                   canComplete={canComplete}
                   onStart={() => void startWork(task.id)}
-                  onComplete={() => void completeWork(task)}
+                  onComplete={() => openCompleteModal(task)}
+                  completedByName={user?.fullName ?? null}
                 />
               </li>
             );
@@ -358,18 +380,27 @@ export function EmployeeTasksClient() {
           void refreshAuth();
         }}
       />
-      <EmployeeLateReasonModal
-        open={lateModal != null}
-        taskTitle={lateModal?.taskTitle ?? ""}
-        estimatedMinutes={lateModal?.estimated ?? null}
-        reason={lateModal?.reason ?? ""}
-        error={lateModal?.error ?? null}
-        submitting={lateModal?.submitting ?? false}
-        quickReasonKeys={QUICK_DELAY_REASON_KEYS}
-        onReasonChange={(reason) => setLateModal((cur) => (cur ? { ...cur, reason } : cur))}
-        onCancel={() => setLateModal(null)}
-        onSubmit={() => void submitLateReason()}
-      />
+      {completeModal && completeModalModel ? (
+        <CompleteTaskModal
+          open
+          task={completeModalModel}
+          lateReason={completeModal.lateReason}
+          completionNote={completeModal.completionNote}
+          submitting={completeModal.submitting}
+          error={completeModal.error}
+          requireLateReason={completeModalModel.isLate}
+          onLateReasonChange={(lateReason) =>
+            setCompleteModal((cur) => (cur ? { ...cur, lateReason, error: null } : cur))
+          }
+          onCompletionNoteChange={(completionNote) =>
+            setCompleteModal((cur) => (cur ? { ...cur, completionNote } : cur))
+          }
+          onCancel={() => {
+            if (!completeModal.submitting) setCompleteModal(null);
+          }}
+          onSubmit={() => void submitCompleteModal()}
+        />
+      ) : null}
     </div>
   );
 }

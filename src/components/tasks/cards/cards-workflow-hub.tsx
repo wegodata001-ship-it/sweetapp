@@ -6,8 +6,6 @@
  */
 
 import {
-  AlertTriangle,
-  Check,
   Loader2,
   Plus,
   RefreshCw,
@@ -17,7 +15,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { fetchJsonCached, invalidateCacheKey, setCached } from "@/lib/client/fetch-cache";
 import { useAuth } from "@/components/auth-provider";
 import { useI18n } from "@/components/i18n-provider";
+import { CompleteTaskModal } from "@/components/tasks/complete-task-modal";
 import { useToast } from "@/components/toast-provider";
+import {
+  describeLateness,
+  formatTaskDateTime,
+  isWorkflowItemLateNow,
+  taskDeadlineAt,
+} from "@/lib/tasks/completion";
 import type {
   WorkflowRunDetailDto,
   WorkflowRunItemDto,
@@ -67,7 +72,7 @@ export function CardsWorkflowHub({
   /** Employee portal embeds its own title */
   hideHeader?: boolean;
 }) {
-  const { t, dir } = useI18n();
+  const { t, dir, bcp47 } = useI18n();
   const { user } = useAuth();
   const { showToast } = useToast();
 
@@ -95,10 +100,11 @@ export function CardsWorkflowHub({
   const [launchOpen, setLaunchOpen] = useState<Record<string, boolean>>({});
   const [launchAssignee, setLaunchAssignee] = useState<Record<string, string>>({});
 
-  const [lateModal, setLateModal] = useState<{
+  const [completeModal, setCompleteModal] = useState<{
     runId: string;
     item: WorkflowRunItemDto;
-    reason: string;
+    lateReason: string;
+    completionNote: string;
     submitting: boolean;
     error: string | null;
   } | null>(null);
@@ -717,14 +723,30 @@ export function CardsWorkflowHub({
           | null;
         if (!json?.ok) {
           if (json?.code === "LATE_REASON_REQUIRED") {
-            setLateModal({ runId: run.id, item, reason: "", submitting: false, error: json.error ?? null });
-            return;
+            setCompleteModal((cur) =>
+              cur
+                ? { ...cur, submitting: false, error: json.error ?? t("completeTask.lateReasonRequiredHint") }
+                : {
+                    runId: run.id,
+                    item,
+                    lateReason: "",
+                    completionNote: "",
+                    submitting: false,
+                    error: json.error ?? t("completeTask.lateReasonRequiredHint"),
+                  },
+            );
+            return false;
           }
           showToast({ tone: "error", title: json?.error ?? t("workflows.runner.toast.actionFailed") });
-          return;
+          return false;
         }
+        setCompleteModal(null);
         setRunDetails((prev) => ({ ...prev, [run.id]: json.data }));
         void refreshAll();
+        return true;
+      } catch {
+        showToast({ tone: "error", title: t("completeTask.failed") });
+        return false;
       } finally {
         setBusyItemId(null);
       }
@@ -732,18 +754,37 @@ export function CardsWorkflowHub({
     [refreshAll, showToast, t],
   );
 
-  const submitLate = async () => {
-    if (!lateModal) return;
-    const run = runDetails[lateModal.runId];
+  const openComplete = (run: WorkflowRunDetailDto, item: WorkflowRunItemDto) => {
+    setCompleteModal({
+      runId: run.id,
+      item,
+      lateReason: "",
+      completionNote: "",
+      submitting: false,
+      error: null,
+    });
+  };
+
+  const submitComplete = async () => {
+    if (!completeModal || completeModal.submitting) return;
+    const run = runDetails[completeModal.runId];
     if (!run) return;
-    const reason = lateModal.reason.trim();
-    if (!reason) {
-      setLateModal({ ...lateModal, error: t("workflows.runner.lateReasonRequired") });
+    const late = isWorkflowItemLateNow({
+      estimatedMinutes: completeModal.item.estimated_minutes,
+      startedAt: completeModal.item.started_at,
+    });
+    const reason = completeModal.lateReason.trim();
+    if (late && completeModal.item.require_late_reason && !reason) {
+      setCompleteModal({ ...completeModal, error: t("completeTask.lateReasonRequiredHint") });
       return;
     }
-    setLateModal({ ...lateModal, submitting: true, error: null });
-    await callRunItem(run, lateModal.item, "complete", reason);
-    setLateModal(null);
+    setCompleteModal({ ...completeModal, submitting: true, error: null });
+    const ok = await callRunItem(run, completeModal.item, "complete", reason || undefined);
+    if (!ok) {
+      setCompleteModal((cur) =>
+        cur ? { ...cur, submitting: false, error: cur.error ?? t("completeTask.failed") } : cur,
+      );
+    }
   };
 
   const visibleTemplates = useMemo(() => templates, [templates]);
@@ -947,7 +988,7 @@ export function CardsWorkflowHub({
                       canComplete={canControl && it.status === "ACTIVE"}
                       canSkip={canManage && it.status !== "COMPLETED" && it.status !== "SKIPPED"}
                       onStart={() => void callRunItem(detail, it, "start")}
-                      onComplete={() => void callRunItem(detail, it, "complete")}
+                      onComplete={() => openComplete(detail, it)}
                       onSkip={() => void callRunItem(detail, it, "skip")}
                     />
                   );
@@ -1134,59 +1175,52 @@ export function CardsWorkflowHub({
         onConfirm={() => void confirmDeleteTemplate()}
       />
 
-      {lateModal ? (
-        <div
-          className="fixed inset-0 z-[120] flex items-end justify-center bg-black/50 p-3 sm:items-center"
-          role="dialog"
-          aria-modal="true"
-          onClick={(e) => {
-            if (e.target === e.currentTarget && !lateModal.submitting) setLateModal(null);
+      {completeModal ? (
+        <CompleteTaskModal
+          open
+          task={{
+            title: completeModal.item.title,
+            dueLabel: formatTaskDateTime(
+              taskDeadlineAt({
+                startedAt: completeModal.item.started_at,
+                estimatedMinutes: completeModal.item.estimated_minutes,
+              }),
+              bcp47,
+            ),
+            statusLabel: t("completeTask.statusInProgress"),
+            isLate: isWorkflowItemLateNow({
+              estimatedMinutes: completeModal.item.estimated_minutes,
+              startedAt: completeModal.item.started_at,
+            }),
+            lateParts: describeLateness({
+              startedAt: completeModal.item.started_at,
+              estimatedMinutes: completeModal.item.estimated_minutes,
+            }),
+            completeAtLabel: formatTaskDateTime(new Date(), bcp47),
           }}
-        >
-          <div className="tcg-fade-in w-full max-w-md rounded-2xl bg-white p-4 shadow-2xl">
-            <div className="flex items-center gap-2">
-              <AlertTriangle className="h-5 w-5 text-rose-600" aria-hidden />
-              <h3 className="text-base font-black text-slate-950">
-                {t("workflows.runner.lateModalTitle")}
-              </h3>
-            </div>
-            <p className="mt-1 text-xs font-bold text-slate-600">{lateModal.item.title}</p>
-            <textarea
-              value={lateModal.reason}
-              onChange={(e) =>
-                setLateModal((p) => (p ? { ...p, reason: e.target.value, error: null } : p))
-              }
-              rows={3}
-              className="mt-2 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
-              placeholder={t("workflows.runner.lateModalPlaceholder")}
-            />
-            {lateModal.error ? (
-              <p className="mt-1 text-xs font-bold text-rose-700">{lateModal.error}</p>
-            ) : null}
-            <div className="mt-3 flex gap-2">
-              <button
-                type="button"
-                onClick={() => setLateModal(null)}
-                className="flex-1 rounded-xl border border-slate-200 py-2 text-xs font-bold"
-              >
-                {t("common.cancel")}
-              </button>
-              <button
-                type="button"
-                onClick={() => void submitLate()}
-                disabled={lateModal.submitting}
-                className="flex flex-1 items-center justify-center gap-1 rounded-xl bg-rose-600 py-2 text-xs font-black text-white"
-              >
-                {lateModal.submitting ? (
-                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-                ) : (
-                  <Check className="h-4 w-4" aria-hidden />
-                )}
-                {t("workflows.runner.lateModalSubmit")}
-              </button>
-            </div>
-          </div>
-        </div>
+          lateReason={completeModal.lateReason}
+          completionNote={completeModal.completionNote}
+          submitting={completeModal.submitting}
+          error={completeModal.error}
+          requireLateReason={
+            completeModal.item.require_late_reason &&
+            isWorkflowItemLateNow({
+              estimatedMinutes: completeModal.item.estimated_minutes,
+              startedAt: completeModal.item.started_at,
+            })
+          }
+          showCompletionNote={false}
+          onLateReasonChange={(lateReason) =>
+            setCompleteModal((p) => (p ? { ...p, lateReason, error: null } : p))
+          }
+          onCompletionNoteChange={(completionNote) =>
+            setCompleteModal((p) => (p ? { ...p, completionNote } : p))
+          }
+          onCancel={() => {
+            if (!completeModal.submitting) setCompleteModal(null);
+          }}
+          onSubmit={() => void submitComplete()}
+        />
       ) : null}
     </div>
   );

@@ -20,17 +20,15 @@ import { TaskStatusPill } from "@/components/tasks/cards/task-status-pill";
 import type { TaskLockState } from "@/lib/work-tasks/employee-work-lock";
 import { getTaskAccentStyle } from "@/lib/work-tasks/task-color-presets";
 import type { SerializedEmployeeTask } from "@/lib/work-tasks/serialize-employee-work";
+import { isEmployeeWorkTaskLate } from "@/lib/tasks/completion";
 
-function statusVariant(status: string, late: boolean): "PENDING" | "ACTIVE" | "COMPLETED" | "LATE" {
-  if (status === "COMPLETED") return "COMPLETED";
+function statusVariant(
+  status: string,
+  late: boolean,
+): "PENDING" | "ACTIVE" | "COMPLETED" | "COMPLETED_LATE" | "LATE" {
+  if (status === "COMPLETED") return late ? "COMPLETED_LATE" : "COMPLETED";
   if (status === "IN_PROGRESS") return late ? "LATE" : "ACTIVE";
   return "PENDING";
-}
-
-function isLate(task: SerializedEmployeeTask): boolean {
-  if (task.status === "COMPLETED") return false;
-  if (!task.target_due_at) return false;
-  return new Date(task.target_due_at).getTime() < Date.now();
 }
 
 type Props = {
@@ -73,9 +71,14 @@ export function EmployeeWorkTaskCard({
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
-  const [justDone, setJustDone] = useState(false);
   const expanded = expandedProp ?? open;
-  const late = isLate(task);
+  const late = isEmployeeWorkTaskLate({
+    status: task.status,
+    startedAt: task.started_at,
+    completedAt: task.completed_at,
+    estimatedMinutes: task.estimated_minutes,
+    targetDueAt: task.target_due_at,
+  });
   const variant = statusVariant(task.status, late);
   const locked = !canManage && (lock?.locked ?? false);
   const accent = getTaskAccentStyle(task.color);
@@ -94,13 +97,13 @@ export function EmployeeWorkTaskCard({
 
   const handleComplete = () => {
     onComplete?.();
-    setJustDone(true);
-    window.setTimeout(() => setJustDone(false), 700);
   };
 
   const statusLabel =
     task.status === "COMPLETED"
-      ? t("workflows.page.badge.completed")
+      ? late
+        ? `${t("completeTask.completedBadge")} ${t("completeTask.lateBadge")}`
+        : t("completeTask.completedBadge")
       : task.status === "IN_PROGRESS"
         ? late
           ? t("workflows.page.badge.late")
@@ -112,8 +115,8 @@ export function EmployeeWorkTaskCard({
   return (
     <li
         className={`ew-task-card rounded-xl bg-white shadow-sm ring-1 transition ${
-          justDone ? "ew-task-complete-pop" : ""
-        } ${locked ? "ew-task-locked opacity-60" : ""} ${
+          locked ? "ew-task-locked opacity-60" : ""
+        } ${
           nested ? "ms-0 sm:ms-1" : ""
         } ${
           task.status === "IN_PROGRESS"
@@ -215,6 +218,23 @@ export function EmployeeWorkTaskCard({
               {task.materials ? (
                 <p className="break-words">
                   <strong>{t("workflows.employeeWork.fields.materials")}:</strong> {task.materials}
+                </p>
+              ) : null}
+              {task.status === "COMPLETED" && task.completed_at ? (
+                <p>
+                  <strong>{t("completeTask.completedAt")}:</strong>{" "}
+                  {new Date(task.completed_at).toLocaleString()}
+                </p>
+              ) : null}
+              {task.status === "COMPLETED" && late ? (
+                <p className="font-black text-amber-800">{t("completeTask.completedLateBadge")}</p>
+              ) : null}
+              {task.delay_reason ? (
+                <p className="whitespace-pre-wrap break-words">
+                  <strong>
+                    {late ? t("completeTask.lateReasonLabel") : t("completeTask.noteLabel")}:
+                  </strong>{" "}
+                  {task.delay_reason}
                 </p>
               ) : null}
             </div>

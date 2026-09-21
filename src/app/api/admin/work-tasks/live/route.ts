@@ -47,6 +47,7 @@ export async function GET() {
         delayReason: r.delayReason,
         orderIndex: r.orderIndex,
         createdAt: r.createdAt,
+        targetDueAt: r.targetDueAt,
       }),
       employee_name: r.employee.name,
     });

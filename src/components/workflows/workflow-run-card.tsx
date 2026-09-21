@@ -16,7 +16,14 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useI18n } from "@/components/i18n-provider";
+import { CompleteTaskModal } from "@/components/tasks/complete-task-modal";
 import { useToast } from "@/components/toast-provider";
+import {
+  describeLateness,
+  formatTaskDateTime,
+  isWorkflowItemLateNow,
+  taskDeadlineAt,
+} from "@/lib/tasks/completion";
 import {
   itemElapsedMs,
   itemIsLate,
@@ -54,13 +61,14 @@ export function WorkflowRunCard({
   /** פורטל עובד — לא להציג שם עובד אחר */
   employeeView?: boolean;
 }) {
-  const { t, dir } = useI18n();
+  const { t, dir, bcp47 } = useI18n();
   const { showToast } = useToast();
   const [now, setNow] = useState(() => Date.now());
   const [busyId, setBusyId] = useState<string | null>(null);
-  const [lateModal, setLateModal] = useState<{
+  const [completeModal, setCompleteModal] = useState<{
     item: WorkflowRunItemDto;
-    reason: string;
+    lateReason: string;
+    completionNote: string;
     submitting: boolean;
     error: string | null;
   } | null>(null);
@@ -108,12 +116,17 @@ export function WorkflowRunCard({
         }
         if (!json.ok) {
           if (json.code === "LATE_REASON_REQUIRED") {
-            setLateModal({
-              item,
-              reason: "",
-              submitting: false,
-              error: json.error ?? null,
-            });
+            setCompleteModal((cur) =>
+              cur
+                ? { ...cur, submitting: false, error: json.error ?? t("completeTask.lateReasonRequiredHint") }
+                : {
+                    item,
+                    lateReason: "",
+                    completionNote: "",
+                    submitting: false,
+                    error: json.error ?? t("completeTask.lateReasonRequiredHint"),
+                  },
+            );
             return null;
           }
           showToast({
@@ -123,12 +136,13 @@ export function WorkflowRunCard({
           });
           return null;
         }
+        if (action === "complete") setCompleteModal(null);
         if (action === "start") {
           showToast({ tone: "info", title: t("workflows.runner.toast.started"), description: item.title });
         } else if (action === "complete") {
           showToast({
             tone: "success",
-            title: t("workflows.runner.toast.completed"),
+            title: t("completeTask.success"),
             description: item.title,
           });
         } else if (action === "skip") {
@@ -143,17 +157,35 @@ export function WorkflowRunCard({
     [run.id, t, showToast, onChanged],
   );
 
-  const submitLate = async () => {
-    if (!lateModal) return;
-    const reason = lateModal.reason.trim();
-    if (!reason) {
-      setLateModal({ ...lateModal, error: t("workflows.runner.lateReasonRequired") });
+  const openComplete = (item: WorkflowRunItemDto) => {
+    setCompleteModal({
+      item,
+      lateReason: "",
+      completionNote: "",
+      submitting: false,
+      error: null,
+    });
+  };
+
+  const submitComplete = async () => {
+    if (!completeModal || completeModal.submitting) return;
+    const late = isWorkflowItemLateNow({
+      estimatedMinutes: completeModal.item.estimated_minutes,
+      startedAt: completeModal.item.started_at,
+    });
+    const requireReason = late && completeModal.item.require_late_reason;
+    const reason = completeModal.lateReason.trim();
+    if (requireReason && !reason) {
+      setCompleteModal({ ...completeModal, error: t("completeTask.lateReasonRequiredHint") });
       return;
     }
-    setLateModal({ ...lateModal, submitting: true, error: null });
-    const result = await callItem(lateModal.item, "complete", reason);
-    if (result) setLateModal(null);
-    else setLateModal((prev) => (prev ? { ...prev, submitting: false } : prev));
+    setCompleteModal({ ...completeModal, submitting: true, error: null });
+    const result = await callItem(completeModal.item, "complete", reason || undefined);
+    if (!result) {
+      setCompleteModal((prev) =>
+        prev ? { ...prev, submitting: false, error: prev.error ?? t("completeTask.failed") } : prev,
+      );
+    }
   };
 
   return (
@@ -214,21 +246,58 @@ export function WorkflowRunCard({
               canStart={canStart}
               canComplete={canComplete}
               onStart={() => callItem(item, "start")}
-              onComplete={() => callItem(item, "complete")}
+              onComplete={() => openComplete(item)}
               onSkip={canControl ? () => callItem(item, "skip") : undefined}
             />
           );
         })}
       </ol>
 
-      {lateModal ? (
-        <LateReasonModal
-          state={lateModal}
-          onChange={(reason) =>
-            setLateModal((prev) => (prev ? { ...prev, reason, error: null } : prev))
+      {completeModal ? (
+        <CompleteTaskModal
+          open
+          task={{
+            title: completeModal.item.title,
+            dueLabel: formatTaskDateTime(
+              taskDeadlineAt({
+                startedAt: completeModal.item.started_at,
+                estimatedMinutes: completeModal.item.estimated_minutes,
+              }),
+              bcp47,
+            ),
+            statusLabel: t("completeTask.statusInProgress"),
+            isLate: isWorkflowItemLateNow({
+              estimatedMinutes: completeModal.item.estimated_minutes,
+              startedAt: completeModal.item.started_at,
+            }),
+            lateParts: describeLateness({
+              startedAt: completeModal.item.started_at,
+              estimatedMinutes: completeModal.item.estimated_minutes,
+            }),
+            completeAtLabel: formatTaskDateTime(new Date(), bcp47),
+          }}
+          lateReason={completeModal.lateReason}
+          completionNote={completeModal.completionNote}
+          submitting={completeModal.submitting}
+          error={completeModal.error}
+          requireLateReason={
+            completeModal.item.require_late_reason &&
+            isWorkflowItemLateNow({
+              estimatedMinutes: completeModal.item.estimated_minutes,
+              startedAt: completeModal.item.started_at,
+            })
           }
-          onSubmit={() => void submitLate()}
-          onClose={() => setLateModal(null)}
+          showCompletionNote={false}
+          onLateReasonChange={(lateReason) =>
+            setCompleteModal((prev) => (prev ? { ...prev, lateReason, error: null } : prev))
+          }
+          onCompletionNoteChange={(completionNote) =>
+            setCompleteModal((prev) => (prev ? { ...prev, completionNote } : prev))
+          }
+          onCancel={() => {
+            if (!completeModal.submitting) setCompleteModal(null);
+          }}
+          onSubmit={() => void submitComplete()}
         />
       ) : null}
     </div>
@@ -454,72 +523,3 @@ function formatMs(ms: number): string {
   return `${mm}:${ss}`;
 }
 
-function LateReasonModal({
-  state,
-  onChange,
-  onSubmit,
-  onClose,
-}: {
-  state: { item: WorkflowRunItemDto; reason: string; submitting: boolean; error: string | null };
-  onChange: (reason: string) => void;
-  onSubmit: () => void;
-  onClose: () => void;
-}) {
-  const { t, dir } = useI18n();
-  return (
-    <div
-      dir={dir}
-      className="fixed inset-0 z-[110] flex items-center justify-center bg-black/65 p-4"
-      role="dialog"
-      aria-modal="true"
-      onClick={(e) => {
-        if (e.target === e.currentTarget && !state.submitting) onClose();
-      }}
-    >
-      <div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-2xl">
-        <div className="flex items-center gap-2">
-          <AlertTriangle className="h-5 w-5 text-rose-600" aria-hidden />
-          <h3 className="text-lg font-black text-slate-950">
-            {t("workflows.runner.lateModalTitle")}
-          </h3>
-        </div>
-        <p className="mt-2 text-sm font-bold text-slate-700">
-          {t("workflows.runner.lateModalBody", { name: state.item.title })}
-        </p>
-        <p className="mt-1 text-xs text-slate-500">
-          {t("workflows.runner.lateModalHint", { n: state.item.estimated_minutes })}
-        </p>
-        <textarea
-          value={state.reason}
-          onChange={(e) => onChange(e.target.value)}
-          rows={3}
-          autoFocus
-          placeholder={t("workflows.runner.lateModalPlaceholder")}
-          className="mt-3 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-rose-400 focus:ring-2 focus:ring-rose-200"
-        />
-        {state.error ? (
-          <p className="mt-2 text-xs font-bold text-rose-700">{state.error}</p>
-        ) : null}
-        <div className="mt-4 flex justify-end gap-2">
-          <button
-            type="button"
-            onClick={onClose}
-            disabled={state.submitting}
-            className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-          >
-            {t("common.cancel")}
-          </button>
-          <button
-            type="button"
-            onClick={onSubmit}
-            disabled={state.submitting}
-            className="inline-flex items-center gap-2 rounded-xl bg-rose-600 px-4 py-2 text-sm font-black text-white shadow-sm hover:bg-rose-700 disabled:opacity-50"
-          >
-            {state.submitting ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Check className="h-4 w-4" aria-hidden />}
-            {t("workflows.runner.lateModalSubmit")}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}

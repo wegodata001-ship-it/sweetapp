@@ -12,6 +12,12 @@ import type { SerializedWorkEmployeeTask } from "@/lib/work-tasks/serialize-work
 import { useI18n } from "@/components/i18n-provider";
 import { TaskCountdownRing } from "@/components/tasks/task-countdown-ring";
 import { computeCountdownTimer } from "@/lib/tasks/countdown-timer";
+import {
+  describeLateness,
+  formatTaskDateTime,
+  isEmployeeWorkTaskLate,
+} from "@/lib/tasks/completion";
+import { formatLatePartsLabel } from "@/components/tasks/complete-task-modal";
 
 export type EmployeeTaskCardProps = {
   task: SerializedWorkEmployeeTask;
@@ -22,6 +28,7 @@ export type EmployeeTaskCardProps = {
   canComplete: boolean;
   onStart: () => void;
   onComplete: () => void;
+  completedByName?: string | null;
 };
 
 export function EmployeeTaskCard({
@@ -33,8 +40,9 @@ export function EmployeeTaskCard({
   canComplete,
   onStart,
   onComplete,
+  completedByName,
 }: EmployeeTaskCardProps) {
-  const { t } = useI18n();
+  const { t, bcp47 } = useI18n();
   const isLive = task.status === "IN_PROGRESS";
   const isDone = task.status === "COMPLETED";
   const hasTimer = (task.estimated_minutes ?? 0) > 0;
@@ -48,6 +56,23 @@ export function EmployeeTaskCard({
   });
 
   const isLate = isLive && snap.isOverdue;
+  const wasLate =
+    isDone &&
+    isEmployeeWorkTaskLate({
+      status: task.status,
+      startedAt: task.started_at,
+      completedAt: task.completed_at,
+      estimatedMinutes: task.estimated_minutes,
+      targetDueAt: task.target_due_at,
+    });
+  const lateParts = wasLate
+    ? describeLateness({
+        startedAt: task.started_at,
+        completedAt: task.completed_at,
+        estimatedMinutes: task.estimated_minutes,
+        targetDueAt: task.target_due_at,
+      })
+    : null;
 
   const shellClass = [
     "relative overflow-hidden rounded-3xl border transition-all duration-300 motion-safe:transition-[transform,opacity,box-shadow]",
@@ -95,7 +120,10 @@ export function EmployeeTaskCard({
           {isDone ? (
             <div className="flex flex-col items-center justify-center rounded-2xl bg-[#16a34a]/10 px-4 py-6 text-center min-h-[7rem]">
               <CheckCircle2 className="h-14 w-14 text-[#16a34a]" aria-hidden />
-              <p className="mt-2 text-sm font-black text-[#16a34a]">{t("employee.tasks.completedBadge")}</p>
+              <p className="mt-2 text-sm font-black text-[#16a34a]">{t("completeTask.completedBadge")}</p>
+              {wasLate ? (
+                <p className="mt-1 text-[11px] font-black text-amber-800">{t("completeTask.lateBadge")}</p>
+              ) : null}
             </div>
           ) : hasTimer ? (
             <TaskCountdownRing
@@ -151,8 +179,28 @@ export function EmployeeTaskCard({
                 </p>
               ) : null}
 
-              {isDone && task.delay_reason ? (
-                <p className="text-xs font-semibold text-amber-800">{task.delay_reason}</p>
+              {isDone ? (
+                <div className="space-y-1 text-xs font-semibold text-slate-600">
+                  <p>
+                    {t("completeTask.completedAt")}: {formatTaskDateTime(task.completed_at, bcp47)}
+                  </p>
+                  {completedByName ? (
+                    <p>
+                      {t("completeTask.completedBy")}: {completedByName}
+                    </p>
+                  ) : null}
+                  {wasLate && lateParts ? (
+                    <p className="font-black text-amber-800">
+                      {t("completeTask.completedLateBadge")} · {formatLatePartsLabel(t, lateParts)}
+                    </p>
+                  ) : null}
+                  {task.delay_reason ? (
+                    <p className="whitespace-pre-wrap text-slate-700">
+                      {wasLate ? t("completeTask.lateReasonLabel") : t("completeTask.noteLabel")}:{" "}
+                      {task.delay_reason}
+                    </p>
+                  ) : null}
+                </div>
               ) : null}
             </>
           ) : null}

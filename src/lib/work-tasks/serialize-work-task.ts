@@ -14,6 +14,7 @@ export function serializeWorkEmployeeTask(row: {
   delayReason: string | null;
   orderIndex: number;
   createdAt: Date;
+  targetDueAt?: Date | null;
 }) {
   return {
     id: row.id,
@@ -29,5 +30,6 @@ export function serializeWorkEmployeeTask(row: {
     delay_reason: row.delayReason,
     order_index: row.orderIndex,
     created_at: row.createdAt.toISOString(),
+    target_due_at: row.targetDueAt ? row.targetDueAt.toISOString() : null,
   };
 }

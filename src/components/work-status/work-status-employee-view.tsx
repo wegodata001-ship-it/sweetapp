@@ -3,7 +3,14 @@
 import { Check, Loader2, Play, Radio } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { useI18n } from "@/components/i18n-provider";
+import { CompleteTaskModal } from "@/components/tasks/complete-task-modal";
 import { WorkStatusHeartbeat } from "@/components/work-status/work-status-heartbeat";
+import {
+  describeLateness,
+  formatTaskDateTime,
+  isEmployeeWorkTaskLate,
+  taskDeadlineAt,
+} from "@/lib/tasks/completion";
 import { formatElapsedMs } from "@/lib/work-status/presence";
 
 type MeData = {
@@ -26,10 +33,15 @@ type MeData = {
 const POLL_MS = 15_000;
 
 export function WorkStatusEmployeeView() {
-  const { t, dir } = useI18n();
+  const { t, dir, bcp47 } = useI18n();
   const [data, setData] = useState<MeData | null>(null);
   const [busy, setBusy] = useState(false);
   const [tick, setTick] = useState(0);
+  const [completeOpen, setCompleteOpen] = useState(false);
+  const [lateReason, setLateReason] = useState("");
+  const [completionNote, setCompletionNote] = useState("");
+  const [completeError, setCompleteError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
   const load = useCallback(async () => {
     const res = await fetch("/api/work-status/me", { credentials: "same-origin", cache: "no-store" });
@@ -68,19 +80,43 @@ export function WorkStatusEmployeeView() {
     }
   };
 
-  const completeTask = async (taskId: string) => {
+  const completeTask = async () => {
+    if (!task || submitting) return;
+    const late = isEmployeeWorkTaskLate({
+      status: task.status,
+      startedAt: task.startedAt,
+      estimatedMinutes: task.estimatedMinutes,
+    });
+    const reason = lateReason.trim();
+    const note = completionNote.trim();
+    if (late && !reason) {
+      setCompleteError(t("completeTask.lateReasonRequiredHint"));
+      return;
+    }
+    setSubmitting(true);
     setBusy(true);
+    setCompleteError(null);
     try {
-      const res = await fetch(`/api/work/tasks/${encodeURIComponent(taskId)}/complete`, {
+      const delay = late ? reason : note;
+      const res = await fetch(`/api/work/tasks/${encodeURIComponent(task.id)}/complete`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
+        body: JSON.stringify(delay ? { delay_reason: delay } : {}),
         credentials: "same-origin",
       });
       const j = (await res.json()) as { ok?: boolean; error?: string };
-      if (!j.ok) alert(j.error ?? t("common.error"));
+      if (!j.ok) {
+        setCompleteError(j.error ?? t("completeTask.failed"));
+        return;
+      }
+      setCompleteOpen(false);
+      setLateReason("");
+      setCompletionNote("");
       await load();
+    } catch {
+      setCompleteError(t("completeTask.failed"));
     } finally {
+      setSubmitting(false);
       setBusy(false);
     }
   };
@@ -124,7 +160,10 @@ export function WorkStatusEmployeeView() {
           <button
             type="button"
             disabled={busy}
-            onClick={() => void completeTask(task.id)}
+            onClick={() => {
+              setCompleteOpen(true);
+              setCompleteError(null);
+            }}
             className="mt-4 flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 text-sm font-black text-white"
           >
             {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-5 w-5" />}
@@ -148,6 +187,51 @@ export function WorkStatusEmployeeView() {
       ) : (
         <p className="mt-8 text-center text-sm font-bold text-slate-500">{t("workStatus.employee.noTask")}</p>
       )}
+
+      {task && completeOpen ? (
+        <CompleteTaskModal
+          open
+          task={{
+            title: task.title,
+            dueLabel: formatTaskDateTime(
+              taskDeadlineAt({
+                startedAt: task.startedAt,
+                estimatedMinutes: task.estimatedMinutes,
+              }),
+              bcp47,
+            ),
+            statusLabel: t("completeTask.statusInProgress"),
+            isLate: isEmployeeWorkTaskLate({
+              status: task.status,
+              startedAt: task.startedAt,
+              estimatedMinutes: task.estimatedMinutes,
+            }),
+            lateParts: describeLateness({
+              startedAt: task.startedAt,
+              estimatedMinutes: task.estimatedMinutes,
+            }),
+            completeAtLabel: formatTaskDateTime(new Date(), bcp47),
+          }}
+          lateReason={lateReason}
+          completionNote={completionNote}
+          submitting={submitting}
+          error={completeError}
+          requireLateReason={isEmployeeWorkTaskLate({
+            status: task.status,
+            startedAt: task.startedAt,
+            estimatedMinutes: task.estimatedMinutes,
+          })}
+          onLateReasonChange={(v) => {
+            setLateReason(v);
+            setCompleteError(null);
+          }}
+          onCompletionNoteChange={setCompletionNote}
+          onCancel={() => {
+            if (!submitting) setCompleteOpen(false);
+          }}
+          onSubmit={() => void completeTask()}
+        />
+      ) : null}
     </div>
   );
 }

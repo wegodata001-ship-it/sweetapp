@@ -58,7 +58,11 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
 
     const completedAt = new Date();
     const actualMinutes = computeActualMinutes(task.startedAt, completedAt);
-    const late = isTaskLate(task.estimatedMinutes, actualMinutes);
+    const timerLate = isTaskLate(task.estimatedMinutes, actualMinutes);
+    const dueLate = task.targetDueAt
+      ? completedAt.getTime() > new Date(task.targetDueAt).getTime()
+      : false;
+    const late = timerLate || dueLate;
     const reason =
       typeof body.delay_reason === "string" ? body.delay_reason.trim().slice(0, 2000) : "";
 
@@ -80,7 +84,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
         status: "COMPLETED",
         completedAt,
         isActive: false,
-        delayReason: late ? reason || null : null,
+        delayReason: late ? reason : reason || null,
       },
     });
 
