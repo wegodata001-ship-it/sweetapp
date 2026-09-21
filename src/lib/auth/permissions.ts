@@ -54,6 +54,7 @@ export const PAGE_ACCESS_RULES: { prefix: string; permission: PagePermission }[]
   { prefix: "/finance/income", permission: "financial_registration" },
   { prefix: "/finance/expenses", permission: "financial_registration" },
   { prefix: "/finance/ledgers", permission: "ledger" },
+  { prefix: "/finance/ledger-v2", permission: "ledger" },
   { prefix: "/finance/cashflow-forecast", permission: "cash_flow" },
   { prefix: "/finance/cashflow", permission: "cash_flow" },
   { prefix: "/finance", permission: "financial_registration" },

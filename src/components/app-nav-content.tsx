@@ -4,6 +4,7 @@ import {
   Archive,
   Banknote,
   BookMarked,
+  Library,
   Activity,
   CheckSquare,
   ChefHat,
@@ -51,6 +52,12 @@ export const financeNav: NavItem[] = [
     href: "/finance/ledgers",
     permission: "ledger",
     icon: BookMarked,
+  },
+  {
+    labelKey: "nav.ledgerV2",
+    href: "/finance/ledger-v2",
+    permission: "ledger",
+    icon: Library,
   },
   {
     labelKey: "nav.cashflow",

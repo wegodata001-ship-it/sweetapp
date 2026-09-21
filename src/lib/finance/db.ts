@@ -9,6 +9,7 @@ import type {
   LedgerOverviewRow,
 } from "@/lib/finance/types";
 import type { FinanceDocumentPayload } from "@/lib/finance/document-payload";
+import type { LedgerV2CustomerRow, LedgerV2Detail, LedgerV2Totals } from "@/lib/finance/ledger-v2";
 
 export async function fetchEntitiesByType(entityType: EntityType): Promise<FinanceEntityRow[]> {
   const res = await fetch(`/api/ledger/entities?type=${encodeURIComponent(entityType)}`, {
@@ -130,6 +131,72 @@ export async function fetchLedgerForFilters(params: {
     if (e instanceof Error) throw e;
     throw new Error("ledger movements failed");
   }
+}
+
+export async function fetchLedgerV2Overview(params: {
+  q?: string;
+  side?: "all" | "DEBT" | "CREDIT" | "ZERO";
+  dateFrom?: string | null;
+  dateTo?: string | null;
+  page?: number;
+  pageSize?: number;
+}): Promise<{
+  totals: LedgerV2Totals;
+  total: number;
+  page: number;
+  pageSize: number;
+  rows: LedgerV2CustomerRow[];
+}> {
+  const q = new URLSearchParams();
+  if (params.q?.trim()) q.set("q", params.q.trim());
+  if (params.side && params.side !== "all") q.set("side", params.side);
+  if (params.dateFrom) q.set("dateFrom", params.dateFrom);
+  if (params.dateTo) q.set("dateTo", params.dateTo);
+  if (params.page) q.set("page", String(params.page));
+  if (params.pageSize) q.set("pageSize", String(params.pageSize));
+  const res = await fetch(`/api/ledger/v2/overview?${q}`, { credentials: "same-origin", cache: "no-store" });
+  const j = (await res.json()) as {
+    ok?: boolean;
+    error?: string;
+    totals?: LedgerV2Totals;
+    total?: number;
+    page?: number;
+    pageSize?: number;
+    rows?: LedgerV2CustomerRow[];
+  };
+  if (!res.ok || !j.ok || !j.totals) {
+    throw new Error(j.error || "ledger v2 overview failed");
+  }
+  return {
+    totals: j.totals,
+    total: j.total ?? 0,
+    page: j.page ?? 1,
+    pageSize: j.pageSize ?? 25,
+    rows: j.rows ?? [],
+  };
+}
+
+export async function fetchLedgerV2Customer(params: {
+  id: string;
+  dateFrom?: string | null;
+  dateTo?: string | null;
+}): Promise<LedgerV2Detail> {
+  const q = new URLSearchParams();
+  if (params.dateFrom) q.set("dateFrom", params.dateFrom);
+  if (params.dateTo) q.set("dateTo", params.dateTo);
+  const res = await fetch(`/api/ledger/v2/customers/${encodeURIComponent(params.id)}?${q}`, {
+    credentials: "same-origin",
+    cache: "no-store",
+  });
+  const j = (await res.json()) as {
+    ok?: boolean;
+    error?: string;
+    detail?: LedgerV2Detail;
+  };
+  if (!res.ok || !j.ok || !j.detail) {
+    throw new Error(j.error || "ledger v2 customer failed");
+  }
+  return j.detail;
 }
 
 export async function fetchCashOpeningBalance(): Promise<number> {
