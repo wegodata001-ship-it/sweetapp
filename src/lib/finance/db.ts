@@ -83,6 +83,10 @@ export async function fetchLedgerForFilters(params: {
   openDebt: number;
   totalCredit: number;
   balance: number;
+  signedBalance: number;
+  debt: number;
+  credit: number;
+  side: "DEBT" | "CREDIT" | "ZERO";
 }> {
   const q = new URLSearchParams({
     entityType: params.entityType,
@@ -101,17 +105,26 @@ export async function fetchLedgerForFilters(params: {
       openDebt?: number;
       totalCredit?: number;
       balance?: number;
+      signedBalance?: number;
+      debt?: number;
+      credit?: number;
+      side?: "DEBT" | "CREDIT" | "ZERO";
     };
     if (!j.ok) {
       throw new Error("ledger movements failed");
     }
+    const signed = j.signedBalance ?? j.balance ?? 0;
     return {
       opening: j.opening ?? 0,
       movements: j.movements ?? [],
       entityName: j.entityName ?? "",
-      openDebt: j.openDebt ?? 0,
+      openDebt: j.debt ?? j.openDebt ?? 0,
       totalCredit: j.totalCredit ?? 0,
-      balance: j.balance ?? j.openDebt ?? 0,
+      balance: signed,
+      signedBalance: signed,
+      debt: j.debt ?? j.openDebt ?? 0,
+      credit: j.credit ?? 0,
+      side: j.side ?? (signed > 0 ? "DEBT" : signed < 0 ? "CREDIT" : "ZERO"),
     };
   } catch (e) {
     if (e instanceof Error) throw e;

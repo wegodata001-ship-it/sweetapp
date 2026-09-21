@@ -18,7 +18,6 @@ import type { EntityType, FinanceEntityRow, LedgerMovementView, LedgerOverviewRo
 import { formatShekel } from "@/lib/format-shekel";
 import { translateDocCategory } from "@/lib/i18n/status-keys";
 import type { TranslateFn } from "@/lib/i18n/translator";
-import { withLedgerRunningBalances } from "@/lib/running-calcs";
 
 function entityLabel(t: TranslateFn, type: EntityType): string {
   if (type === "customer") return t("entities.customer");
@@ -187,8 +186,12 @@ function LedgersPageInner() {
   });
 
   const rowsWithBalance = useMemo(
-    () => withLedgerRunningBalances(detailMovements, detailOpening),
-    [detailMovements, detailOpening],
+    () =>
+      detailMovements.map((row) => ({
+        ...row,
+        balance: row.open_balance ?? 0,
+      })),
+    [detailMovements],
   );
 
   const applyFilters = () => {
@@ -266,7 +269,7 @@ function LedgersPageInner() {
       (acc, row) => ({
         debit: acc.debit + row.total_debit,
         credit: acc.credit + row.total_credit,
-        open: acc.open + Math.max(0, row.open_balance),
+        open: acc.open + (row.signed_balance ?? row.open_balance),
       }),
       { debit: 0, credit: 0, open: 0 },
     );
@@ -302,11 +305,23 @@ function LedgersPageInner() {
   };
 
   const renderOpenBalanceCell = (row: LedgerOverviewRow) => {
-    const v = Math.max(0, row.open_balance);
-    if (v <= 0) {
-      return <span className="font-black text-emerald-700">{formatShekel(0)}</span>;
+    const signed = row.signed_balance ?? row.open_balance;
+    const side = row.side ?? (signed > 0 ? "DEBT" : signed < 0 ? "CREDIT" : "ZERO");
+    if (side === "CREDIT") {
+      return (
+        <span className="font-black text-emerald-700">
+          {t("ledgers.openAsCredit", { amount: formatShekel(row.credit ?? Math.abs(signed)) })}
+        </span>
+      );
     }
-    return <span className="font-black text-amber-800">{formatShekel(v)}</span>;
+    if (side === "ZERO") {
+      return <span className="font-black text-slate-700">{t("ledgers.openAsZero")}</span>;
+    }
+    return (
+      <span className="font-black text-amber-800">
+        {t("ledgers.openAsDebt", { amount: formatShekel(row.debt ?? signed) })}
+      </span>
+    );
   };
 
   return (
@@ -687,7 +702,11 @@ function LedgersPageInner() {
                       <td className={`${tdClass} font-bold text-slate-900`}>{row.credit ? formatShekel(row.credit) : "—"}</td>
                       <td
                         className={`${tdClass} font-black ${
-                          row.balance > 1e-6 ? "text-amber-900" : "text-slate-950"
+                          row.balance > 1e-6
+                            ? "text-amber-900"
+                            : row.balance < -1e-6
+                              ? "text-emerald-700"
+                              : "text-slate-950"
                         }`}
                       >
                         {formatShekel(row.balance)}

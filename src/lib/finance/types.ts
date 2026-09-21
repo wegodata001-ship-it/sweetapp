@@ -8,8 +8,12 @@ export type LedgerOverviewRow = {
   id: string;
   name: string;
   opening_balance: number;
-  /** לקוח: מחושב בזמן אמת ממסמכי הכנסה פחות תשלומים; ספק/עובד: יתרה נטו מכרטסת ידנית */
+  /** Signed closing balance from ledger-engine (negative = credit). */
   open_balance: number;
+  signed_balance?: number;
+  debt?: number;
+  credit?: number;
+  side?: "DEBT" | "CREDIT" | "ZERO";
   total_debit: number;
   total_credit: number;
   movement_count: number;
