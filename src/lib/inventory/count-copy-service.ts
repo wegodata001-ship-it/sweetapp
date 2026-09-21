@@ -214,7 +214,7 @@ export function resolveCopyProductName(
   );
 }
 
-/** טקסט מסודר להדבקה ב־WhatsApp / מייל */
+/** טקסט מסודר להדבקה ב־WhatsApp / מייל — שם - סה״כ, בלי סטטוס ובלי כמות נספרת */
 export function formatCountSessionCopyText(
   session: CountCopySession,
   language?: string | null,
@@ -225,14 +225,9 @@ export function formatCountSessionCopyText(
   ].join("\n");
   const body = session.products.map((p, index) => {
     const name = resolveCopyProductName(p, language);
-    const total = `${totalCopyLabel(language)}: ${formatCopyQuantity(p.totalQuantity)}`;
-    const status =
-      p.quantity === null
-        ? notCountedCopyLabel(language)
-        : `${formatCopyQuantity(p.quantity)}\n${countedCopyLabel(language)}`;
-    return `${index + 1}. ${name}\n${total}\n${status}`;
+    return `${index + 1}. ${name} - ${formatCopyQuantity(p.totalQuantity)}`;
   });
-  return [header, ...body].join("\n\n");
+  return [header, body.join("\n")].filter(Boolean).join("\n\n");
 }
 
 export function formatAllCountSessionsCopyText(

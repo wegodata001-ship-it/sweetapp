@@ -270,34 +270,18 @@ export function CountCopyModal({ open, onClose, locations }: Props) {
                         </p>
                       </div>
                     </div>
-                    <ul className="max-h-[min(28rem,55dvh)] space-y-2 overflow-y-auto overflow-x-hidden overscroll-contain px-3 py-2">
+                    <ul className="max-h-[min(28rem,55dvh)] space-y-0.5 overflow-y-auto overflow-x-hidden overscroll-contain px-3 py-2">
                       {session.products.map((product, index) => {
                         const name = resolveCopyProductName(product, locale);
-                        const countedQty = product.quantity;
-                        const counted = countedQty !== null;
                         return (
                           <li
                             key={product.inventoryProductId}
-                            className="rounded-xl bg-white px-3 py-2.5 ring-1 ring-[#e7ecf5]"
+                            className="break-words px-1 py-1 text-sm font-bold leading-5 text-slate-900"
                           >
-                            <p className="break-words text-sm font-black leading-5 text-slate-900">
-                              {index + 1}. {name}
-                            </p>
-                            <p className="mt-1 text-[15px] font-black tabular-nums leading-6 text-slate-900">
-                              {tC("total")}: {formatCopyQuantity(product.totalQuantity)}
-                            </p>
-                            {counted ? (
-                              <p className="mt-0.5 break-words text-xs font-bold tabular-nums text-slate-600">
-                                {tC("countedQty")}: {formatCopyQuantity(countedQty)}
-                              </p>
-                            ) : null}
-                            <p
-                              className={`mt-0.5 text-xs font-bold ${
-                                counted ? "text-emerald-700" : "text-slate-500"
-                              }`}
-                            >
-                              {counted ? tC("counted") : tC("notCounted")}
-                            </p>
+                            {index + 1}. {name} -{" "}
+                            <span className="tabular-nums">
+                              {formatCopyQuantity(product.totalQuantity)}
+                            </span>
                           </li>
                         );
                       })}

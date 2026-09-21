@@ -64,12 +64,11 @@ describe("count-copy-service formatters", () => {
 
     const text = formatCountSessionCopyText(session, "ar");
     assert.match(text, /^عجوت\n13\/8\n\n/);
-    assert.match(text, /1\. ريجولاخ/);
-    assert.match(text, /الإجمالي: 15/);
-    assert.match(text, /15\nتم الجرد/);
-    assert.match(text, /2\. كروسون عادي/);
-    assert.match(text, /الإجمالي: 0/);
-    assert.match(text, /\n0\nتم الجرد/);
+    assert.match(text, /1\. ريجولاخ - 15/);
+    assert.match(text, /2\. كروسون عادي - 0/);
+    assert.doesNotMatch(text, /الإجمالي/);
+    assert.doesNotMatch(text, /تم الجرد/);
+    assert.doesNotMatch(text, /لم يتم الجرد/);
     assert.equal(formatCopyQuantity(0), "0");
     assert.equal(resolveCopyProductName(session.products[0]!, "ar"), "ريجولاخ");
   });
@@ -171,9 +170,9 @@ describe("count-copy location products + not counted", () => {
       },
       "he",
     );
-    assert.match(text, /1\. B/);
-    assert.match(text, /סה״כ: 0/);
-    assert.match(text, /\n0\nנספר/);
+    assert.match(text, /1\. B - 0/);
+    assert.doesNotMatch(text, /סה״כ/);
+    assert.doesNotMatch(text, /נספר/);
     assert.doesNotMatch(text, /לא נספר/);
   });
 
@@ -204,12 +203,11 @@ describe("count-copy location products + not counted", () => {
       },
       "ar",
     );
-    assert.match(text, /1\. A/);
-    assert.match(text, /2\. B/);
-    assert.match(text, /3\. C/);
-    assert.match(text, /لم يتم الجرد/);
-    assert.match(text, /تم الجرد/);
-    assert.doesNotMatch(text, /3\. C\nالإجمالي: 0\n0/);
+    assert.match(text, /1\. A - 0/);
+    assert.match(text, /2\. B - 0/);
+    assert.match(text, /3\. C - 0/);
+    assert.doesNotMatch(text, /لم يتم الجرد/);
+    assert.doesNotMatch(text, /تم الجرد/);
   });
 
   it("TEST E: copy order matches count-screen order (not alphabetical)", () => {
@@ -219,6 +217,12 @@ describe("count-copy location products + not counted", () => {
       orderedProductIds: ordered,
       productsById,
       explicitCountsByProductId: new Map([
+        ["A", 1],
+        ["C", 2],
+        ["B", 3],
+        ["D", 4],
+      ]),
+      totalsByProductId: new Map([
         ["A", 1],
         ["C", 2],
         ["B", 3],
@@ -242,7 +246,7 @@ describe("count-copy location products + not counted", () => {
       "en",
     );
     const lines = text.split("\n").filter((l) => /^\d+\./.test(l));
-    assert.deepEqual(lines, ["1. A", "2. C", "3. B", "4. D"]);
+    assert.deepEqual(lines, ["1. A - 1", "2. C - 2", "3. B - 3", "4. D - 4"]);
   });
 
   it("TEST F: inactive / not on ordered list is omitted", () => {
@@ -321,8 +325,9 @@ describe("count-copy location products + not counted", () => {
       })),
     };
     const text = formatAllCountSessionsCopyText([session], "he");
-    assert.match(text, /23\. P23/);
-    assert.match(text, /לא נספר/);
+    assert.match(text, /23\. P23 - 0/);
+    assert.doesNotMatch(text, /לא נספר/);
+    assert.doesNotMatch(text, /נספר/);
     assert.equal([...text.matchAll(/^\d+\./gm)].length, 23);
   });
 
@@ -359,9 +364,120 @@ describe("count-copy location products + not counted", () => {
       },
       "ar",
     );
-    assert.match(text, /مقروطة\nالإجمالي: 5\nلم يتم الجرد/);
-    assert.match(text, /كروسون\nالإجمالي: 12\nلم يتم الجرد/);
-    assert.match(text, /تفاح\nالإجمالي: 0\nلم يتم الجرد/);
-    assert.doesNotMatch(text, /مقروطة\nالإجمالي: 0\nلم يتم الجرد/);
+    assert.match(text, /1\. مقروطة - 5/);
+    assert.match(text, /2\. كروسون - 12/);
+    assert.match(text, /3\. تفاح - 0/);
+    assert.doesNotMatch(text, /لم يتم الجرد/);
+    assert.doesNotMatch(text, /تم الجرد/);
+    assert.doesNotMatch(text, /الإجمالي/);
+  });
+
+  it("copy uses on-screen totalQuantity, never counted quantity or status labels", () => {
+    const session: CountCopySession = {
+      id: "s",
+      sessionNumber: 1,
+      locationId: "loc",
+      locationName: "قائمة البضاعة نص البلد (عدي ذياب)",
+      countDate: new Date(2026, 8, 14).toISOString(),
+      createdAt: new Date().toISOString(),
+      products: [
+        {
+          inventoryProductId: "p1",
+          name: "سدر مبرومة",
+          nameHe: "سدر مبرومة",
+          nameAr: "سدر مبرومة",
+          nameEn: null,
+          quantity: 7.5,
+          totalQuantity: 4,
+        },
+        {
+          inventoryProductId: "p2",
+          name: "קקקוווו",
+          nameHe: "קקקוווו",
+          nameAr: "קקקוווו",
+          nameEn: null,
+          quantity: 11,
+          totalQuantity: 25,
+        },
+        {
+          inventoryProductId: "p3",
+          name: "شوال جبنة شغاله",
+          nameHe: "شوال جبنة شغاله",
+          nameAr: "شوال جبنة شغاله",
+          nameEn: null,
+          quantity: 0,
+          totalQuantity: 0,
+        },
+        {
+          inventoryProductId: "p4",
+          name: "كيس عجيب شماريم",
+          nameHe: "كيس عجيب شماريم",
+          nameAr: "كيس عجيب شماريم",
+          nameEn: null,
+          quantity: null,
+          totalQuantity: 106,
+        },
+      ],
+    };
+    const text = formatCountSessionCopyText(session, "he");
+    assert.equal(
+      text,
+      [
+        "قائمة البضاعة نص البلد (عدي ذياب)",
+        "14/9",
+        "",
+        "1. سدر مبرومة - 4",
+        "2. קקקוווו - 25",
+        "3. شوال جبنة شغاله - 0",
+        "4. كيس عجيب شماريم - 106",
+      ].join("\n"),
+    );
+    assert.doesNotMatch(text, /7\.5/);
+    assert.doesNotMatch(text, /11/);
+    assert.doesNotMatch(text, /סה״כ/);
+    assert.doesNotMatch(text, /נספר/);
+    assert.doesNotMatch(text, /לא נספר/);
+  });
+
+  it("copies all 34 products in displayOrder using totalQuantity", () => {
+    const ordered = Array.from({ length: 34 }, (_, i) => `p${i + 1}`);
+    const rows = buildCopyProductRows({
+      orderedProductIds: ordered,
+      productsById: new Map(
+        ordered.map((id, i) => [
+          id,
+          { name: `P${i + 1}`, nameHe: `P${i + 1}`, nameAr: `P${i + 1}`, nameEn: `P${i + 1}` },
+        ]),
+      ),
+      explicitCountsByProductId: new Map(
+        ordered.slice(0, 20).map((id, i) => [id, i === 0 ? 7.5 : i]),
+      ),
+      totalsByProductId: new Map(ordered.map((id, i) => [id, i === 0 ? 4 : i])),
+    });
+    assert.equal(rows.length, 34);
+    assert.equal(rows[0]!.quantity, 7.5);
+    assert.equal(rows[0]!.totalQuantity, 4);
+    assert.equal(rows[20]!.quantity, null);
+    assert.equal(rows[20]!.totalQuantity, 20);
+    const text = formatCountSessionCopyText(
+      {
+        id: "s",
+        sessionNumber: 1,
+        locationId: "loc",
+        locationName: "Shelf",
+        countDate: new Date(2026, 8, 14).toISOString(),
+        createdAt: new Date().toISOString(),
+        products: rows,
+      },
+      "he",
+    );
+    const lines = text.split("\n").filter((l) => /^\d+\./.test(l));
+    assert.equal(lines.length, 34);
+    assert.equal(lines[0], "1. P1 - 4");
+    assert.equal(lines[33], "34. P34 - 33");
+    assert.doesNotMatch(text, /7\.5/);
+    assert.doesNotMatch(text, /נספר/);
+    assert.doesNotMatch(text, /לא נספר/);
+    assert.doesNotMatch(text, /סה״כ/);
   });
 });
