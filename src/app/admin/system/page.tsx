@@ -3,6 +3,7 @@
 import { AlertTriangle, CheckCircle2, Loader2, Mail, RefreshCw, Settings } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
+import { BusinessDataExportCard } from "@/components/admin/business-data-export-card";
 import { SystemNotificationRecipientsPanel } from "@/components/admin/system-notification-recipients-panel";
 import type { EmailDiagnostics } from "@/lib/email/diagnostics";
 
@@ -103,11 +104,13 @@ export default function AdminSystemPage() {
           <Settings className="h-4 w-4" aria-hidden />
           מנהל מערכת
         </p>
-        <h1 className="mt-1 text-2xl font-black text-slate-950">הגדרות מערכת — מייל והתראות</h1>
+        <h1 className="mt-1 text-2xl font-black text-slate-950">הגדרות מערכת</h1>
         <p className="mt-1 text-sm text-slate-600">
-          אבחון ספק המייל (Resend), שליחת בדיקה, וניסיון שליחה מחדש להתראות שנכשלו.
+          ייצוא נתוני העסק, אבחון ספק המייל (Resend), שליחת בדיקה, וניסיון שליחה מחדש להתראות שנכשלו.
         </p>
       </header>
+
+      <BusinessDataExportCard />
 
       {testResult ? (
         <p className="rounded-xl bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-800 ring-1 ring-slate-200">

@@ -1236,7 +1236,7 @@ model User {
   passwordUpdatedAt            DateTime?
   /// טלפון אישי לעובד (לעתיד: שחזור סיסמה דרך OTP)
   phone                        String?
-  /// חיבור יחיד — JWT.sid חייב להתאים; login חדש מחליף
+  /// Session binding: UUID בודד (משתמש רגיל) או JSON array של UUIDs (ADMIN/SUPER_ADMIN)
   currentSessionId             String?
   lastLoginAt                  DateTime?
   lastLoginIp                  String?

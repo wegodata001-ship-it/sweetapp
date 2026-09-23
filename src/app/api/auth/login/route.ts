@@ -109,7 +109,10 @@ export async function POST(req: NextRequest) {
       user.role as "EMPLOYEE" | "ADMIN" | "SUPER_ADMIN",
     );
     const clientMeta = requestClientMeta(req.headers);
-    const sessionId = await createUserSession(user.id, clientMeta);
+    const sessionId = await createUserSession(user.id, clientMeta, {
+      role: user.role,
+      allowMultiple: user.role === "ADMIN" || user.role === "SUPER_ADMIN",
+    });
 
     const token = await signSessionToken({
       sub: user.id,

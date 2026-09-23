@@ -1827,6 +1827,20 @@
           "serverError": "Server errors",
           "integrationFailure": "Integration errors"
         }
+      },
+      "businessExport": {
+        "sectionTitle": "Data export and backup",
+        "cardTitle": "Download all business data",
+        "cardBody": "Download a full copy of the business data, including customers, suppliers, employees, finance, inventory, tasks, documents, and activity history.",
+        "download": "Download all data",
+        "confirmTitle": "Start export?",
+        "confirmBody": "The system will prepare a full data package. This does not delete or change any information.",
+        "cancel": "Cancel",
+        "start": "Start export",
+        "preparing": "Preparing the data package…",
+        "preparingHint": "This does not delete or change any information. It may take a few minutes.",
+        "done": "Download started",
+        "failed": "Export failed"
       }
     },
     "users": {

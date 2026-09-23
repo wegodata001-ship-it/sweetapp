@@ -12,6 +12,8 @@
     "test:pdf-pipeline": "tsx src/lib/document-scan/pdf-pipeline.test.ts",
     "test:supplier-price-compare": "tsx src/lib/procurement/supplier-product-match.test.ts",
     "test:daily-count-report": "tsx src/lib/inventory/daily-count-report.test.ts",
+    "test:handover-export": "tsx --test src/lib/handover/handover-export.test.ts src/lib/handover/business-export.test.ts",
+    "handover:export": "tsx scripts/run-client-handover-export.ts",
     "icons:generate": "node scripts/generate-brand-icons.mjs",
     "postinstall": "prisma generate"
   },

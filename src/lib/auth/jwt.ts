@@ -8,7 +8,7 @@ export type SessionJwtPayload = {
   email: string;
   role: UserRole;
   permissions: string[];
-  /** Session ID — חייב להתאים ל-User.currentSessionId */
+  /** Session ID — חייב להיות ברשימת ה-sessions הפעילים של המשתמש */
   sid: string;
   /** When true, middleware blocks the app until the user changes password. */
   mustChangePassword?: boolean;
