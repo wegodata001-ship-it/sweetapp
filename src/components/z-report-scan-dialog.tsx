@@ -233,8 +233,6 @@ function ZReportScanDialogContent({
       <FieldRow label={t("register.zreport.cashTaxable")} field={f.cashTaxable} t={t} />
       <FieldRow label={t("register.zreport.cashExempt")} field={f.cashExempt} t={t} />
       <FieldRow label={t("register.zreport.creditTaxable")} field={f.creditTaxable} t={t} />
-      <FieldRow label={t("register.zreport.creditExempt")} field={f.creditExempt} t={t} />
-      <FieldRow label={t("register.zreport.transfers")} field={f.transfers} t={t} />
       <FieldRow label={t("register.zreport.grandTotal")} field={f.grandTotal} t={t} />
     </>
   );

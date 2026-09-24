@@ -52,7 +52,7 @@ function schemaText(): string {
 describe("catalog coverage", () => {
   it("covers every Prisma model except PasswordResetToken", () => {
     const prismaModels = prismaModelsFromSchema(schemaText());
-    assert.equal(prismaModels.length, 71);
+    assert.equal(prismaModels.length, 72);
     const expected = prismaModels.filter((m) => !EXCLUDED_MODELS.includes(m as "PasswordResetToken"));
     const covered = new Set(clientModelNames());
     assert.equal(covered.size, expected.length);
@@ -60,7 +60,7 @@ describe("catalog coverage", () => {
       assert.ok(covered.has(name), `missing client model ${name}`);
     }
     assert.equal(covered.has("PasswordResetToken"), false);
-    assert.equal(CLIENT_MODELS.length, 70);
+    assert.equal(CLIENT_MODELS.length, 71);
     assert.equal(APPROVED_MAP_CLIENT_COUNT, 69);
   });
 
@@ -342,7 +342,7 @@ describe("zip + checksum", () => {
 
     const customerJson = JSON.parse(await zip.file(`${PACKAGE_ROOT}/TECHNICAL_BACKUP/Customer.json`)!.async("string"));
     assert.equal(customerJson[0].id, "cust-1");
-    assert.equal(pkg.validation.coveredClientModels, 70);
+    assert.equal(pkg.validation.coveredClientModels, 71);
     assert.equal(pkg.validation.passwordResetTokensExcluded, true);
     assert.equal(pkg.validation.passwordsExcluded, true);
   });

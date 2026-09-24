@@ -1,6 +1,6 @@
 /**
  * Client handover catalog.
- * 71 Prisma models − PasswordResetToken = 70 exportable client models.
+ * 72 Prisma models − PasswordResetToken = 71 exportable client models.
  * Approved map said 69 (off-by-one). Tests cover every remaining model.
  */
 
@@ -71,6 +71,7 @@ export const CLIENT_MODELS: ClientModelDef[] = [
   { model: "UserPermission", prisma: "userPermission", idField: "id", folder: "USERS", amountFields: [], fileRefs: [], excludeFields: [] },
   { model: "LedgerEntry", prisma: "ledgerEntry", idField: "id", folder: "FINANCE", amountFields: ["debit", "credit"], fileRefs: [], excludeFields: [] },
   { model: "FinancialDocument", prisma: "financialDocument", idField: "id", folder: "FINANCE", amountFields: ["totalAmount", "paidAmount", "remainingAmount", "depositAmount"], fileRefs: [{ pathField: "pdfStoragePath", fallbackBucket: "reports" }], excludeFields: [] },
+  { model: "ManualReceipt", prisma: "manualReceipt", idField: "id", folder: "FINANCE", amountFields: ["amountBeforeVat", "vatAmount", "totalAmount", "vatDeductibleAmount"], fileRefs: [{ pathField: "attachmentPath", bucketField: "attachmentBucket", fallbackBucket: "source" }], excludeFields: [] },
   { model: "FinancialDocumentItem", prisma: "financialDocumentItem", idField: "id", folder: "FINANCE", amountFields: ["unitPrice", "total"], fileRefs: [], excludeFields: [] },
   { model: "Payment", prisma: "payment", idField: "id", folder: "FINANCE", amountFields: ["amount"], fileRefs: [], excludeFields: [] },
   { model: "CheckPayment", prisma: "checkPayment", idField: "id", folder: "FINANCE", amountFields: ["amount"], fileRefs: [], excludeFields: [] },
@@ -158,6 +159,7 @@ export const FK_RULES: FkRule[] = [
   { model: "EmployeeTask", field: "employeeId", targetModel: "Employee", targetField: "id", optional: false },
   { model: "TaskFile", field: "groupId", targetModel: "TaskGroup", targetField: "id", optional: false },
   { model: "DocumentUpload", field: "financialDocumentId", targetModel: "FinancialDocument", targetField: "id", optional: true },
+  { model: "ManualReceipt", field: "linkedFinancialDocumentId", targetModel: "FinancialDocument", targetField: "id", optional: true },
   { model: "CashFlowEntry", field: "customerId", targetModel: "Customer", targetField: "id", optional: true },
   { model: "CashFlowEntry", field: "documentId", targetModel: "FinancialDocument", targetField: "id", optional: true },
   { model: "CashFlowEntry", field: "paymentId", targetModel: "Payment", targetField: "id", optional: true },

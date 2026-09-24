@@ -35,6 +35,7 @@ import {
   type ZReportPayload,
 } from "@/lib/finance/document-payload";
 import { IncomeExpenseFields } from "@/app/finance/register/income-expense-fields";
+import { ManualReceiptPanel } from "@/components/finance/manual-receipt-panel";
 import { useToast } from "@/components/toast-provider";
 import { useI18n } from "@/components/i18n-provider";
 import {
@@ -47,7 +48,7 @@ import {
 import { REGISTER_LABEL_KEYS as LK } from "@/lib/i18n/register-label-keys";
 import { formatShekel, parseNum } from "@/lib/format-shekel";
 
-type TabId = "income" | "zreport" | "expenses";
+type TabId = "income" | "zreport" | "expenses" | "manualReceipt";
 type ModalTone = "income" | "expense" | "neutral" | "error";
 type OperationModalState = {
   type: "success" | "error";
@@ -88,6 +89,7 @@ function FinanceRegisterPageInner() {
         { id: "income" as const, label: t(LK.tabEvent) },
         { id: "zreport" as const, label: t(LK.tabZreport) },
         { id: "expenses" as const, label: t(LK.tabExpenses) },
+        { id: "manualReceipt" as const, label: t("register.tabs.manualReceipt") },
       ],
     [t, locale],
   );
@@ -156,6 +158,8 @@ function FinanceRegisterPageInner() {
   useEffect(() => {
     if (tabParam === "expenses") {
       setActiveTab("expenses");
+    } else if (tabParam === "manualReceipt") {
+      setActiveTab("manualReceipt");
     }
   }, [tabParam]);
 
@@ -256,10 +260,6 @@ function FinanceRegisterPageInner() {
     else setCashExempt(doc.cashExempt ? String(doc.cashExempt) : "");
     if (sf?.creditTaxable.detected) setCreditTaxable(String(sf.creditTaxable.value ?? 0));
     else setCreditTaxable(doc.creditTaxable ? String(doc.creditTaxable) : "");
-    if (sf?.creditExempt.detected) setCreditExempt(String(sf.creditExempt.value ?? 0));
-    else setCreditExempt(doc.creditExempt ? String(doc.creditExempt) : "");
-    if (sf?.transfers.detected) setTransfers(String(sf.transfers.value ?? 0));
-    else setTransfers(doc.transfers ? String(doc.transfers) : "");
     setZReceiptFileUrl(doc.receiptFileUrl ?? null);
     setZReceiptFileName(doc.receiptFileName ?? null);
     setZReceiptStoragePath(doc.receiptStoragePath ?? null);
@@ -454,15 +454,10 @@ function FinanceRegisterPageInner() {
     };
   }, [paymentCustomerId]);
 
-  const zGrandTotal = useMemo(() => {
-    return (
-      parseNum(cashTaxable) +
-      parseNum(cashExempt) +
-      parseNum(creditTaxable) +
-      parseNum(creditExempt) +
-      parseNum(transfers)
-    );
-  }, [cashTaxable, cashExempt, creditTaxable, creditExempt, transfers]);
+  const zGrandTotal = useMemo(
+    () => parseNum(cashTaxable) + parseNum(cashExempt) + parseNum(creditTaxable),
+    [cashTaxable, cashExempt, creditTaxable],
+  );
 
   const [archiveFeedback, setArchiveFeedback] = useState<ReactNode>(null);
 
@@ -1350,7 +1345,7 @@ function FinanceRegisterPageInner() {
           </div>
         )}
 
-        <div className="mt-3 grid gap-2 sm:grid-cols-3 sm:gap-3">
+        <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4 sm:gap-3">
           {tabs.map((tab) => {
             const isActive = activeTab === tab.id;
             return (
@@ -1481,7 +1476,7 @@ function FinanceRegisterPageInner() {
             </label>
           </div>
 
-          <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-3">
             <label className={labelClass}>
               {t("register.zreport.cashTaxable")}
               <input
@@ -1515,28 +1510,6 @@ function FinanceRegisterPageInner() {
                 className={inputClass}
               />
             </label>
-            <label className={labelClass}>
-              {t("register.zreport.creditExempt")}
-              <input
-                type="number"
-                min={0}
-                step="0.01"
-                value={creditExempt}
-                onChange={(e) => setCreditExempt(e.target.value)}
-                className={inputClass}
-              />
-            </label>
-            <label className={`sm:col-span-2 lg:col-span-1 ${labelClass}`}>
-              {t("register.zreport.transfers")}
-              <input
-                type="number"
-                min={0}
-                step="0.01"
-                value={transfers}
-                onChange={(e) => setTransfers(e.target.value)}
-                className={inputClass}
-              />
-            </label>
           </div>
 
           <div className="mt-3 rounded-[16px] border border-emerald-200 bg-emerald-50/70 px-4 py-3">
@@ -1547,19 +1520,6 @@ function FinanceRegisterPageInner() {
           </div>
 
           <div className="mt-3 grid gap-2 sm:flex sm:flex-wrap sm:gap-3">
-            {editingDocId && editingKind === "zreport" ? (
-              <button
-                type="button"
-                disabled={publishing || openingDocPdf}
-                onClick={() => {
-                  if (editingDocId) void openOrCreateDocumentPdf(editingDocId);
-                }}
-                className={`${btnPrimary} gap-2 border border-blue-200 bg-blue-50 text-blue-950 hover:bg-blue-100`}
-              >
-                {openingDocPdf ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : null}
-                {t("register.actions.generateReportPdf")}
-              </button>
-            ) : null}
             <button
               type="button"
               onClick={resetZ}
@@ -1594,6 +1554,19 @@ function FinanceRegisterPageInner() {
                 t("register.actions.saveZ")
               )}
             </button>
+            {editingDocId && editingKind === "zreport" ? (
+              <button
+                type="button"
+                disabled={publishing || openingDocPdf}
+                onClick={() => {
+                  if (editingDocId) void openOrCreateDocumentPdf(editingDocId);
+                }}
+                className={`${btnPrimary} gap-2 border border-blue-200 bg-blue-50 text-blue-950 hover:bg-blue-100`}
+              >
+                {openingDocPdf ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : null}
+                {t("register.actions.generateReportPdf")}
+              </button>
+            ) : null}
           </div>
         </section>
       )}
@@ -1674,6 +1647,8 @@ function FinanceRegisterPageInner() {
           </div>
         </>
       )}
+
+      {activeTab === "manualReceipt" && <ManualReceiptPanel />}
 
       {operationModal ? (
         <OperationResultModal

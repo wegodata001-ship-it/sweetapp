@@ -64,9 +64,7 @@ function sumParts(fields: ZReportScanFields): number {
   return (
     (fields.cashTaxable.value ?? 0) +
     (fields.cashExempt.value ?? 0) +
-    (fields.creditTaxable.value ?? 0) +
-    (fields.creditExempt.value ?? 0) +
-    (fields.transfers.value ?? 0)
+    (fields.creditTaxable.value ?? 0)
   );
 }
 
@@ -98,7 +96,7 @@ function toDto(
   },
 ): ScannedZReportDto {
   const cashTotal = (fields.cashTaxable.value ?? 0) + (fields.cashExempt.value ?? 0);
-  const creditTotal = (fields.creditTaxable.value ?? 0) + (fields.creditExempt.value ?? 0);
+  const creditTotal = fields.creditTaxable.value ?? 0;
   const partsTotal = sumParts(fields);
   const grandTotal = fields.grandTotal.value ?? partsTotal;
 
@@ -108,8 +106,8 @@ function toDto(
     cashTaxable: fields.cashTaxable.value ?? 0,
     cashExempt: fields.cashExempt.value ?? 0,
     creditTaxable: fields.creditTaxable.value ?? 0,
-    creditExempt: fields.creditExempt.value ?? 0,
-    transfers: fields.transfers.value ?? 0,
+    creditExempt: 0,
+    transfers: 0,
     grandTotal,
     cashTotal,
     creditTotal,
