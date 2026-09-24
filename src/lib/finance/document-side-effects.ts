@@ -179,8 +179,11 @@ function cashFlowMagnitude(raw: number): number {
   return raw >= 0 ? raw : -raw;
 }
 
-export async function replaceCashFlowForDocument(documentId: string): Promise<void> {
-  const doc = await prisma.financialDocument.findUnique({
+export async function replaceCashFlowForDocument(
+  documentId: string,
+  db: Prisma.TransactionClient | typeof prisma = prisma,
+): Promise<void> {
+  const doc = await db.financialDocument.findUnique({
     where: { id: documentId },
     include: {
       customer: { select: { name: true } },
@@ -194,7 +197,7 @@ export async function replaceCashFlowForDocument(documentId: string): Promise<vo
     return;
   }
 
-  await prisma.cashFlowEntry.deleteMany({
+  await db.cashFlowEntry.deleteMany({
     where: {
       isDirect: false,
       OR: [{ documentId }, { relatedDocumentId: documentId }],
@@ -380,7 +383,7 @@ export async function replaceCashFlowForDocument(documentId: string): Promise<vo
   }
 
   if (data.length) {
-    await prisma.cashFlowEntry.createMany({ data });
+    await db.cashFlowEntry.createMany({ data });
   }
 }
 

@@ -1,8 +1,10 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { Banknote, RefreshCw, TrendingDown, TrendingUp, Wallet } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Banknote, RefreshCw, TrendingDown, TrendingUp, Users, Wallet } from "lucide-react";
 import { CountUp } from "@/components/count-up";
+import { CustomerDebtModal, FinancialSummaryModal } from "@/components/dashboard/dashboard-finance-modals";
 import { useI18n } from "@/components/i18n-provider";
 import { StaffAlertsBell } from "@/components/staff-alerts-bell";
 import type { DashboardHeroMetrics } from "@/lib/dashboard/financial-engine";
@@ -23,12 +25,14 @@ function MiniKpi({
   value,
   sub,
   icon: Icon,
+  onClick,
 }: {
   variant: MiniVariant;
   label: string;
   value: number;
   sub?: ReactNode;
   icon: typeof Wallet;
+  onClick?: () => void;
 }) {
   const variantClass = {
     expense: styles.miniExpense,
@@ -36,9 +40,10 @@ function MiniKpi({
     cash: styles.miniCash,
     month: styles.miniMonth,
   }[variant];
+  const Tag = onClick ? "button" : "div";
 
   return (
-    <div className={`${styles.miniCard} ${variantClass}`}>
+    <Tag type={onClick ? "button" : undefined} onClick={onClick} className={`${styles.miniCard} ${variantClass}`}>
       <div className={styles.miniHeader}>
         <span className={styles.miniIconWrap}>
           <Icon className="h-4 w-4" aria-hidden />
@@ -49,15 +54,33 @@ function MiniKpi({
         <CountUp value={value} currency duration={1000} />
       </p>
       {sub ? <div className={styles.miniSub}>{sub}</div> : null}
-    </div>
+    </Tag>
   );
 }
 
 export function DashboardHero({ hero, updatedAt, loading, onRefresh }: Props) {
   const { t } = useI18n();
+  const [debtTotal, setDebtTotal] = useState(0);
+  const [debtCount, setDebtCount] = useState(0);
+  const [debtOpen, setDebtOpen] = useState(false);
+  const [summaryOpen, setSummaryOpen] = useState(false);
   const timeLabel = updatedAt
     ? new Date(updatedAt).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })
     : "—";
+
+  useEffect(() => {
+    void fetch("/api/ledger/v2/overview?side=DEBT&sort=debt&pageSize=5", { credentials: "same-origin" })
+      .then((res) => res.json())
+      .then((body: { ok?: boolean; totals?: { totalDebt?: number; customersWithDebt?: number } }) => {
+        if (!body.ok || !body.totals) return;
+        setDebtTotal(body.totals.totalDebt ?? 0);
+        setDebtCount(body.totals.customersWithDebt ?? 0);
+      })
+      .catch(() => {
+        setDebtTotal(0);
+        setDebtCount(0);
+      });
+  }, [updatedAt]);
 
   return (
     <section className={styles.hero}>
@@ -74,6 +97,9 @@ export function DashboardHero({ hero, updatedAt, loading, onRefresh }: Props) {
         <span className={styles.toolBtn}>
           {t("dashboard.redesign.lastUpdate")}: {timeLabel}
         </span>
+        <button type="button" className={styles.toolBtn} onClick={() => setSummaryOpen(true)}>
+          {t("dashboard.redesign.financialSummary")}
+        </button>
         <button type="button" className={styles.toolBtn} onClick={onRefresh} disabled={loading}>
           <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} aria-hidden />
           {t("dashboard.redesign.refresh")}
@@ -114,6 +140,14 @@ export function DashboardHero({ hero, updatedAt, loading, onRefresh }: Props) {
               />
               <MiniKpi
                 variant="income"
+                label={t("dashboard.redesign.customerDebt")}
+                value={debtTotal}
+                sub={<span>{t("dashboard.redesign.customersInDebt", { count: debtCount })}</span>}
+                icon={Users}
+                onClick={() => setDebtOpen(true)}
+              />
+              <MiniKpi
+                variant="income"
                 label={t("dashboard.redesign.heroExpensesMonth")}
                 value={hero.monthExpenses}
                 icon={TrendingDown}
@@ -134,6 +168,8 @@ export function DashboardHero({ hero, updatedAt, loading, onRefresh }: Props) {
           </div>
         </div>
       </div>
+      <CustomerDebtModal open={debtOpen} totalDebt={debtTotal} count={debtCount} onClose={() => setDebtOpen(false)} />
+      <FinancialSummaryModal open={summaryOpen} onClose={() => setSummaryOpen(false)} />
     </section>
   );
 }

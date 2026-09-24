@@ -105,6 +105,8 @@ export function IncomeExpenseFields({
   const [focusLineId, setFocusLineId] = useState<string | null>(null);
   const [customerSuggestions, setCustomerSuggestions] = useState<string[]>([]);
   const [procurementSuppliers, setProcurementSuppliers] = useState<{ id: string; name: string }[]>([]);
+  const [newSupplierName, setNewSupplierName] = useState("");
+  const [creatingSupplier, setCreatingSupplier] = useState(false);
   const [employees, setEmployees] = useState<{ id: string; name: string }[]>([]);
   const documentTypeOptions = getDocumentTypeOptions(t);
   const supplierOptions = [
@@ -124,6 +126,27 @@ export function IncomeExpenseFields({
   const showDepositBox = !isExpense && (value.clientMode === "event" || value.includeDeposit);
 
   const setPatch = (patch: Partial<IncomeExpensePayload>) => onChange({ ...value, ...patch });
+
+  async function createSupplier() {
+    const name = newSupplierName.trim();
+    if (!name) return;
+    setCreatingSupplier(true);
+    try {
+      const res = await fetch("/api/suppliers", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      const body = (await res.json()) as { ok?: boolean; data?: { id: string; name: string }; error?: string };
+      if (!body.ok || !body.data) return;
+      setProcurementSuppliers((rows) => [...rows, { id: body.data!.id, name: body.data!.name }]);
+      setPatch({ supplierId: body.data.id, counterpartyName: body.data.name });
+      setNewSupplierName("");
+    } finally {
+      setCreatingSupplier(false);
+    }
+  }
 
   const setExpenseType = (type: ExpenseType) => {
     const patch: Partial<IncomeExpensePayload> = { expenseType: type };
@@ -535,6 +558,26 @@ export function IncomeExpenseFields({
               className="mt-1"
             />
           </label>
+          <div className="mt-3 flex flex-wrap items-end gap-2">
+            <label className={`min-w-[12rem] flex-1 ${labelClass}`}>
+              ספק חדש
+              <input
+                value={newSupplierName}
+                onChange={(e) => setNewSupplierName(e.target.value)}
+                className={inputClass}
+                placeholder={t("register.fields.supplierExample")}
+                disabled={disabled}
+              />
+            </label>
+            <button
+              type="button"
+              disabled={disabled || !newSupplierName.trim() || creatingSupplier}
+              className="rounded-xl bg-[#081224] px-3 py-2 text-sm font-bold text-white disabled:opacity-40"
+              onClick={() => void createSupplier()}
+            >
+              + ספק חדש
+            </button>
+          </div>
           {value.supplierId && selectedSupplier ? (
             <SupplierCatalogPanel
               supplierId={value.supplierId}

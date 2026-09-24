@@ -379,6 +379,28 @@ describe("14. Same person in multiple roles", () => {
     assert.equal(customer.signedBalance, 80);
     assert.equal(supplier.signedBalance, 50);
   });
+
+  it("supplier invoice minus recorded payment is open debt, not a credit of the full invoice", () => {
+    const supplier = computeEntryLedger({
+      entityType: "supplier",
+      entityId: "s-hani",
+      entityName: "هاني كعك",
+      openingBalance: 0,
+      entries: [
+        {
+          id: "inv",
+          debit: 10000,
+          credit: 7000,
+          entryDate: d("2026-09-01"),
+          docType: "חשבונית מס",
+          description: "supplier invoice",
+        },
+      ],
+    });
+    assert.equal(supplier.debt, 3000);
+    assert.equal(supplier.credit, 0);
+    assert.equal(supplier.signedBalance, 3000);
+  });
 });
 
 describe("15. Negative balance", () => {

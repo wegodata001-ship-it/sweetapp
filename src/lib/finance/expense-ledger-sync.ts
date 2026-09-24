@@ -1,4 +1,13 @@
+import type { Prisma, PrismaClient } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+
+type Db = Prisma.TransactionClient | PrismaClient;
+
+export function supplierLedgerAmounts(totalAmount: number, paidAmount: number): { debit: number; credit: number } {
+  const debit = Math.max(0, Number(totalAmount) || 0);
+  const credit = Math.min(debit, Math.max(0, Number(paidAmount) || 0));
+  return { debit, credit };
+}
 import { documentTypeForEmployeePay, normalizeEmployeePayType } from "@/lib/finance/employee-pay-types";
 import { parsePayload } from "@/lib/finance/document-payload";
 import { normalizeExpenseType } from "@/lib/finance/expense-types";
@@ -7,10 +16,10 @@ import { normalizeExpenseType } from "@/lib/finance/expense-types";
  * יוצר/מעדכן שורת כרטסת אחת למסמך הוצאה (ספק או עובד).
  * לא נוגע ברישומים ידניים ללא financialDocumentId.
  */
-export async function syncExpenseDocumentLedgerEntry(documentId: string): Promise<void> {
-  await prisma.ledgerEntry.deleteMany({ where: { financialDocumentId: documentId } });
+export async function syncExpenseDocumentLedgerEntry(documentId: string, db: Db = prisma): Promise<void> {
+  await db.ledgerEntry.deleteMany({ where: { financialDocumentId: documentId } });
 
-  const doc = await prisma.financialDocument.findUnique({
+  const doc = await db.financialDocument.findUnique({
     where: { id: documentId },
     select: {
       id: true,
@@ -18,6 +27,7 @@ export async function syncExpenseDocumentLedgerEntry(documentId: string): Promis
       documentType: true,
       title: true,
       totalAmount: true,
+      paidAmount: true,
       docDate: true,
       createdAt: true,
       metadata: true,
@@ -32,8 +42,8 @@ export async function syncExpenseDocumentLedgerEntry(documentId: string): Promis
   const meta = parsePayload(doc.metadata as unknown);
   if (!meta || meta.kind !== "expense") return;
 
-  const amount = Math.max(0, Number(doc.totalAmount) || 0);
-  if (amount < 1e-6) return;
+  const amounts = supplierLedgerAmounts(doc.totalAmount, doc.paidAmount);
+  if (amounts.debit < 1e-6 && amounts.credit < 1e-6) return;
 
   const entryDate = doc.docDate ?? doc.createdAt;
   const expenseType = normalizeExpenseType(meta.expenseType);
@@ -42,15 +52,15 @@ export async function syncExpenseDocumentLedgerEntry(documentId: string): Promis
   const description = note ? `${baseDesc} — ${note}` : baseDesc;
 
   if (expenseType === "SUPPLIER_PAYMENTS" && doc.supplierId) {
-    await prisma.ledgerEntry.create({
+    await db.ledgerEntry.create({
       data: {
         financialDocumentId: documentId,
         supplierId: doc.supplierId,
         entryDate,
         docType: doc.documentType,
         description,
-        debit: 0,
-        credit: amount,
+        debit: amounts.debit,
+        credit: amounts.credit,
       },
     });
     return;
@@ -58,7 +68,7 @@ export async function syncExpenseDocumentLedgerEntry(documentId: string): Promis
 
   if (expenseType === "WORKER_PAYMENTS" && doc.employeeId) {
     const payType = normalizeEmployeePayType(meta.employeePayType);
-    await prisma.ledgerEntry.create({
+    await db.ledgerEntry.create({
       data: {
         financialDocumentId: documentId,
         employeeId: doc.employeeId,
@@ -66,7 +76,7 @@ export async function syncExpenseDocumentLedgerEntry(documentId: string): Promis
         docType: documentTypeForEmployeePay(payType),
         description,
         debit: 0,
-        credit: amount,
+        credit: amounts.debit,
       },
     });
   }

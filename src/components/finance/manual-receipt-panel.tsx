@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useI18n } from "@/components/i18n-provider";
 import { EXPENSE_TYPE_I18N, EXPENSE_TYPE_VALUES } from "@/lib/finance/expense-types";
 import { PAYMENT_INSTRUMENT_OPTIONS, PAYMENT_METHOD_LABELS } from "@/lib/finance/document-payload";
@@ -63,7 +63,7 @@ const emptyForm = {
   linkedFinancialDocumentId: "",
 };
 
-export function ManualReceiptPanel() {
+export function ManualReceiptPanel({ focusId }: { focusId?: string | null }) {
   const { t } = useI18n();
   const [form, setForm] = useState<{
     documentDate: string;
@@ -91,6 +91,7 @@ export function ManualReceiptPanel() {
   const [filters, setFilters] = useState({ from: "", to: "", supplier: "", category: "", documentType: "", vatDeductible: "" });
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  const focusedReceipt = useRef<string | null>(null);
 
   const preview = useMemo(
     () =>
@@ -125,6 +126,14 @@ export function ManualReceiptPanel() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  useEffect(() => {
+    if (!focusId || focusedReceipt.current === focusId) return;
+    const row = rows.find((item) => item.id === focusId);
+    if (!row) return;
+    focusedReceipt.current = focusId;
+    edit(row);
+  }, [focusId, rows]);
 
   async function onFile(file: File) {
     const data = new FormData();

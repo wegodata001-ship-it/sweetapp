@@ -1,9 +1,12 @@
-import { prisma } from "@/lib/prisma";
+import type { Prisma, PrismaClient } from "@prisma/client";
 import { parsePayload, paymentLinesTotal } from "@/lib/finance/document-payload";
+import { prisma } from "@/lib/prisma";
+
+type Db = Prisma.TransactionClient | PrismaClient;
 
 /** paidAmount / remainingAmount נגזרים מתשלומים — לא לערוך ידנית. */
-export async function syncFinancialDocumentPaymentTotals(documentId: string): Promise<void> {
-  const doc = await prisma.financialDocument.findUnique({
+export async function syncFinancialDocumentPaymentTotals(documentId: string, db: Db = prisma): Promise<void> {
+  const doc = await db.financialDocument.findUnique({
     where: { id: documentId },
     select: { id: true, totalAmount: true, documentType: true, metadata: true },
   });
@@ -12,7 +15,7 @@ export async function syncFinancialDocumentPaymentTotals(documentId: string): Pr
   /** דוח Z — סגירת קופה; כל הסכום נחשב כשולם (אין תשלומי Payment נפרדים). */
   if (doc.documentType === "דוח Z") {
     const paid = doc.totalAmount;
-    await prisma.financialDocument.update({
+    await db.financialDocument.update({
       where: { id: documentId },
       data: {
         paidAmount: paid,
@@ -24,7 +27,7 @@ export async function syncFinancialDocumentPaymentTotals(documentId: string): Pr
   }
 
   const payload = parsePayload(doc.metadata as unknown);
-  const agg = await prisma.payment.aggregate({
+  const agg = await db.payment.aggregate({
     where: { documentId },
     _sum: { amount: true },
   });
@@ -42,7 +45,7 @@ export async function syncFinancialDocumentPaymentTotals(documentId: string): Pr
   const paymentStatus =
     doc.totalAmount <= 0 ? "unpaid" : remaining <= 0 ? "paid" : paid > 0 ? "partial" : "unpaid";
 
-  await prisma.financialDocument.update({
+  await db.financialDocument.update({
     where: { id: documentId },
     data: {
       paidAmount: paid,

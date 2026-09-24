@@ -93,7 +93,11 @@ export async function GET(req: NextRequest) {
 
     const totals = aggregateLedgerV2Totals(rows);
     const filtered = filterLedgerV2Rows(rows, side);
-    const pageRows = paginateLedgerV2(filtered, page, pageSize);
+    const ordered =
+      sp.get("sort") === "debt"
+        ? [...filtered].sort((a, b) => b.debt - a.debt || a.name.localeCompare(b.name))
+        : filtered;
+    const pageRows = paginateLedgerV2(ordered, page, pageSize);
 
     return NextResponse.json({
       ok: true,

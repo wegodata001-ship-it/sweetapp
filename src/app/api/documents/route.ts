@@ -136,6 +136,7 @@ export async function POST(req: NextRequest) {
           sentToCpa: false,
         },
       });
+
       await replaceCashFlowForDocument(doc.id);
       if (session) await logActivity(session.sub, "document_create");
       await archiveSourceDocumentForFinancialDoc({
@@ -192,12 +193,20 @@ export async function POST(req: NextRequest) {
 
     const itemsWithProducts = await attachProductsToItems(items);
     const expenseLinks = ie.kind === "expense" ? resolveExpenseDocumentLinks(ie) : { supplierId: null, employeeId: null };
+    if (
+      ie.kind === "expense" &&
+      normalizeExpenseType(ie.expenseType) === "SUPPLIER_PAYMENTS" &&
+      !expenseLinks.supplierId
+    ) {
+      return NextResponse.json({ ok: false, error: "יש לבחור ספק קיים או ליצור ספק חדש" }, { status: 400 });
+    }
     const docType =
       ie.kind === "expense" && normalizeExpenseType(ie.expenseType) === "WORKER_PAYMENTS"
         ? documentTypeForEmployeePay(normalizeEmployeePayType(ie.employeePayType))
         : ie.documentType;
 
-    const doc = await prisma.financialDocument.create({
+    const doc = await prisma.$transaction(async (tx) => {
+      const created = await tx.financialDocument.create({
       data: {
         title: body.title.trim(),
         category: body.category,
@@ -235,35 +244,36 @@ export async function POST(req: NextRequest) {
       },
     });
 
+      if (isIncomeRegister) {
+        const payments = normalizedPaymentLines(ie);
+        if (payments.length > 0 && customerId) {
+          await tx.payment.createMany({
+            data: payments.map((payment) => ({
+              customerId,
+              documentId: created.id,
+              amount: parseNum(payment.amount),
+              paymentMethod: payment.instrument.trim() || null,
+              notes: payment.notes.trim() || null,
+            })),
+          });
+        }
+      }
+
+      await syncFinancialDocumentPaymentTotals(created.id, tx);
+      await replaceCashFlowForDocument(created.id, tx);
+      if (body.category === "הוצאה" && ie.kind === "expense") {
+        await syncExpenseDocumentLedgerEntry(created.id, tx);
+      }
+      return created;
+    });
+
     const sideEffects: Promise<unknown>[] = [saveProductHistoryFromItems(items)];
     if (body.category === "הוצאה" && ie.kind === "expense") {
       sideEffects.push(recordSupplierPriceHistoryFromExpense(ie));
     }
     await Promise.all(sideEffects);
 
-    if (isIncomeRegister) {
-      const payments = normalizedPaymentLines(ie);
-      if (payments.length > 0 && customerId) {
-        await prisma.payment.createMany({
-          data: payments.map((payment) => ({
-            customerId,
-            documentId: doc.id,
-            amount: parseNum(payment.amount),
-            paymentMethod: payment.instrument.trim() || null,
-            notes: payment.notes.trim() || null,
-          })),
-        });
-      }
-    }
-
-    await syncFinancialDocumentPaymentTotals(doc.id);
-    await Promise.all([
-      replaceCashFlowForDocument(doc.id),
-      syncCheckPaymentsForDocument(doc.id),
-      body.category === "הוצאה" && ie.kind === "expense"
-        ? syncExpenseDocumentLedgerEntry(doc.id)
-        : Promise.resolve(),
-    ]);
+    await syncCheckPaymentsForDocument(doc.id);
     if (session) void logActivity(session.sub, "document_create");
     if (body.category === "הוצאה" && ie.kind === "expense") {
       void notifyAbnormalExpenseIfNeeded({

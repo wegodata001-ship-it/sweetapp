@@ -47,14 +47,27 @@ function addDaysYmd(ymd: string, delta: number): string {
   return dt.toISOString().slice(0, 10);
 }
 
-export default function AdminStaffPage() {
+function formatShiftHours(totalMinutes: number): string {
+  const mins = Math.max(0, Math.round(totalMinutes));
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  return `${h}:${String(m).padStart(2, "0")}`;
+}
+
+function elapsedSince(iso: string): string {
+  const start = new Date(iso).getTime();
+  if (Number.isNaN(start)) return "—";
+  return formatShiftHours((Date.now() - start) / 60000);
+}
+
+export default function AdminStaffPage({ embedded = false }: { embedded?: boolean }) {
   const { t, bcp47 } = useI18n();
   const [dash, setDash] = useState<Dash | null>(null);
   const [shifts, setShifts] = useState<ShiftRow[]>([]);
   const [attendance, setAttendance] = useState<AttRow[]>([]);
   const [assignees, setAssignees] = useState<Assignee[]>([]);
   const [err, setErr] = useState<string | null>(null);
-  const [tab, setTab] = useState<"dash" | "shifts" | "att">("dash");
+  const [tab, setTab] = useState<"dash" | "shifts" | "att">(embedded ? "att" : "dash");
 
   const today = useMemo(() => new Date().toISOString().slice(0, 10), []);
   const weekFrom = useMemo(() => addDaysYmd(today, -6), [today]);
@@ -182,11 +195,13 @@ export default function AdminStaffPage() {
   return (
     <div className="mx-auto max-w-6xl space-y-4">
       <section className="app-panel p-4 md:p-6">
-        <p className="text-[12px] font-bold tracking-[0.14em] text-luxury-gold opacity-90">{t("admin.staff.kicker")}</p>
-        <h1 className="erp-page-title mt-1 text-slate-950">{t("admin.staff.title")}</h1>
-        <p className="mt-1 max-w-2xl text-sm text-slate-600">
-          {t("admin.staff.subtitle")}
-        </p>
+        {embedded ? null : (
+          <>
+            <p className="text-[12px] font-bold tracking-[0.14em] text-luxury-gold opacity-90">{t("admin.staff.kicker")}</p>
+            <h1 className="erp-page-title mt-1 text-slate-950">{t("admin.staff.title")}</h1>
+            <p className="mt-1 max-w-2xl text-sm text-slate-600">{t("admin.staff.subtitle")}</p>
+          </>
+        )}
         <div className="mt-4 flex flex-wrap gap-2">
           {(
             [
@@ -397,8 +412,32 @@ export default function AdminStaffPage() {
       ) : null}
 
       {tab === "att" ? (
+        <section className="space-y-4">
+          <div>
+            <h2 className="text-base font-black text-slate-950">{t("ops.team.workingNow")}</h2>
+            {dash && dash.activeNow.length === 0 ? (
+              <p className="mt-2 text-sm text-slate-500">{t("ops.team.nobodyWorking")}</p>
+            ) : (
+              <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                {(dash?.activeNow ?? []).map((person) => (
+                  <article key={person.userId} className="app-panel p-4">
+                    <p className="text-lg font-black text-slate-950">{person.name}</p>
+                    <p className="mt-1 text-sm text-slate-600">
+                      {t("ops.team.clockIn")}:{" "}
+                      {new Date(person.clockIn).toLocaleTimeString(bcp47, { hour: "2-digit", minute: "2-digit" })}
+                    </p>
+                    <p className="text-sm text-slate-600">
+                      {t("ops.team.worked")}: {elapsedSince(person.clockIn)} {t("ops.team.hours")}
+                    </p>
+                    <p className="mt-2 text-sm font-bold text-emerald-700">● {t("ops.team.onShift")}</p>
+                  </article>
+                ))}
+              </div>
+            )}
+          </div>
         <section className="app-panel overflow-x-auto p-4">
-          <h2 className="text-sm font-black text-slate-900">{t("admin.staff.attList.title", { from: weekFrom, to: today })}</h2>
+          <h2 className="text-base font-black text-slate-950">{t("ops.team.sheetTitle")}</h2>
+          <p className="text-xs text-slate-500">{t("admin.staff.attList.title", { from: weekFrom, to: today })}</p>
           <table className="mt-3 w-full min-w-[640px] text-right text-sm">
             <thead>
               <tr className="border-b border-slate-200 text-xs text-slate-500">
@@ -406,7 +445,8 @@ export default function AdminStaffPage() {
                 <th className="py-2">{t("admin.staff.attList.thDate")}</th>
                 <th className="py-2">{t("admin.staff.attList.thIn")}</th>
                 <th className="py-2">{t("admin.staff.attList.thOut")}</th>
-                <th className="py-2">{t("admin.staff.attList.thMinutes")}</th>
+                <th className="py-2">{t("ops.team.thHours")}</th>
+                <th className="py-2">{t("ops.team.thStatus")}</th>
                 <th className="py-2">{t("admin.staff.attList.thLate")}</th>
                 <th className="py-2">{t("admin.staff.attList.thOver")}</th>
                 <th className="py-2" />
@@ -423,7 +463,16 @@ export default function AdminStaffPage() {
                       ? new Date(a.clockOut).toLocaleTimeString(bcp47, { hour: "2-digit", minute: "2-digit" })
                       : "—"}
                   </td>
-                  <td className="py-2">{a.workedMinutes ?? "—"}</td>
+                  <td className="py-2">
+                    {a.clockOut
+                      ? a.workedMinutes != null
+                        ? formatShiftHours(a.workedMinutes)
+                        : "—"
+                      : elapsedSince(a.clockIn)}
+                  </td>
+                  <td className="py-2 font-bold">
+                    {a.clockOut ? t("ops.team.statusDone") : t("ops.team.onShift")}
+                  </td>
                   <td className="py-2">
                     {a.isLate ? <span className="font-bold text-red-600">{a.lateMinutes}</span> : "—"}
                   </td>
@@ -447,6 +496,7 @@ export default function AdminStaffPage() {
               ))}
             </tbody>
           </table>
+        </section>
         </section>
       ) : null}
 

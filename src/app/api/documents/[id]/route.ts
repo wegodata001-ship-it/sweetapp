@@ -168,70 +168,82 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
           }
         }
 
-        await prisma.payment.deleteMany({ where: { documentId: id } });
-
-        await prisma.financialDocumentItem.deleteMany({ where: { documentId: id } });
         const itemsWithProducts = await attachProductsToItems(items);
         const expenseLinks =
           ie.kind === "expense" ? resolveExpenseDocumentLinks(ie) : { supplierId: null, employeeId: null };
+        if (
+          ie.kind === "expense" &&
+          normalizeExpenseType(ie.expenseType) === "SUPPLIER_PAYMENTS" &&
+          !expenseLinks.supplierId
+        ) {
+          return NextResponse.json({ ok: false, error: "יש לבחור ספק קיים או ליצור ספק חדש" }, { status: 400 });
+        }
         const docType =
           ie.kind === "expense" && normalizeExpenseType(ie.expenseType) === "WORKER_PAYMENTS"
             ? documentTypeForEmployeePay(normalizeEmployeePayType(ie.employeePayType))
             : ie.documentType;
-        await prisma.financialDocument.update({
-          where: { id },
-          data: {
-            title: body.title ?? existing.title,
-            category,
-            documentType: docType,
-            customerId,
-            supplierId: expenseLinks.supplierId,
-            employeeId: expenseLinks.employeeId,
-            totalAmount: calculatedTotal,
-            depositAmount,
-            depositType: depositAmount > 0 ? ie.depositType?.trim() || null : null,
-            depositNote: depositAmount > 0 ? ie.depositNote?.trim() || null : null,
-            depositStatus: depositAmount > 0 ? ie.depositStatus || "open" : "open",
-            metadata: asJson(meta),
-            notes: combineIncomeNotes(ie),
-            docDate: ie.docDate ? new Date(ie.docDate) : body.doc_date ? new Date(body.doc_date) : undefined,
-            sentToCpa: body.sent_to_cpa ?? undefined,
-            items: {
-              create:
-                itemsWithProducts.length > 0
-                  ? itemsWithProducts
-                  : [
-                      {
-                        itemName: "סיכום",
-                        productName: "סיכום",
-                        quantity: 1,
-                        unitPrice: productTotal,
-                        vatType: null,
-                        total: productTotal,
-                      },
-                    ],
+
+        await prisma.$transaction(async (tx) => {
+          await tx.payment.deleteMany({ where: { documentId: id } });
+          await tx.financialDocumentItem.deleteMany({ where: { documentId: id } });
+          await tx.financialDocument.update({
+            where: { id },
+            data: {
+              title: body.title ?? existing.title,
+              category,
+              documentType: docType,
+              customerId,
+              supplierId: expenseLinks.supplierId,
+              employeeId: expenseLinks.employeeId,
+              totalAmount: calculatedTotal,
+              depositAmount,
+              depositType: depositAmount > 0 ? ie.depositType?.trim() || null : null,
+              depositNote: depositAmount > 0 ? ie.depositNote?.trim() || null : null,
+              depositStatus: depositAmount > 0 ? ie.depositStatus || "open" : "open",
+              metadata: asJson(meta),
+              notes: combineIncomeNotes(ie),
+              docDate: ie.docDate ? new Date(ie.docDate) : body.doc_date ? new Date(body.doc_date) : undefined,
+              sentToCpa: body.sent_to_cpa ?? undefined,
+              items: {
+                create:
+                  itemsWithProducts.length > 0
+                    ? itemsWithProducts
+                    : [
+                        {
+                          itemName: "סיכום",
+                          productName: "סיכום",
+                          quantity: 1,
+                          unitPrice: productTotal,
+                          vatType: null,
+                          total: productTotal,
+                        },
+                      ],
+              },
             },
-          },
+          });
+          if (isIncomeRegister) {
+            const payments = normalizedPaymentLines(ie);
+            if (payments.length > 0 && customerId) {
+              await tx.payment.createMany({
+                data: payments.map((payment) => ({
+                  customerId,
+                  documentId: id,
+                  amount: parseNum(payment.amount),
+                  paymentMethod: payment.instrument.trim() || null,
+                  notes: payment.notes.trim() || null,
+                })),
+              });
+            }
+          }
+          await syncFinancialDocumentPaymentTotals(id, tx);
+          await replaceCashFlowForDocument(id, tx);
+          if (category === "הוצאה" && ie.kind === "expense") {
+            await syncExpenseDocumentLedgerEntry(id, tx);
+          } else {
+            await tx.ledgerEntry.deleteMany({ where: { financialDocumentId: id } });
+          }
         });
         await saveProductHistoryFromItems(items);
-
-        if (isIncomeRegister) {
-          const payments = normalizedPaymentLines(ie);
-          if (payments.length > 0 && customerId) {
-            await prisma.payment.createMany({
-              data: payments.map((payment) => ({
-                customerId,
-                documentId: id,
-                amount: parseNum(payment.amount),
-                paymentMethod: payment.instrument.trim() || null,
-                notes: payment.notes.trim() || null,
-              })),
-            });
-          }
-        }
-
-        await syncFinancialDocumentPaymentTotals(id);
-        await replaceCashFlowForDocument(id);
         await syncCheckPaymentsForDocument(id);
         if (ie.kind === "income" || ie.kind === "expense") {
           await archiveSourceDocumentForFinancialDoc({
@@ -243,9 +255,6 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
         }
         if (category === "הוצאה" && ie.kind === "expense") {
           await recordSupplierPriceHistoryFromExpense(ie);
-          await syncExpenseDocumentLedgerEntry(id);
-        } else {
-          await prisma.ledgerEntry.deleteMany({ where: { financialDocumentId: id } });
         }
       }
     } else {

@@ -91,6 +91,7 @@ export const API_ACCESS_RULES: { prefix: string; permission: PermissionKey | "SU
   { prefix: "/api/pdfs", permission: "financial_registration" },
   { prefix: "/api/product-history", permission: "financial_registration" },
   { prefix: "/api/finance/manual-receipts", permission: "financial_registration" },
+  { prefix: "/api/finance/unlinked-supplier-documents", permission: "financial_registration" },
   { prefix: "/api/finance/stats", permission: "financial_registration" },
   { prefix: "/api/finance/product-picker", permission: "financial_registration" },
   { prefix: "/api/finance/counterparties", permission: "financial_registration" },

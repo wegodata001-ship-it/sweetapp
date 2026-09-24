@@ -330,13 +330,21 @@
 
 @media (min-width: 640px) {
   .miniGrid {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 0.65rem;
+  }
+}
+
+@media (min-width: 1100px) {
+  .miniGrid {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
   }
 }
 
 .miniCard {
   position: relative;
+  text-align: inherit;
+  width: 100%;
   overflow: hidden;
   border-radius: 16px;
   padding: 0.85rem 0.9rem;

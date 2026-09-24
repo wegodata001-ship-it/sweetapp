@@ -30,6 +30,7 @@ import {
   PAYMENT_INSTRUMENT_OPTIONS,
   newPaymentId,
   paymentLinesTotal,
+  cloneIncomePayloadForNewDocument,
   type FinanceLineItemPayload,
   type IncomeExpensePayload,
   type ZReportPayload,
@@ -78,6 +79,7 @@ function FinanceRegisterPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const editId = searchParams.get("edit");
+  const duplicateId = searchParams.get("duplicate");
   const paymentDocumentId = searchParams.get("paymentDocumentId");
   const paymentCustomerId = searchParams.get("paymentCustomerId");
   const tabParam = searchParams.get("tab");
@@ -388,6 +390,22 @@ function FinanceRegisterPageInner() {
       cancelled = true;
     };
   }, [editId, fixIncomeExpense]);
+
+  useEffect(() => {
+    if (!duplicateId || editId) return;
+    let cancelled = false;
+    void (async () => {
+      const row = await fetchFinanceDocumentById(duplicateId);
+      if (cancelled || row?.payload?.kind !== "income") return;
+      setEditingDocId(null);
+      setEditingKind(null);
+      setIncomeForm(fixIncomeExpense(cloneIncomePayloadForNewDocument(row.payload, todayInputValue())));
+      setActiveTab("income");
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [duplicateId, editId, fixIncomeExpense]);
 
   useEffect(() => {
     if (!paymentDocumentId) {
@@ -822,6 +840,11 @@ function FinanceRegisterPageInner() {
           showErrorModal(t("register.employeePay.validationAmount"), "expense");
           return;
         }
+      }
+
+      if (normalizeExpenseType(prepared.expenseType) === "SUPPLIER_PAYMENTS" && !prepared.supplierId?.trim()) {
+        showErrorModal("יש לבחור ספק קיים או ליצור ספק חדש", "expense");
+        return;
       }
 
       const paymentError = validatePaymentMethodsTotal(prepared);
@@ -1648,7 +1671,7 @@ function FinanceRegisterPageInner() {
         </>
       )}
 
-      {activeTab === "manualReceipt" && <ManualReceiptPanel />}
+      {activeTab === "manualReceipt" && <ManualReceiptPanel focusId={searchParams.get("receipt")} />}
 
       {operationModal ? (
         <OperationResultModal

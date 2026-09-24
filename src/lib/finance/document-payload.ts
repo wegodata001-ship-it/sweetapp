@@ -196,6 +196,26 @@ export function newPaymentId(): string {
   return `pay-${Math.random().toString(36).slice(2, 10)}`;
 }
 
+export function cloneIncomePayloadForNewDocument(source: IncomeExpensePayload, docDate: string): IncomeExpensePayload {
+  const base = emptyIncomeExpensePayload("income");
+  return {
+    ...base,
+    clientMode: source.clientMode,
+    counterpartyName: source.counterpartyName,
+    docDate,
+    documentType: source.documentType,
+    lines: source.lines.map((line) => ({
+      id: newLineId(),
+      itemName: line.itemName,
+      quantity: line.quantity,
+      price: line.price,
+      vatMode: line.vatMode,
+      lineNote: line.lineNote ?? "",
+      supplierProductId: line.supplierProductId ?? null,
+    })),
+  };
+}
+
 export function emptyIncomeExpensePayload(kind: "income" | "expense"): IncomeExpensePayload {
   return {
     kind,
