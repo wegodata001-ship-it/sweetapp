@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionFromCookie } from "@/lib/auth/get-session";
 import { israelCalendarDateString, parseCalendarDateToDbDate } from "@/lib/staff/work-date";
+import { enforceMaxShiftLength } from "@/lib/work-sessions/auto-checkout";
+import { shiftWorkedMinutes } from "@/lib/work-sessions/max-shift";
 
 export async function GET() {
   const session = await getSessionFromCookie();
@@ -11,6 +13,7 @@ export async function GET() {
 
   const workDateStr = israelCalendarDateString();
   const workDate = parseCalendarDateToDbDate(workDateStr);
+  await enforceMaxShiftLength({ userId: session.sub });
 
   const [user, attendance, shift] = await Promise.all([
     prisma.user.findUnique({
@@ -28,12 +31,9 @@ export async function GET() {
   ]);
 
   const now = new Date();
-  let liveWorkedMinutes = 0;
-  if (attendance?.clockIn && !attendance.clockOut) {
-    liveWorkedMinutes = Math.max(0, Math.round((now.getTime() - attendance.clockIn.getTime()) / 60_000));
-  } else if (attendance?.workedMinutes != null) {
-    liveWorkedMinutes = attendance.workedMinutes;
-  }
+  const liveWorkedMinutes = attendance
+    ? shiftWorkedMinutes(attendance.clockIn, attendance.clockOut, now)
+    : 0;
 
   const rate = user?.hourlyRate ?? 0;
   const estimatedPay = (liveWorkedMinutes / 60) * rate;

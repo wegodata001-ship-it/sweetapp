@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { getSessionFromCookie } from "@/lib/auth/get-session";
 import { canManageAllTasks } from "@/lib/tasks/task-access";
 import { parseCalendarDateToDbDate } from "@/lib/staff/work-date";
+import { enforceMaxShiftLength } from "@/lib/work-sessions/auto-checkout";
 
 export async function GET(req: NextRequest) {
   const session = await getSessionFromCookie();
@@ -21,6 +22,8 @@ export async function GET(req: NextRequest) {
   if (!Number.isFinite(dFrom.getTime()) || !Number.isFinite(dTo.getTime())) {
     return NextResponse.json({ ok: false, error: "תאריכים לא תקינים" }, { status: 400 });
   }
+
+  await enforceMaxShiftLength();
 
   const rows = await prisma.attendance.findMany({
     where: { workDate: { gte: dFrom, lte: dTo } },
@@ -45,6 +48,7 @@ export async function GET(req: NextRequest) {
       overtimeMinutes: r.overtimeMinutes,
       isLate: r.isLate,
       hasOvertime: r.hasOvertime,
+      checkoutType: r.checkoutType,
       note: r.note,
       shiftId: r.shiftId,
       shift: r.shift

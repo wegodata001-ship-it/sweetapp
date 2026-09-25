@@ -8,6 +8,7 @@ import {
   logStrictScope,
   strictUserId,
 } from "@/lib/auth/strict-user-isolation";
+import { enforceMaxShiftLength } from "@/lib/work-sessions/auto-checkout";
 import { serializeWorkSession } from "@/lib/work-sessions/serialize";
 import { serializeWorkflowRunDetail } from "@/lib/workflows/serialize";
 
@@ -39,6 +40,8 @@ export async function GET() {
     const startOfDay = new Date();
     startOfDay.setUTCHours(0, 0, 0, 0);
     const tomorrow = new Date(startOfDay.getTime() + 24 * 60 * 60 * 1000);
+
+    await enforceMaxShiftLength({ userId: uid });
 
     const [activeSession, todaySessions, activeRunsRaw, dailyWorkTasksOpen] = await Promise.all([
       prismaAny.workSession.findFirst({

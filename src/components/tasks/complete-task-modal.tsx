@@ -22,6 +22,8 @@ type Props = {
   error: string | null;
   requireLateReason: boolean;
   showCompletionNote?: boolean;
+  reasonChoices?: Array<{ value: string; label: string }>;
+  clockSummary?: { target: string; actual: string; late: string } | null;
   onLateReasonChange: (value: string) => void;
   onCompletionNoteChange: (value: string) => void;
   onCancel: () => void;
@@ -55,6 +57,8 @@ export function CompleteTaskModal({
   error,
   requireLateReason,
   showCompletionNote = true,
+  reasonChoices,
+  clockSummary,
   onLateReasonChange,
   onCompletionNoteChange,
   onCancel,
@@ -109,21 +113,47 @@ export function CompleteTaskModal({
                 <AlertTriangle className="h-4 w-4 shrink-0" aria-hidden />
                 {t("completeTask.lateBanner")}
               </p>
-              <p className="mt-2 text-xs font-bold">
-                {t("completeTask.due")}: {task.dueLabel}
-              </p>
-              <p className="text-xs font-bold">
-                {t("completeTask.completedOn")}: {task.completeAtLabel}
-              </p>
-              <p className="text-xs font-black">
-                {t("completeTask.lateness")}: {formatLatePartsLabel(t, task.lateParts)}
-              </p>
+              {clockSummary ? (
+                <>
+                  <p className="mt-2 font-mono text-xs font-bold tabular-nums">{t("taskTiming.target")}: {clockSummary.target}</p>
+                  <p className="font-mono text-xs font-bold tabular-nums">{t("taskTiming.actual")}: {clockSummary.actual}</p>
+                  <p className="font-mono text-xs font-black tabular-nums">{t("taskTiming.lateBy")}: {clockSummary.late}</p>
+                </>
+              ) : (
+                <>
+                  <p className="mt-2 text-xs font-bold">
+                    {t("completeTask.due")}: {task.dueLabel}
+                  </p>
+                  <p className="text-xs font-bold">
+                    {t("completeTask.completedOn")}: {task.completeAtLabel}
+                  </p>
+                  <p className="text-xs font-black">
+                    {t("completeTask.lateness")}: {formatLatePartsLabel(t, task.lateParts)}
+                  </p>
+                </>
+              )}
             </div>
           ) : (
             <p className="text-sm font-semibold text-slate-600">{t("completeTask.onTimeHint")}</p>
           )}
 
-          {requireLateReason ? (
+          {requireLateReason && reasonChoices ? (
+            <fieldset className="space-y-2">
+              <legend className="text-sm font-black text-slate-900">{t("taskTiming.why")}</legend>
+              {reasonChoices.map((choice) => (
+                <label key={choice.value} className="flex items-center gap-2 text-sm font-bold">
+                  <input
+                    type="radio"
+                    name="late-reason"
+                    value={choice.value}
+                    checked={lateReason === choice.value}
+                    onChange={() => onLateReasonChange(choice.value)}
+                  />
+                  {choice.label}
+                </label>
+              ))}
+            </fieldset>
+          ) : requireLateReason ? (
             <label className="block space-y-1.5">
               <span className="text-sm font-black text-slate-900">
                 {t("completeTask.lateReasonLabel")} *
@@ -142,7 +172,7 @@ export function CompleteTaskModal({
             </label>
           ) : null}
 
-          {showCompletionNote ? (
+          {showCompletionNote && !reasonChoices ? (
             <label className="block space-y-1.5">
               <span className="text-sm font-black text-slate-800">{t("completeTask.noteLabel")}</span>
               <textarea

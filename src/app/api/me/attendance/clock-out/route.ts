@@ -6,10 +6,11 @@ import { notifyAdminRecipients, toneToColor } from "@/lib/notifications/dispatch
 import {
   computeEarlyLeaveOnClockOut,
   computeOvertimeOnClockOut,
-  diffMinutesClocked,
 } from "@/lib/staff/attendance-calc";
 import { israelCalendarDateString, parseCalendarDateToDbDate } from "@/lib/staff/work-date";
 import { notifyEarlyClockOut } from "@/lib/notifications/checkMissedAttendance";
+import { notifyManagers } from "@/lib/notifications/dispatch";
+import { resolveCheckout } from "@/lib/work-sessions/max-shift";
 
 export async function POST(req: NextRequest) {
   const session = await getSessionFromCookie();
@@ -34,22 +35,34 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const clockOut = new Date();
-  const workedMinutes = diffMinutesClocked(existing.clockIn, clockOut);
+  const now = new Date();
+  const resolved = resolveCheckout(existing.clockIn, now);
+  const clockOut = resolved.clockOut;
+  const workedMinutes = resolved.totalMinutes;
   const shiftLike = existing.shift;
   const ot = computeOvertimeOnClockOut(shiftLike, clockOut);
 
   const mergedNote = [existing.note, noteExtra].filter(Boolean).join(" — ") || null;
 
-  const updated = await prisma.attendance.update({
-    where: { id: existing.id },
+  const claimed = await prisma.attendance.updateMany({
+    where: { id: existing.id, clockOut: null },
     data: {
       clockOut,
       workedMinutes,
       overtimeMinutes: ot.overtimeMinutes,
       hasOvertime: ot.hasOvertime,
       note: mergedNote,
+      checkoutType: resolved.checkoutType,
     },
+  });
+  if (claimed.count !== 1) {
+    return NextResponse.json(
+      { ok: false, error: "אין משמרת פתוחה לסיום" },
+      { status: 400 },
+    );
+  }
+  const updated = await prisma.attendance.findUniqueOrThrow({
+    where: { id: existing.id },
     include: { shift: true },
   });
 
@@ -58,7 +71,21 @@ export async function POST(req: NextRequest) {
     select: { fullName: true },
   });
 
-  if (ot.hasOvertime) {
+  if (resolved.checkoutType === "AUTO_12_HOURS") {
+    await notifyManagers(
+      {
+        type: "CLOCK_OUT",
+        title: "יציאה אוטומטית",
+        message: `המשמרת של ${user?.fullName ?? "עובד"} נסגרה אוטומטית לאחר 12 שעות.`,
+        subjectUserId: session.sub,
+        actionUrl: "/ops/team?tab=attendance",
+        priority: "MEDIUM",
+        metadata: { autoCheckoutId: `attendance:${updated.id}`, source: "auto_12_hours" },
+        dedupe: { metadataKey: "autoCheckoutId", sinceHours: 24 * 365 * 5 },
+      },
+      { excludeUserId: session.sub },
+    );
+  } else if (ot.hasOvertime) {
     const name = user?.fullName ?? "עובד";
     const ids = await listStaffAlertRecipientIds();
     const filtered = ids.filter((id) => id !== session.sub);

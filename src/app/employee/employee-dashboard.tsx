@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "@/components/auth-provider";
 import { useI18n } from "@/components/i18n-provider";
 import { useToast } from "@/components/toast-provider";
@@ -30,6 +30,7 @@ import type { SerializedWorkEmployeeTask } from "@/lib/work-tasks/serialize-work
 import { WorkflowRunCard } from "@/components/workflows/workflow-run-card";
 import type { WorkflowRunDetailDto } from "@/lib/workflows/serialize";
 import type { WorkSessionDto } from "@/lib/work-sessions/serialize";
+import { cappedOpenMinutes, MAX_SHIFT_MS } from "@/lib/work-sessions/max-shift";
 
 type DashboardData = {
   session: WorkSessionDto | null;
@@ -58,7 +59,7 @@ function fmtHMM(minutes: number): string {
  *  - Re-fetch dashboard every 30s and on focus to stay honest after sleeps.
  */
 export function EmployeeDashboard() {
-  const { t, dir, locale } = useI18n();
+  const { t, dir, bcp47 } = useI18n();
   const { showToast } = useToast();
   const { user } = useAuth();
   const router = useRouter();
@@ -150,8 +151,16 @@ export function EmployeeDashboard() {
   // Live "time so far in current session" plus already-completed minutes today.
   const liveMinutes = useMemo(() => {
     if (!sessionStartMs) return 0;
-    return Math.max(0, Math.floor((now - sessionStartMs) / 60_000));
+    return cappedOpenMinutes(sessionStartMs, now);
   }, [now, sessionStartMs]);
+
+  const askedServerToClose = useRef(false);
+  useEffect(() => {
+    if (!sessionStartMs || askedServerToClose.current) return;
+    if (now < sessionStartMs + MAX_SHIFT_MS) return;
+    askedServerToClose.current = true;
+    void load();
+  }, [load, now, sessionStartMs]);
 
   const todayMinutesLive = (data?.today.completed_minutes ?? 0) + liveMinutes;
   const activeWorkTask = useMemo(
@@ -160,7 +169,6 @@ export function EmployeeDashboard() {
   );
   const workTaskStats = useMemo(() => computeEmployeeTaskDayStats(workTasks), [workTasks]);
 
-  const bcp47 = locale === "ar" ? "ar-EG" : locale === "en" ? "en-US" : "he-IL";
   const clockInTime = session
     ? new Date(session.clock_in).toLocaleTimeString(bcp47, {
         hour: "2-digit",

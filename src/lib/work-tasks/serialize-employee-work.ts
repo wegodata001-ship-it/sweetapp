@@ -13,6 +13,10 @@ export type SerializedEmployeeTask = {
   completed_at: string | null;
   status: string;
   delay_reason: string | null;
+  delayed_at: string | null;
+  late_reason: string | null;
+  active_work_ms: number;
+  segment_started_at: string | null;
   color: string | null;
   order_index: number;
   created_at: string;
@@ -62,6 +66,10 @@ export function serializeEmployeeTask(row: {
   completedAt: Date | null;
   status: string;
   delayReason: string | null;
+  delayedAt?: Date | null;
+  lateReason?: string | null;
+  activeWorkMs?: number;
+  segmentStartedAt?: Date | null;
   color?: string | null;
   orderIndex: number;
   createdAt: Date;
@@ -81,6 +89,10 @@ export function serializeEmployeeTask(row: {
     completed_at: toIso(row.completedAt),
     status: row.status,
     delay_reason: row.delayReason,
+    delayed_at: toIso(row.delayedAt),
+    late_reason: row.lateReason ?? null,
+    active_work_ms: row.activeWorkMs ?? 0,
+    segment_started_at: toIso(row.segmentStartedAt),
     color: row.color ?? null,
     order_index: row.orderIndex,
     created_at: row.createdAt.toISOString(),

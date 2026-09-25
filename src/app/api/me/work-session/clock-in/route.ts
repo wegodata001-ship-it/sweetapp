@@ -7,6 +7,7 @@ import { notifyAdminRecipients, notifyEmployee, toneToColor } from "@/lib/notifi
 import { computeLateOnClockIn } from "@/lib/staff/attendance-calc";
 import { israelCalendarDateString, parseCalendarDateToDbDate } from "@/lib/staff/work-date";
 import { requireDb } from "@/lib/api-route";
+import { enforceMaxShiftLength } from "@/lib/work-sessions/auto-checkout";
 import { serializeWorkSession } from "@/lib/work-sessions/serialize";
 
 /**
@@ -15,7 +16,8 @@ import { serializeWorkSession } from "@/lib/work-sessions/serialize";
  * Starts a new work session for the caller.
  *
  * Side-effects:
- *  - If today already has an open session → 400 (the user must clock-out first).
+ *  - An open session older than 12 hours is closed at clockIn + 12h first.
+ *  - A still-open session inside that window → 400.
  *  - Always creates a `WorkSession` row.
  *  - Also keeps the legacy daily `Attendance` row in sync for the admin
  *    staff dashboard: creates one for the day if missing, leaves it alone
@@ -38,6 +40,7 @@ export async function POST(req: NextRequest) {
   const workDate = parseCalendarDateToDbDate(workDateStr);
 
   try {
+    await enforceMaxShiftLength({ userId: session.sub });
     const openExisting = await prismaAny.workSession.findFirst({
       where: { userId: session.sub, status: "ACTIVE" },
       select: { id: true },
@@ -109,6 +112,7 @@ export async function POST(req: NextRequest) {
           workedMinutes: null,
           overtimeMinutes: 0,
           hasOvertime: false,
+          checkoutType: null,
         },
       });
     }

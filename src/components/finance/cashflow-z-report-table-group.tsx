@@ -58,7 +58,7 @@ export function CashflowZReportTableGroupDesktop({
     : summary.title;
   const dateFormatted = summary.entryDate
     ? new Date(`${summary.entryDate}T12:00:00`).toLocaleDateString(
-        bcp47 === "ar" ? "ar-IL" : bcp47 === "en" ? "en-GB" : "he-IL",
+        bcp47,
         { day: "2-digit", month: "2-digit", year: "numeric" },
       )
     : "—";
@@ -170,7 +170,7 @@ export function CashflowZReportTableGroupMobile({
     : summary.title;
   const dateFormatted = summary.entryDate
     ? new Date(`${summary.entryDate}T12:00:00`).toLocaleDateString(
-        bcp47 === "ar" ? "ar-IL" : bcp47 === "en" ? "en-GB" : "he-IL",
+        bcp47,
         { day: "2-digit", month: "2-digit", year: "numeric" },
       )
     : "—";

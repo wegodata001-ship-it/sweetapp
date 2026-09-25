@@ -6,7 +6,7 @@
 import { invalidateCache } from "@/lib/client/fetch-cache";
 
 export const LIVE_REFRESH_EVENT = "wego:live-refresh";
-export const LIVE_REFRESH_INTERVAL_MS = 12_000;
+export const LIVE_REFRESH_INTERVAL_MS = 30_000;
 
 export type LiveRefreshDetail = { scope?: string };
 

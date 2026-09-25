@@ -3,18 +3,22 @@ import { prisma } from "@/lib/prisma";
 /** מפעיל משימה אחת — סוגר קודמת ומעדכן User */
 export async function activateEmployeeTask(userId: string, taskId: string) {
   const now = new Date();
+  const task = await prisma.employeeTask.findUnique({ where: { id: taskId } });
+  if (!task) throw new Error("משימה לא נמצאה");
+  const resuming = task.status === "DELAYED" || task.startedAt != null;
   await prisma.$transaction([
-    prisma.employeeTask.updateMany({
-      where: { assignedToUserId: userId, status: "IN_PROGRESS", id: { not: taskId } },
-      data: { status: "PENDING", startedAt: null, isActive: false },
-    }),
     prisma.employeeTask.update({
       where: { id: taskId },
-      data: { status: "IN_PROGRESS", startedAt: now, isActive: true },
+      data: {
+        status: "IN_PROGRESS",
+        startedAt: task.startedAt ?? now,
+        segmentStartedAt: now,
+        isActive: true,
+      },
     }),
     prisma.user.update({
       where: { id: userId },
-      data: { activeTaskId: taskId, activeTaskStartedAt: now, lastSeenAt: now },
+      data: { activeTaskId: taskId, activeTaskStartedAt: resuming ? task.startedAt ?? now : now, lastSeenAt: now },
     }),
   ]);
 }

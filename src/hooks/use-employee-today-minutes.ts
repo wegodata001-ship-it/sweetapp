@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { cappedOpenMinutes } from "@/lib/work-sessions/max-shift";
 
 type DashboardSlice = {
   session: { clock_in: string } | null;
@@ -46,8 +47,7 @@ export function useEmployeeTodayMinutes(enabled = true) {
     const session = data?.session;
     if (!session?.clock_in) return base;
     const start = new Date(session.clock_in).getTime();
-    const live = Math.max(0, Math.floor((now - start) / 60_000));
-    return base + live;
+    return base + cappedOpenMinutes(start, now);
   }, [data, now]);
 
   return { todayMinutes, refresh: load };

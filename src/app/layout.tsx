@@ -12,7 +12,10 @@ import {
   localeToBcp47,
   normalizeLocale,
 } from "@/lib/i18n/constants";
+import { installLatinDigits } from "@/lib/i18n/latin-digits";
 import { createTranslator } from "@/lib/i18n/translator";
+
+installLatinDigits();
 import "./globals.css";
 
 const geistSans = Geist({

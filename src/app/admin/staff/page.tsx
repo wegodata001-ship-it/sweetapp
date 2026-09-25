@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useI18n } from "@/components/i18n-provider";
+import { cappedOpenMinutes } from "@/lib/work-sessions/max-shift";
 
 type Dash = {
   date: string;
@@ -37,6 +38,7 @@ type AttRow = {
   overtimeMinutes: number;
   isLate: boolean;
   hasOvertime: boolean;
+  checkoutType?: "MANUAL" | "AUTO_12_HOURS" | null;
 };
 
 type Assignee = { id: string; fullName: string; email: string };
@@ -57,7 +59,7 @@ function formatShiftHours(totalMinutes: number): string {
 function elapsedSince(iso: string): string {
   const start = new Date(iso).getTime();
   if (Number.isNaN(start)) return "—";
-  return formatShiftHours((Date.now() - start) / 60000);
+  return formatShiftHours(cappedOpenMinutes(start, Date.now()));
 }
 
 export default function AdminStaffPage({ embedded = false }: { embedded?: boolean }) {
@@ -471,7 +473,11 @@ export default function AdminStaffPage({ embedded = false }: { embedded?: boolea
                       : elapsedSince(a.clockIn)}
                   </td>
                   <td className="py-2 font-bold">
-                    {a.clockOut ? t("ops.team.statusDone") : t("ops.team.onShift")}
+                    {a.checkoutType === "AUTO_12_HOURS"
+                      ? t("ops.team.statusAuto12")
+                      : a.clockOut
+                        ? t("ops.team.statusDone")
+                        : t("ops.team.onShift")}
                   </td>
                   <td className="py-2">
                     {a.isLate ? <span className="font-bold text-red-600">{a.lateMinutes}</span> : "—"}

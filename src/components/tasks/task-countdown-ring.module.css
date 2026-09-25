@@ -59,8 +59,8 @@
 .ringSvg {
   width: 100%;
   height: 100%;
-  transform: rotate(-90deg);
   overflow: visible;
+  transform: none;
 }
 
 .ringTrack {
@@ -92,6 +92,10 @@
 }
 
 .time {
+  direction: ltr;
+  unicode-bidi: isolate;
+  writing-mode: horizontal-tb;
+  white-space: nowrap;
   font-variant-numeric: tabular-nums;
   font-weight: 900;
   letter-spacing: -0.03em;
@@ -282,14 +286,125 @@
   color: #bbf7d0;
 }
 
-.wrap.criticalMinute {
-  animation:
-    ringFadeIn 0.5s ease-out backwards,
-    criticalPulse 0.85s ease-in-out infinite;
+.wrap.criticalMinute .time {
+  animation: none;
+  transform: none;
 }
 
-.wrap.criticalMinute .ringOuter {
-  animation: ringVibrate 0.4s ease-in-out infinite;
+/* Active-task clock only. The ring may pulse; the digits stay horizontal. */
+.activeFocus.wrap,
+.activeFocus.wrap:hover {
+  transform: none;
+  animation: none;
+  filter: none;
+}
+
+.activeFocus .center {
+  z-index: 2;
+  direction: ltr;
+  unicode-bidi: isolate;
+  writing-mode: horizontal-tb;
+  text-orientation: mixed;
+  transform: none;
+}
+
+.activeFocus .time {
+  display: block;
+  width: max-content;
+  max-width: none;
+  flex: none;
+  direction: ltr;
+  unicode-bidi: isolate;
+  writing-mode: horizontal-tb;
+  text-orientation: mixed;
+  white-space: nowrap;
+  transform: none;
+  animation: none;
+}
+
+.activeFocus.state_critical .ringProgress,
+.activeFocus.state_expired .ringProgress,
+.activeFocus.criticalMinute .ringProgress {
+  stroke: #dc2626;
+  color: #dc2626;
+  stroke-width: 14;
+  filter: drop-shadow(0 0 12px rgba(220, 38, 38, 0.95));
+  animation: criticalRingGlow 1.2s ease-in-out infinite;
+}
+
+.activeFocus.state_critical .glassPlate,
+.activeFocus.state_expired .glassPlate,
+.activeFocus.criticalMinute .glassPlate {
+  background: #450a0a;
+  box-shadow:
+    inset 0 0 36px rgba(127, 29, 29, 0.95),
+    0 0 42px rgba(220, 38, 38, 0.8);
+}
+
+.activeFocus.state_critical .innerGlow,
+.activeFocus.state_expired .innerGlow,
+.activeFocus.criticalMinute .innerGlow {
+  background: radial-gradient(circle, rgba(220, 38, 38, 0.95), transparent 62%);
+  opacity: 1;
+  animation: none;
+  transform: none;
+}
+
+.activeFocus.state_critical .time,
+.activeFocus.state_expired .time,
+.activeFocus.criticalMinute .time {
+  color: #fff;
+  font-size: clamp(2.4rem, 8vw, 3.25rem);
+  text-shadow: 0 0 22px rgba(254, 202, 202, 0.7);
+  animation: none;
+  transform: none;
+}
+
+.activeFocus.state_critical .status,
+.activeFocus.state_expired .status,
+.activeFocus.criticalMinute .status {
+  color: #fecaca;
+  letter-spacing: 0.04em;
+  text-transform: none;
+  font-size: 0.95rem;
+  font-weight: 900;
+}
+
+.activeFocus.state_critical .progressPct,
+.activeFocus.state_expired .progressPct,
+.activeFocus.criticalMinute .progressPct {
+  display: none;
+}
+
+.activeFocus.state_overdue .time {
+  direction: ltr;
+  unicode-bidi: isolate;
+}
+
+.activeFocus.state_warning .ringProgress {
+  stroke: #f59e0b;
+  color: #f59e0b;
+}
+
+.activeFocus.state_warning .innerGlow {
+  background: radial-gradient(circle, rgba(245, 158, 11, 0.55), transparent 70%);
+}
+
+.activeFocus.state_warning .time {
+  color: #fffbeb;
+}
+
+.activeFocus.state_warning .status {
+  color: #fcd34d;
+}
+
+.activeFocus.state_normal .time,
+.activeFocus.state_warning .time,
+.activeFocus.state_overdue .time {
+  direction: ltr;
+  unicode-bidi: isolate;
+  writing-mode: horizontal-tb;
+  white-space: nowrap;
 }
 
 @keyframes ringFadeIn {
@@ -353,15 +468,12 @@
   }
 }
 
-@keyframes ringVibrate {
+@keyframes criticalRingGlow {
   0%,
   100% {
-    transform: rotate(-90deg);
+    filter: drop-shadow(0 0 8px rgba(239, 68, 68, 0.55));
   }
-  25% {
-    transform: rotate(-90.4deg);
-  }
-  75% {
-    transform: rotate(-89.6deg);
+  50% {
+    filter: drop-shadow(0 0 22px rgba(239, 68, 68, 0.95));
   }
 }

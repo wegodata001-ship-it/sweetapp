@@ -28,13 +28,11 @@ export function WelcomeWorkdayOverlay({
   onClose,
   autoCloseMs = 2600,
 }: WelcomeWorkdayOverlayProps) {
-  const { t, dir, locale } = useI18n();
+  const { t, dir, bcp47 } = useI18n();
   const [mounted, setMounted] = useState(false);
   const [msgIndex, setMsgIndex] = useState(0);
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
-
-  const bcp47 = locale === "ar" ? "ar-EG" : locale === "en" ? "en-US" : "he-IL";
 
   useEffect(() => {
     queueMicrotask(() => setMounted(true));

@@ -47,7 +47,7 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 const AUTH_CACHE_MS = 20_000;
 const AUTH_KEY = "auth-me";
 const AUTH_SYNC_KEY = "auth-me-sync";
-const SESSION_POLL_MS = 5_000;
+const SESSION_POLL_MS = 60_000;
 
 type MeResponse = {
   ok?: boolean;
@@ -100,7 +100,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    setUser(data.user ?? null);
+    const nextUser = data.user ?? null;
+    setUser((prev) => {
+      if (prev === nextUser) return prev;
+      if (prev && nextUser && JSON.stringify(prev) === JSON.stringify(nextUser)) return prev;
+      return nextUser;
+    });
     setLoading(false);
   }, []);
 
@@ -119,16 +124,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     void refresh();
   }, [refresh]);
 
-  /** בדיקת session פעיל — כל 5 שניות + בעת חזרה לטאב */
+  /** בדיקת session פעיל — פעם בדקה, בלי לטעון הרשאות ולחתום עוגיה מחדש.
+   *  חזרה לטאב כן עושה sync מלא כדי לתפוס ניתוק ומנוי הרשאות. */
   useEffect(() => {
     if (!user) return;
 
-    const poll = () => void refresh({ sync: true });
+    const poll = () => void refresh();
 
     const interval = window.setInterval(poll, SESSION_POLL_MS);
 
     const onVisible = () => {
-      if (document.visibilityState === "visible") poll();
+      if (document.visibilityState === "visible") void refresh({ sync: true });
     };
     document.addEventListener("visibilitychange", onVisible);
 

@@ -62,6 +62,7 @@ type Props = {
   onReorderTask: (orderedIds: string[]) => void;
   onStartTask?: (taskId: string) => void;
   onCompleteTask?: (taskId: string) => void;
+  onDelayTask?: (taskId: string, reason: string) => void;
 };
 
 export function EmployeeWorkGroupCard({
@@ -83,6 +84,7 @@ export function EmployeeWorkGroupCard({
   onReorderTask,
   onStartTask,
   onCompleteTask,
+  onDelayTask,
 }: Props) {
   const { t } = useI18n();
   const [open, setOpen] = useState(defaultOpen);
@@ -320,8 +322,13 @@ export function EmployeeWorkGroupCard({
                   }}
                   onDelete={() => onDeleteTask(task.id)}
                   onStart={
-                    !canManage && task.status === "PENDING"
+                    !canManage && (task.status === "PENDING" || task.status === "DELAYED")
                       ? () => onStartTask?.(task.id)
+                      : undefined
+                  }
+                  onDelay={
+                    !canManage && task.status === "IN_PROGRESS"
+                      ? (reason) => onDelayTask?.(task.id, reason)
                       : undefined
                   }
                   onComplete={

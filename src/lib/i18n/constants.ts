@@ -1,3 +1,7 @@
+import { installLatinDigits } from "./latin-digits";
+
+installLatinDigits();
+
 export const WEGO_LOCALE_COOKIE = "wego-locale";
 
 /** נתמך בממשק; en מוכן ל-LTR בעתיד */
@@ -9,9 +13,14 @@ export function isRtlLocale(locale: AppLocale): boolean {
 }
 
 export function localeToBcp47(locale: AppLocale): string {
-  if (locale === "ar") return "ar-SA";
+  if (locale === "ar") return "ar-u-nu-latn";
   if (locale === "en") return "en-US";
   return "he-IL";
+}
+
+/** True for "ar" and for tags such as ar-EG / ar-u-nu-latn. */
+export function isArabicTag(tag: string | null | undefined): boolean {
+  return typeof tag === "string" && /^ar\b/i.test(tag.trim());
 }
 
 export function normalizeLocale(raw: string | undefined | null): AppLocale {

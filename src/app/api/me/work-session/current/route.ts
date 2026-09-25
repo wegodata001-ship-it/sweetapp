@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getSessionFromCookie } from "@/lib/auth/get-session";
 import { prismaAny } from "@/lib/prisma";
 import { requireDb } from "@/lib/api-route";
+import { enforceMaxShiftLength } from "@/lib/work-sessions/auto-checkout";
 import { serializeWorkSession } from "@/lib/work-sessions/serialize";
 
 export const dynamic = "force-dynamic";
@@ -23,6 +24,7 @@ export async function GET() {
   }
 
   try {
+    await enforceMaxShiftLength({ userId: session.sub });
     const active = await prismaAny.workSession.findFirst({
       where: { userId: session.sub, status: "ACTIVE" },
       orderBy: { clockIn: "desc" },

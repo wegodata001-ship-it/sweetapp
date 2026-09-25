@@ -102,7 +102,7 @@ export function SuppliersPricesHub() {
   }, [productQ]);
 
   const fmtDate = (iso: string) =>
-    new Date(iso).toLocaleDateString(bcp47 === "ar" ? "ar-IL" : bcp47 === "en" ? "en-GB" : "he-IL", {
+    new Date(iso).toLocaleDateString(bcp47, {
       day: "2-digit",
       month: "short",
       year: "numeric",

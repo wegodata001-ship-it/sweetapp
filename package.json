@@ -32,6 +32,7 @@
     "bcryptjs": "^3.0.3",
     "bidi-js": "^1.0.3",
     "canvas-confetti": "^1.9.4",
+    "exceljs": "^4.4.0",
     "fuse.js": "^7.1.0",
     "jose": "^6.2.3",
     "jszip": "^3.10.1",

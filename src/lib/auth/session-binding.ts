@@ -11,7 +11,7 @@ function newSessionId(): string {
   return globalThis.crypto.randomUUID();
 }
 
-const CACHE_TTL_MS = 3000;
+const CACHE_TTL_MS = 15_000;
 
 type BindingCacheEntry = {
   sessionIds: string[];
@@ -20,9 +20,11 @@ type BindingCacheEntry = {
 };
 
 const bindingCache = new Map<string, BindingCacheEntry>();
+const bindingInflight = new Map<string, Promise<BindingCacheEntry>>();
 
 export function invalidateSessionBindingCache(userId: string): void {
   bindingCache.delete(userId);
+  bindingInflight.delete(userId);
 }
 
 export function allowsMultipleAuthSessions(role: string | null | undefined): boolean {
@@ -166,18 +168,30 @@ async function loadBinding(userId: string): Promise<BindingCacheEntry> {
     return cached;
   }
 
-  const row = (await prismaAny.user.findUnique({
-    where: { id: userId },
-    select: { currentSessionId: true, isActive: true },
-  })) as { currentSessionId: string | null; isActive: boolean } | null;
+  const pending = bindingInflight.get(userId);
+  if (pending) return pending;
 
-  const entry: BindingCacheEntry = {
-    sessionIds: parseActiveSessionIds(row?.currentSessionId),
-    isActive: row?.isActive ?? false,
-    at: now,
-  };
-  bindingCache.set(userId, entry);
-  return entry;
+  const job = (async () => {
+    const row = (await prismaAny.user.findUnique({
+      where: { id: userId },
+      select: { currentSessionId: true, isActive: true },
+    })) as { currentSessionId: string | null; isActive: boolean } | null;
+
+    const entry: BindingCacheEntry = {
+      sessionIds: parseActiveSessionIds(row?.currentSessionId),
+      isActive: row?.isActive ?? false,
+      at: Date.now(),
+    };
+    bindingCache.set(userId, entry);
+    return entry;
+  })();
+
+  bindingInflight.set(userId, job);
+  try {
+    return await job;
+  } finally {
+    bindingInflight.delete(userId);
+  }
 }
 
 export type SessionValidationResult =

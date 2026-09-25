@@ -815,7 +815,15 @@ model EmployeeTask {
   startedAt        DateTime?
   completedAt      DateTime?
   createdAt        DateTime            @default(now())
+  /// MISSING_MATERIALS | MACHINE_BUSY | NO_AVAILABLE_SPACE — עיכוב, לא טקסט מתורגם
   delayReason      String?
+  delayedAt        DateTime?
+  /// אותן סיבות, רק כשהמשימה הושלמה אחרי זמן היעד
+  lateReason       String?
+  /// זמן עבודה שנסגר (בלי זמן העיכוב), במילישניות
+  activeWorkMs     Int                 @default(0)
+  /// תחילת מקטע העבודה הפתוח. מתאפס בזמן עיכוב.
+  segmentStartedAt DateTime?
   estimatedMinutes Int                 @default(15)
   orderIndex       Int                 @default(0)
   /// משתמש שקיבל את המשימה — חובה לסינון עובד (לא לשתף בין משתמשים על אותו כרטיס)
@@ -1182,6 +1190,8 @@ model WorkSession {
   status       WorkSessionStatus @default(ACTIVE)
   /// הערה חופשית שהעובד הוסיף בכניסה/יציאה
   note         String?
+  /// MANUAL ביציאה של העובד, AUTO_12_HOURS כשהמערכת סגרה אחרי 12 שעות
+  checkoutType ShiftCheckoutType?
   createdAt    DateTime          @default(now())
   updatedAt    DateTime          @updatedAt
   user         User              @relation("WorkSessionUser", fields: [userId], references: [id], onDelete: Cascade)
@@ -1399,6 +1409,8 @@ model Attendance {
   isLate          Boolean             @default(false)
   hasOvertime     Boolean             @default(false)
   note            String?
+  /// MANUAL ביציאה ידנית, AUTO_12_HOURS כשהמערכת סגרה אחרי 12 שעות
+  checkoutType    ShiftCheckoutType?
   createdAt       DateTime            @default(now())
   updatedAt       DateTime            @updatedAt
   shift           WorkShift?          @relation(fields: [shiftId], references: [id])
@@ -1687,6 +1699,12 @@ enum WorkSessionStatus {
   ACTIVE
   ENDED
   CANCELLED
+}
+
+/// איך נסגרה המשמרת. NULL ברשומות היסטוריות שנסגרו לפני החוק.
+enum ShiftCheckoutType {
+  MANUAL
+  AUTO_12_HOURS
 }
 
 enum UserRole {

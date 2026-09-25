@@ -43,7 +43,7 @@ function toPickerRow(p: SupplierCatalogProduct, supplierId: string, supplierName
 function fmtDate(iso: string | null, locale: string) {
   if (!iso) return "—";
   try {
-    return new Date(iso).toLocaleDateString(locale === "ar" ? "ar-IL" : locale === "he" ? "he-IL" : "en-IL", {
+    return new Date(iso).toLocaleDateString(locale === "ar" ? "ar-u-nu-latn" : locale === "he" ? "he-IL" : "en-IL", {
       day: "2-digit",
       month: "2-digit",
     });

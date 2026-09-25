@@ -73,6 +73,10 @@ export async function PATCH(
   let workedMinutes: number | null = null;
   let overtimeMinutes = 0;
   let hasOvertime = false;
+  let checkoutType = existing.checkoutType;
+  if (body.clockOut !== undefined) {
+    checkoutType = clockOut ? "MANUAL" : null;
+  }
   if (clockOut) {
     workedMinutes = diffMinutesClocked(clockIn, clockOut);
     const ot = computeOvertimeOnClockOut(linkedShift, clockOut);
@@ -109,6 +113,7 @@ export async function PATCH(
         shiftId,
         note,
         workedMinutes,
+        checkoutType,
         lateMinutes: late.lateMinutes,
         isLate: late.isLate,
         overtimeMinutes,

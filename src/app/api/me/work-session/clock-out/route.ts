@@ -6,11 +6,12 @@ import { notifyAdminRecipients, toneToColor } from "@/lib/notifications/dispatch
 import {
   computeEarlyLeaveOnClockOut,
   computeOvertimeOnClockOut,
-  diffMinutesClocked,
 } from "@/lib/staff/attendance-calc";
 import { israelCalendarDateString } from "@/lib/staff/work-date";
 import { notifyEarlyClockOut } from "@/lib/notifications/checkMissedAttendance";
 import { requireDb } from "@/lib/api-route";
+import { claimWorkSessionCheckout } from "@/lib/work-sessions/auto-checkout";
+import { notifyManagers } from "@/lib/notifications/dispatch";
 import { serializeWorkSession } from "@/lib/work-sessions/serialize";
 
 /**
@@ -52,19 +53,29 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const clockOut = new Date();
-    const total = diffMinutesClocked(open.clockIn, clockOut);
+    const now = new Date();
     const mergedNote = [open.note, noteExtra].filter(Boolean).join(" — ") || null;
-
-    const ended = await prismaAny.workSession.update({
-      where: { id: open.id },
-      data: {
-        clockOut,
-        totalMinutes: total,
-        status: "ENDED",
-        note: mergedNote,
-      },
+    const claim = await claimWorkSessionCheckout({
+      sessionId: open.id,
+      clockIn: open.clockIn,
+      now,
+      note: mergedNote,
     });
+    const clockOut = claim.clockOut;
+
+    const ended = await prismaAny.workSession.findUnique({ where: { id: open.id } });
+    if (!ended?.clockOut) {
+      return NextResponse.json(
+        { ok: false, error: "אין משמרת פתוחה לסיום" },
+        { status: 400 },
+      );
+    }
+    if (!claim.claimed) {
+      return NextResponse.json({
+        ok: true,
+        data: serializeWorkSession(ended),
+      });
+    }
 
     const taskUser = await prisma.user.findUnique({
       where: { id: session.sub },
@@ -85,12 +96,17 @@ export async function POST(req: NextRequest) {
         workDate: open.workDate,
         status: "ENDED",
       },
-      select: { totalMinutes: true },
+      select: { totalMinutes: true, checkoutType: true },
     });
     const dailyMinutes = dailyTotals.reduce(
       (acc: number, r: { totalMinutes: number | null }) => acc + (r.totalMinutes ?? 0),
       0,
     );
+    const dayCheckoutType = dailyTotals.some(
+      (r: { checkoutType?: string | null }) => r.checkoutType === "AUTO_12_HOURS",
+    )
+      ? "AUTO_12_HOURS"
+      : claim.checkoutType;
 
     const att = await prisma.attendance.findUnique({
       where: { userId_workDate: { userId: session.sub, workDate: open.workDate } },
@@ -107,11 +123,30 @@ export async function POST(req: NextRequest) {
           overtimeMinutes: overtime.overtimeMinutes,
           hasOvertime: overtime.hasOvertime,
           note: mergedNote,
+          checkoutType: dayCheckoutType,
         },
       });
     }
 
-    if (overtime.hasOvertime) {
+    if (claim.claimed && claim.checkoutType === "AUTO_12_HOURS") {
+      const user = await prisma.user.findUnique({
+        where: { id: session.sub },
+        select: { fullName: true },
+      });
+      await notifyManagers(
+        {
+          type: "CLOCK_OUT",
+          title: "יציאה אוטומטית",
+          message: `המשמרת של ${user?.fullName ?? "עובד"} נסגרה אוטומטית לאחר 12 שעות.`,
+          subjectUserId: session.sub,
+          actionUrl: "/ops/team?tab=attendance",
+          priority: "MEDIUM",
+          metadata: { autoCheckoutId: `session:${open.id}`, source: "auto_12_hours" },
+          dedupe: { metadataKey: "autoCheckoutId", sinceHours: 24 * 365 * 5 },
+        },
+        { excludeUserId: session.sub },
+      );
+    } else if (overtime.hasOvertime) {
       const user = await prisma.user.findUnique({
         where: { id: session.sub },
         select: { fullName: true },

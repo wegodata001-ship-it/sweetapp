@@ -371,7 +371,7 @@ export function OrdersHub({ module, canManage }: OrdersHubProps) {
   const [expandMode, setExpandMode] = useState<"view" | "edit" | null>(null);
   const [editForm, setEditForm] = useState<FormState>(emptyForm);
 
-  const locale = bcp47 === "ar" ? "ar-IL" : bcp47 === "en" ? "en-GB" : "he-IL";
+  const locale = bcp47;
 
   const fmtDate = (iso: string) =>
     new Date(iso).toLocaleDateString(locale, { day: "2-digit", month: "short", year: "numeric" });

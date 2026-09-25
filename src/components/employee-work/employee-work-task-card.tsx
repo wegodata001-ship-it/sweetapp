@@ -10,7 +10,7 @@ import {
   Play,
   Trash2,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   EmployeeWorkTaskEditModal,
   type EmployeeWorkTaskEditPatch,
@@ -21,6 +21,7 @@ import type { TaskLockState } from "@/lib/work-tasks/employee-work-lock";
 import { getTaskAccentStyle } from "@/lib/work-tasks/task-color-presets";
 import type { SerializedEmployeeTask } from "@/lib/work-tasks/serialize-employee-work";
 import { isEmployeeWorkTaskLate } from "@/lib/tasks/completion";
+import { TASK_BLOCK_REASONS, activeWorkMs, formatClockHms } from "@/lib/work-tasks/task-timing";
 
 function statusVariant(
   status: string,
@@ -41,6 +42,7 @@ type Props = {
   onToggle?: () => void;
   onStart?: () => void;
   onComplete?: () => void;
+  onDelay?: (reason: string) => void;
   onDelete?: () => void;
   onSave?: (patch: EmployeeWorkTaskEditPatch) => void;
   listLength?: number;
@@ -60,6 +62,7 @@ export function EmployeeWorkTaskCard({
   onToggle,
   onStart,
   onComplete,
+  onDelay,
   onDelete,
   onSave,
   listLength = 1,
@@ -69,8 +72,16 @@ export function EmployeeWorkTaskCard({
   onDrop,
 }: Props) {
   const { t } = useI18n();
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(task.status === "IN_PROGRESS" || task.status === "DELAYED");
   const [editOpen, setEditOpen] = useState(false);
+  const [delayOpen, setDelayOpen] = useState(false);
+  const [delayReason, setDelayReason] = useState("");
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  useEffect(() => {
+    if (task.status !== "IN_PROGRESS") return;
+    const id = window.setInterval(() => setNowMs(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, [task.status]);
   const expanded = expandedProp ?? open;
   const late = isEmployeeWorkTaskLate({
     status: task.status,
@@ -212,6 +223,41 @@ export function EmployeeWorkTaskCard({
           </div>
         </div>
 
+        {task.status === "IN_PROGRESS" || task.status === "DELAYED" || task.late_reason || task.delay_reason ? (
+          <div className="space-y-1 px-3 pb-2 font-mono text-sm font-black tabular-nums text-slate-800">
+            <p>{t("taskTiming.target")} {formatClockHms(task.estimated_minutes * 60_000)}</p>
+            <p>
+              {t("taskTiming.worked")}{" "}
+              {formatClockHms(activeWorkMs({
+                activeWorkMs: task.active_work_ms,
+                segmentStartedAt: task.segment_started_at ?? task.started_at,
+                status: task.status,
+                nowMs,
+              }))}
+            </p>
+            {(() => {
+              const worked = activeWorkMs({
+                activeWorkMs: task.active_work_ms,
+                segmentStartedAt: task.segment_started_at ?? task.started_at,
+                status: task.status,
+                nowMs,
+              });
+              const target = task.estimated_minutes * 60_000;
+              return worked > target ? <p className="text-rose-700">{t("taskTiming.lateBy")} {formatClockHms(worked - target)}</p> : null;
+            })()}
+            {task.status === "DELAYED" ? (
+              <p className="font-sans text-xs font-bold text-amber-800">
+                {t("taskTiming.delayedBadge")} · {t("taskTiming.reasonLabel")}: {task.delay_reason ? t(`taskTiming.reason.${task.delay_reason}`) : "—"}
+              </p>
+            ) : null}
+            {task.late_reason ? (
+              <p className="font-sans text-xs font-bold text-amber-800">
+                {t("taskTiming.lateReason")}: {t(`taskTiming.reason.${task.late_reason}`)}
+              </p>
+            ) : null}
+          </div>
+        ) : null}
+
         {expanded ? (
           <div className="border-t border-slate-100 px-2.5 pb-2.5 pt-2">
             <div className="space-y-1 text-xs text-slate-600">
@@ -240,6 +286,27 @@ export function EmployeeWorkTaskCard({
             </div>
 
             <div className="mt-2 flex gap-1">
+              {!canManage && task.status === "IN_PROGRESS" && onDelay ? (
+                <button
+                  type="button"
+                  onClick={() => setDelayOpen(true)}
+                  disabled={busy}
+                  className="flex flex-1 items-center justify-center rounded-lg border border-amber-300 py-2.5 text-xs font-black text-amber-900"
+                >
+                  {t("taskTiming.delay")}
+                </button>
+              ) : null}
+              {!canManage && task.status === "DELAYED" ? (
+                <button
+                  type="button"
+                  onClick={handleStart}
+                  disabled={busy}
+                  className="flex flex-1 items-center justify-center gap-1 rounded-lg bg-blue-600 py-2.5 text-xs font-black text-white"
+                >
+                  <Play className="h-3.5 w-3.5" />
+                  {t("taskTiming.resume")}
+                </button>
+              ) : null}
               {!canManage && task.status === "PENDING" && !locked ? (
                 <button
                   type="button"
@@ -277,6 +344,28 @@ export function EmployeeWorkTaskCard({
           </div>
         ) : null}
 
+      {delayOpen ? (
+        <div className="fixed inset-0 z-[140] flex items-end justify-center bg-slate-950/55 p-3 sm:items-center" role="dialog">
+          <div className="w-full max-w-sm rounded-3xl bg-white p-4 shadow-2xl">
+            <h3 className="text-lg font-black">{t("taskTiming.delayTitle")}</h3>
+            <p className="mt-1 text-sm font-bold text-slate-600">{t("taskTiming.whyNow")}</p>
+            <div className="mt-3 space-y-2">
+              {TASK_BLOCK_REASONS.map((reason) => (
+                <label key={reason} className="flex items-center gap-2 text-sm font-bold">
+                  <input type="radio" name={`delay-${task.id}`} checked={delayReason === reason} onChange={() => setDelayReason(reason)} />
+                  {t(`taskTiming.reason.${reason}`)}
+                </label>
+              ))}
+            </div>
+            <div className="mt-4 flex gap-2">
+              <button type="button" className="flex-1 rounded-xl bg-amber-500 py-2 text-sm font-black text-slate-950 disabled:opacity-50" disabled={!delayReason} onClick={() => { onDelay?.(delayReason); setDelayOpen(false); setDelayReason(""); }}>
+                {t("taskTiming.delayAndNext")}
+              </button>
+              <button type="button" className="rounded-xl px-3 py-2 text-sm font-bold text-slate-600" onClick={() => setDelayOpen(false)}>{t("common.cancel")}</button>
+            </div>
+          </div>
+        </div>
+      ) : null}
       {canManage ? (
         <EmployeeWorkTaskEditModal
           open={editOpen}

@@ -4,6 +4,7 @@ import { CalendarDays, Clock3, Loader2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useI18n } from "@/components/i18n-provider";
 import type { WorkSessionDto } from "@/lib/work-sessions/serialize";
+import { cappedOpenMinutes } from "@/lib/work-sessions/max-shift";
 
 type DayGroup = {
   work_date: string;
@@ -28,7 +29,7 @@ function fmtHMM(minutes: number): string {
  * session ticks once a second using a single `setInterval`.
  */
 export function EmployeeHoursClient() {
-  const { t, dir, locale } = useI18n();
+  const { t, dir, bcp47 } = useI18n();
   const [days, setDays] = useState<DayGroup[]>([]);
   const [loading, setLoading] = useState(true);
   const [now, setNow] = useState(() => Date.now());
@@ -58,7 +59,6 @@ export function EmployeeHoursClient() {
     return () => window.clearInterval(id);
   }, []);
 
-  const bcp47 = locale === "ar" ? "ar-EG" : locale === "en" ? "en-US" : "he-IL";
   const fmtTime = (iso: string | null) =>
     iso
       ? new Date(iso).toLocaleTimeString(bcp47, { hour: "2-digit", minute: "2-digit" })
@@ -71,10 +71,7 @@ export function EmployeeHoursClient() {
   );
   const liveMinutes = useMemo(() => {
     if (!liveSession) return 0;
-    return Math.max(
-      0,
-      Math.floor((now - new Date(liveSession.clock_in).getTime()) / 60_000),
-    );
+    return cappedOpenMinutes(new Date(liveSession.clock_in).getTime(), now);
   }, [liveSession, now]);
 
   const todayTotal = (today?.total_minutes ?? 0) + liveMinutes;
@@ -133,10 +130,17 @@ export function EmployeeHoursClient() {
                 <span className="font-mono tabular-nums text-slate-700">
                   {fmtTime(s.clock_in)} → {s.clock_out ? fmtTime(s.clock_out) : t("employee.hoursPage.activeNow")}
                 </span>
-                <span className="font-mono font-black tabular-nums text-slate-900">
-                  {s.status === "ACTIVE"
-                    ? fmtHMM(liveMinutes)
-                    : fmtHMM(s.total_minutes ?? 0)}
+                <span className="text-end">
+                  {s.checkout_type === "AUTO_12_HOURS" ? (
+                    <span className="mb-0.5 block text-[11px] font-bold text-amber-700">
+                      {t("employee.hoursPage.autoCheckout")}
+                    </span>
+                  ) : null}
+                  <span className="font-mono font-black tabular-nums text-slate-900">
+                    {s.status === "ACTIVE"
+                      ? fmtHMM(liveMinutes)
+                      : fmtHMM(s.total_minutes ?? 0)}
+                  </span>
                 </span>
               </li>
             ))}
@@ -196,6 +200,11 @@ export function EmployeeHoursClient() {
                     </td>
                     <td className="px-2 py-2 font-mono tabular-nums text-slate-700">
                       {fmtTime(d.last_out)}
+                      {d.sessions.some((s) => s.checkout_type === "AUTO_12_HOURS") ? (
+                        <span className="mt-0.5 block text-[11px] font-bold text-amber-700">
+                          {t("employee.hoursPage.autoCheckout")}
+                        </span>
+                      ) : null}
                     </td>
                     <td className="px-2 py-2 text-end font-mono font-black tabular-nums text-slate-900">
                       {fmtHMM(d.total_minutes)}

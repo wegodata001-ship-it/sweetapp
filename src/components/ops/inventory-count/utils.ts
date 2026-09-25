@@ -1,4 +1,5 @@
 import type { CSSProperties, FocusEvent } from "react";
+import { isArabicTag } from "@/lib/i18n/constants";
 import type { TranslateFn } from "@/lib/i18n/translator";
 import type { ShelfStatusKind, ShelfSummary } from "./types";
 
@@ -27,28 +28,18 @@ export function formatRelativeTime(iso: string | null | undefined, bcp47: string
     const diffMs = now - then;
     if (diffMs < 0) return "—";
     const mins = Math.floor(diffMs / 60000);
-    if (mins < 1) return bcp47 === "ar" ? "الآن" : bcp47 === "en" ? "Just now" : "עכשיו";
+    const arabic = isArabicTag(bcp47);
+    const english = bcp47 === "en" || bcp47.startsWith("en");
+    if (mins < 1) return arabic ? "الآن" : english ? "Just now" : "עכשיו";
     if (mins < 60) {
-      return bcp47 === "ar"
-        ? `قبل ${mins} د`
-        : bcp47 === "en"
-          ? `${mins}m ago`
-          : `לפני ${mins} דק׳`;
+      return arabic ? `قبل ${mins} د` : english ? `${mins}m ago` : `לפני ${mins} דק׳`;
     }
     const hours = Math.floor(mins / 60);
     if (hours < 48) {
-      return bcp47 === "ar"
-        ? `قبل ${hours} س`
-        : bcp47 === "en"
-          ? `${hours}h ago`
-          : `לפני ${hours} שע׳`;
+      return arabic ? `قبل ${hours} س` : english ? `${hours}h ago` : `לפני ${hours} שע׳`;
     }
     const days = Math.floor(hours / 24);
-    return bcp47 === "ar"
-      ? `قبل ${days} ي`
-      : bcp47 === "en"
-        ? `${days}d ago`
-        : `לפני ${days} ימים`;
+    return arabic ? `قبل ${days} ي` : english ? `${days}d ago` : `לפני ${days} ימים`;
   } catch {
     return "—";
   }

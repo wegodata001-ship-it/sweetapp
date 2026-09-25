@@ -5,6 +5,7 @@ import { listStaffAlertRecipientIds } from "@/lib/staff/notify-managers";
 import { notifyAdminRecipients, notifyEmployee, toneToColor } from "@/lib/notifications/dispatch";
 import { computeLateOnClockIn } from "@/lib/staff/attendance-calc";
 import { israelCalendarDateString, parseCalendarDateToDbDate } from "@/lib/staff/work-date";
+import { enforceMaxShiftLength } from "@/lib/work-sessions/auto-checkout";
 
 export async function POST(req: NextRequest) {
   const session = await getSessionFromCookie();
@@ -17,6 +18,8 @@ export async function POST(req: NextRequest) {
 
   const workDateStr = israelCalendarDateString();
   const workDate = parseCalendarDateToDbDate(workDateStr);
+
+  await enforceMaxShiftLength({ userId: session.sub });
 
   const existing = await prisma.attendance.findUnique({
     where: { userId_workDate: { userId: session.sub, workDate } },

@@ -135,6 +135,7 @@ export function EmployeeTaskCard({
               size={isActive ? "large" : isCollapsed ? "compact" : "default"}
               showMeta={isActive}
               showTitle={!isActive && !isCollapsed}
+              activeFocus={isActive}
             />
           ) : (
             <div className="flex min-h-[7rem] flex-col items-center justify-center rounded-2xl bg-slate-50 px-4 py-4 text-center">

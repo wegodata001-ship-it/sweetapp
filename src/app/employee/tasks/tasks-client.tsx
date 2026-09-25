@@ -1,9 +1,10 @@
 "use client";
 
 import { KeyRound, Loader2, Timer } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { SerializedWorkEmployeeTask } from "@/lib/work-tasks/serialize-work-task";
 import { computeCountdownTimer } from "@/lib/tasks/countdown-timer";
+import { TASK_BLOCK_REASONS } from "@/lib/work-tasks/task-timing";
 import { playEmployeeSound } from "@/lib/employee-experience/sounds";
 import { computeEmployeeTaskDayStats } from "@/lib/employee-experience/task-stats";
 import { EmployeeTaskCard } from "@/components/tasks/employee-task-card";
@@ -25,7 +26,6 @@ import { ChangePasswordDialog } from "@/components/auth/change-password-dialog";
 import { useAuth } from "@/components/auth-provider";
 import { useI18n } from "@/components/i18n-provider";
 import { useToast } from "@/components/toast-provider";
-import { dispatchNotificationsRefresh } from "@/lib/notifications/refresh-event";
 import { TaskCelebrationOverlay } from "@/components/employee/task-celebration-overlay";
 import { useEmployeeMiddayToast } from "@/hooks/use-employee-midday-toast";
 import { useEmployeeTodayMinutes } from "@/hooks/use-employee-today-minutes";
@@ -65,6 +65,7 @@ export function EmployeeTasksClient() {
   const [pwOpen, setPwOpen] = useState(false);
   const [celebration, setCelebration] = useState(false);
   const [completedEarly, setCompletedEarly] = useState(false);
+  const actionLock = useRef(false);
   const forcedPw = user?.mustChangePassword === true;
   const { todayMinutes } = useEmployeeTodayMinutes(!needAuth && !loading);
 
@@ -116,8 +117,24 @@ export function EmployeeTasksClient() {
   }, [load]);
 
   const startWork = async (id: string) => {
+    if (actionLock.current) return;
+    actionLock.current = true;
     setBusyId(id);
     setError(null);
+    const snapshot = tasks;
+    const optimisticAt = new Date().toISOString();
+    setTasks((current) =>
+      current.map((task) =>
+        task.id === id
+          ? {
+              ...task,
+              status: "IN_PROGRESS",
+              started_at: task.started_at ?? optimisticAt,
+              segment_started_at: optimisticAt,
+            }
+          : task,
+      ),
+    );
     try {
       const res = await fetch(`/api/work/tasks/${encodeURIComponent(id)}/start`, {
         method: "POST",
@@ -127,21 +144,26 @@ export function EmployeeTasksClient() {
         ok?: boolean;
         error?: string;
         code?: string;
+        data?: SerializedWorkEmployeeTask;
       };
-      if (res.ok && j.ok !== false) {
+      if (res.ok && j.ok !== false && j.data) {
+        const confirmed = j.data;
+        setTasks((current) => current.map((task) => (task.id === id ? { ...task, ...confirmed } : task)));
         playEmployeeSound("start");
         showToast({ tone: "success", title: t("employee.experience.taskStartedToast") });
-        await load();
         return;
       }
+      setTasks(snapshot);
       let msg = j.error?.trim() || t("employee.tasks.errors.startFailed");
       if (j.code === "NOT_YOUR_TASK" || j.code === "NO_EMPLOYEE_CARD") {
         msg = t("employee.tasks.errors.ownershipMismatch");
       }
       setError(msg);
     } catch {
+      setTasks(snapshot);
       setError(t("employee.tasks.errors.startFailed"));
     } finally {
+      actionLock.current = false;
       setBusyId(null);
     }
   };
@@ -175,28 +197,43 @@ export function EmployeeTasksClient() {
           targetDueAt: task.target_due_at,
         });
 
+    if (actionLock.current) return false;
+    actionLock.current = true;
     setBusyId(task.id);
     try {
       const res = await fetch(`/api/work/tasks/${encodeURIComponent(task.id)}/complete`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "same-origin",
-        body: JSON.stringify(delayReason ? { delay_reason: delayReason } : {}),
+        body: JSON.stringify(delayReason ? { late_reason: delayReason } : {}),
       });
       const raw = (await res.json().catch(() => ({}))) as {
         ok?: boolean;
         error?: string;
         code?: string;
+        completedTask?: SerializedWorkEmployeeTask;
+        data?: SerializedWorkEmployeeTask;
+        nextTask?: SerializedWorkEmployeeTask | null;
       };
 
       if (res.ok && raw.ok !== false) {
+        const completed = raw.completedTask ?? raw.data;
+        setTasks((current) => {
+          const next = current.map((row) =>
+            row.id === task.id && completed ? { ...row, ...completed } : row.id === task.id
+              ? { ...row, status: "COMPLETED", completed_at: new Date().toISOString() }
+              : row,
+          );
+          if (raw.nextTask && !next.some((row) => row.id === raw.nextTask!.id)) {
+            next.push(raw.nextTask);
+          }
+          return next;
+        });
         setCompleteModal(null);
         playEmployeeSound("complete");
         setCompletedEarly(wasOnTime && !delayReason);
         setCelebration(true);
         showToast({ tone: "success", title: t("completeTask.success") });
-        dispatchNotificationsRefresh();
-        await load();
         return true;
       }
 
@@ -212,6 +249,7 @@ export function EmployeeTasksClient() {
       );
       return false;
     } finally {
+      actionLock.current = false;
       setBusyId(null);
     }
   };
@@ -346,7 +384,7 @@ export function EmployeeTasksClient() {
           {sortedTasks.map((task) => {
             const isActive = activeTask?.id === task.id;
             const hasDifferentActive = Boolean(activeTask && activeTask.id !== task.id);
-            const canStart = task.status === "PENDING" && !hasDifferentActive;
+            const canStart = (task.status === "PENDING" || task.status === "DELAYED") && !hasDifferentActive;
             const canComplete = task.status === "IN_PROGRESS";
             const isCollapsed = Boolean(activeTask && !isActive);
 
@@ -389,6 +427,10 @@ export function EmployeeTasksClient() {
           submitting={completeModal.submitting}
           error={completeModal.error}
           requireLateReason={completeModalModel.isLate}
+          reasonChoices={TASK_BLOCK_REASONS.map((value) => ({
+            value,
+            label: t(`taskTiming.reason.${value}`),
+          }))}
           onLateReasonChange={(lateReason) =>
             setCompleteModal((cur) => (cur ? { ...cur, lateReason, error: null } : cur))
           }

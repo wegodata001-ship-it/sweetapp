@@ -1,3 +1,4 @@
+import { localeToBcp47, normalizeLocale } from "@/lib/i18n/constants";
 import { formatTimerMs } from "@/lib/tasks/timer-display";
 
 export type TimerVisualTier = "paused" | "onTrack" | "warning" | "danger" | "overdue" | "idle" | "done";
@@ -30,9 +31,20 @@ export type CountdownTimerSnapshot = {
   estimatedMs: number;
 };
 
+export type ActiveTaskClockState = "normal" | "warning" | "critical" | "expired" | "overdue";
+
+/** Visual state for the My Tasks active-task clock. Does not change elapsed time. */
+export function activeTaskClockState(remainingMs: number, isOverdue: boolean): ActiveTaskClockState {
+  if (isOverdue) return "overdue";
+  if (remainingMs <= 0) return "expired";
+  if (remainingMs <= 60_000) return "critical";
+  if (remainingMs <= 120_000) return "warning";
+  return "normal";
+}
+
 function formatClock(iso: string | null, locale: string): string | null {
   if (!iso) return null;
-  const bcp47 = locale === "ar" ? "ar-EG" : locale === "en" ? "en-US" : "he-IL";
+  const bcp47 = /^(he|ar|en)$/i.test(locale) ? localeToBcp47(normalizeLocale(locale)) : locale;
   return new Date(iso).toLocaleTimeString(bcp47, { hour: "2-digit", minute: "2-digit" });
 }
 

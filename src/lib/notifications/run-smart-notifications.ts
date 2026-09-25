@@ -7,6 +7,7 @@ import { checkMissedAttendance } from "@/lib/notifications/checkMissedAttendance
 import { checkInventoryLow } from "@/lib/notifications/checkInventoryLow";
 import { checkEmployeeOverdueTasks } from "@/lib/notifications/checkEmployeeOverdueTasks";
 import { retryFailedNotificationEmails } from "@/lib/email/retry-failed-emails";
+import { enforceMaxShiftLength } from "@/lib/work-sessions/auto-checkout";
 
 export type SmartNotificationsRunResult = {
   lateEmployees: { admin: number; employee: number };
@@ -18,6 +19,7 @@ export type SmartNotificationsRunResult = {
   missedAttendance: { missedIn: number; missedOut: number };
   inventoryLow: number;
   emailRetries: number;
+  autoCheckouts: number;
 };
 
 /** הרצת כל בודקי ההתראות האוטומטיים */
@@ -43,6 +45,7 @@ export async function runSmartNotifications(): Promise<SmartNotificationsRunResu
     checkInventoryLow(),
     retryFailedNotificationEmails(),
   ]);
+  const autoCheckouts = (await enforceMaxShiftLength()).length;
   return {
     lateEmployees,
     overdueTasks,
@@ -53,5 +56,6 @@ export async function runSmartNotifications(): Promise<SmartNotificationsRunResu
     missedAttendance,
     inventoryLow,
     emailRetries,
+    autoCheckouts,
   };
 }

@@ -125,7 +125,7 @@ export function InventoryWarehouseDashboard() {
       t(`ops.inventory.warehouse.modal.${key}`, vars),
     [t],
   );
-  const locale = bcp47 === "ar" ? "ar-IL" : bcp47 === "en" ? "en-GB" : "he-IL";
+  const locale = bcp47;
 
   const canManage = canManageInventory(user);
   /** הסרת שורה מהספירה — מנהל מערכת / בעל העסק בלבד (מחמיר מ־canManage) */

@@ -56,10 +56,10 @@ export function WorkStatusBoard() {
     };
   }, [load]);
 
-  const liveElapsed = (startedAt: string | null) => {
+  const liveElapsed = (startedAt: string | null, closedMs = 0) => {
     void tick;
-    if (!startedAt) return "00:00";
-    return formatElapsedMs(Date.now() - new Date(startedAt).getTime());
+    const open = startedAt ? Math.max(0, Date.now() - new Date(startedAt).getTime()) : 0;
+    return formatElapsedMs(closedMs + open);
   };
 
   const rows = data?.rows ?? [];
@@ -126,7 +126,7 @@ export function WorkStatusBoard() {
                     <p className="mt-1 text-xs font-bold text-slate-600">📦 {row.active_task.group_title}</p>
                   ) : null}
                   <p className="mt-2 font-mono text-lg font-black tabular-nums text-violet-700">
-                    ⏱ {liveElapsed(row.active_task.started_at)}
+                    ⏱ {liveElapsed(row.active_task.started_at, row.active_task.active_work_ms)}
                   </p>
                   <p className="text-[11px] font-bold text-slate-500">
                     📊 {row.active_task.step_index}/{row.active_task.step_total}
@@ -186,7 +186,7 @@ export function WorkStatusBoard() {
                   </p>
                 ) : null}
                 <p className="mt-2 font-mono text-3xl font-black text-violet-700">
-                  {liveElapsed(selected.active_task.started_at)}
+                  {liveElapsed(selected.active_task.started_at, selected.active_task.active_work_ms)}
                 </p>
                 <p className="text-sm font-bold text-slate-600">
                   📍 {t("workStatus.step")} {selected.active_task.step_index} / {selected.active_task.step_total}

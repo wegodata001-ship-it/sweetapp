@@ -38,7 +38,7 @@ export function computeSequenceLocks(
   const sorted = [...tasks].sort((a, b) => a.order_index - b.order_index);
   let foundNext = false;
   for (const t of sorted) {
-    if (t.status === "COMPLETED") {
+    if (t.status === "COMPLETED" || t.status === "DELAYED") {
       map.set(t.id, { locked: false, isNext: false });
       continue;
     }
@@ -94,14 +94,14 @@ export async function assertEmployeeCanStartTask(params: {
         taskGroupId: params.taskGroupId,
         employeeId: params.employeeId,
         orderIndex: { lt: params.orderIndex },
-        status: { not: "COMPLETED" },
+        status: { notIn: ["COMPLETED", "DELAYED"] },
       }
     : {
         taskGroupId: null,
         sessionId: params.sessionId,
         employeeId: params.employeeId,
         orderIndex: { lt: params.orderIndex },
-        status: { not: "COMPLETED" },
+        status: { notIn: ["COMPLETED", "DELAYED"] },
       };
 
   const { prisma } = await import("@/lib/prisma");

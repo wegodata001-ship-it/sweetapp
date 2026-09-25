@@ -86,13 +86,61 @@ export async function collectForecastMovements(fallbackDate: string): Promise<Fo
   const movements: ForecastMovement[] = [];
   const checkAmountByDoc = new Map<string, number>();
 
-  const checks = await prisma.checkPayment.findMany({
+  const [checks, incomeDocs, orders, expenseDocs, manualEntries] = await Promise.all([
+    prisma.checkPayment.findMany({
     where: { status: { in: [...OPEN_CHECK_STATUSES] } },
     include: {
       customer: { select: { name: true } },
       document: { select: { id: true, title: true } },
     },
-  });
+  }),
+    prisma.financialDocument.findMany({
+      where: { category: "הכנסה" },
+      select: {
+        id: true,
+        title: true,
+        paymentStatus: true,
+        totalAmount: true,
+        paidAmount: true,
+        remainingAmount: true,
+        docDate: true,
+        metadata: true,
+        customer: { select: { name: true } },
+      },
+    }),
+    prisma.futureOrder.findMany({
+      where: {
+        isCompleted: false,
+        status: { notIn: ["COMPLETED", "CANCELLED"] },
+        remainingAmount: { gt: 0.01 },
+      },
+      select: {
+        id: true,
+        orderNumber: true,
+        customerName: true,
+        remainingAmount: true,
+        depositAmount: true,
+        depositPaid: true,
+        eventDate: true,
+        orderCategory: true,
+      },
+    }),
+    prisma.financialDocument.findMany({
+      where: { category: "הוצאה" },
+      select: {
+        id: true,
+        title: true,
+        totalAmount: true,
+        paidAmount: true,
+        remainingAmount: true,
+        docDate: true,
+        metadata: true,
+        supplier: { select: { name: true } },
+        employee: { select: { name: true } },
+      },
+    }),
+    listManualForecastEntries(),
+  ]);
 
   for (const c of checks) {
     const dueDate = toDateKey(c.dueDate);
@@ -114,21 +162,6 @@ export async function collectForecastMovements(fallbackDate: string): Promise<Fo
       canDefer: false,
     });
   }
-
-  const incomeDocs = await prisma.financialDocument.findMany({
-    where: { category: "הכנסה" },
-    select: {
-      id: true,
-      title: true,
-      paymentStatus: true,
-      totalAmount: true,
-      paidAmount: true,
-      remainingAmount: true,
-      docDate: true,
-      metadata: true,
-      customer: { select: { name: true } },
-    },
-  });
 
   for (const doc of incomeDocs) {
     if (!isOpenInvoiceDoc(doc)) continue;
@@ -186,24 +219,6 @@ export async function collectForecastMovements(fallbackDate: string): Promise<Fo
     }
   }
 
-  const orders = await prisma.futureOrder.findMany({
-    where: {
-      isCompleted: false,
-      status: { notIn: ["COMPLETED", "CANCELLED"] },
-      remainingAmount: { gt: 0.01 },
-    },
-    select: {
-      id: true,
-      orderNumber: true,
-      customerName: true,
-      remainingAmount: true,
-      depositAmount: true,
-      depositPaid: true,
-      eventDate: true,
-      orderCategory: true,
-    },
-  });
-
   for (const o of orders) {
     const eventDate = toDateKey(o.eventDate);
     if (!o.depositPaid && o.depositAmount > 0.01) {
@@ -234,21 +249,6 @@ export async function collectForecastMovements(fallbackDate: string): Promise<Fo
       });
     }
   }
-
-  const expenseDocs = await prisma.financialDocument.findMany({
-    where: { category: "הוצאה" },
-    select: {
-      id: true,
-      title: true,
-      totalAmount: true,
-      paidAmount: true,
-      remainingAmount: true,
-      docDate: true,
-      metadata: true,
-      supplier: { select: { name: true } },
-      employee: { select: { name: true } },
-    },
-  });
 
   for (const doc of expenseDocs) {
     const remaining =
@@ -323,7 +323,6 @@ export async function collectForecastMovements(fallbackDate: string): Promise<Fo
     }
   }
 
-  const manualEntries = await listManualForecastEntries();
   for (const entry of manualEntries) {
     pushMovement(movements, {
       id: `manual-${entry.id}`,

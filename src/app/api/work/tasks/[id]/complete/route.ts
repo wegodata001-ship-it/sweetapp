@@ -1,14 +1,11 @@
-import { NextRequest, NextResponse } from "next/server";
+import { after, NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireDb } from "@/lib/api-route";
-import { getSessionFromCookie } from "@/lib/auth/get-session";
-import { computeActualMinutes, isTaskLate } from "@/lib/tasks/helpers";
+import { canManageAllTasks } from "@/lib/tasks/task-access";
 import { strictUserId } from "@/lib/auth/strict-user-isolation";
-import { assertEmployeeOwnsWorkTask } from "@/lib/work-tasks/access";
-import { logTaskCompleteDenied } from "@/lib/work-tasks/task-security-log";
 import { serializeWorkEmployeeTask } from "@/lib/work-tasks/serialize-work-task";
+import { completeEmployeeTaskFast, readTaskActionSession } from "@/lib/work-tasks/fast-task-actions";
 import { notifyTaskCompleted } from "@/lib/notifications/task-flow";
-import { clearUserActiveTask } from "@/lib/work-status/active-task";
 
 export const dynamic = "force-dynamic";
 
@@ -16,101 +13,58 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   const dbErr = await requireDb();
   if (dbErr) return dbErr;
 
-  const session = await getSessionFromCookie();
+  const authStarted = performance.now();
+  const session = await readTaskActionSession();
+  const authMs = Math.round(performance.now() - authStarted);
   if (!session) {
     return NextResponse.json({ ok: false, error: "נדרשת התחברות" }, { status: 401 });
   }
 
   const { id } = await ctx.params;
-  const body = (await req.json().catch(() => ({}))) as { delay_reason?: string | null };
+  const body = (await req.json().catch(() => ({}))) as { late_reason?: string | null; delay_reason?: string | null };
+  const lateReason = (body.late_reason ?? body.delay_reason ?? "").toString();
 
   try {
-    const task = await prisma.employeeTask.findUnique({ where: { id } });
-    if (!task) {
-      return NextResponse.json({ ok: false, error: "משימה לא נמצאה" }, { status: 404 });
-    }
-
-    const gate = await assertEmployeeOwnsWorkTask(session, { ...task, id }, "complete");
-    if (!gate.ok) {
-      logTaskCompleteDenied({
-        taskId: id,
-        userId: strictUserId(session),
-        assignedToUserId: task.assignedToUserId,
-        code: gate.code,
-      });
+    const result = await completeEmployeeTaskFast(prisma, {
+      taskId: id,
+      userId: strictUserId(session),
+      manager: canManageAllTasks(session),
+      lateReason,
+      sid: session.sid,
+    });
+    if (!result.ok) {
       return NextResponse.json(
-        { ok: false, error: gate.error, code: gate.code },
-        { status: gate.status },
+        { ok: false, success: false, error: result.error, code: result.code },
+        { status: result.status },
       );
     }
 
-    if (task.status === "COMPLETED") {
-      return NextResponse.json({
-        ok: true,
-        data: serializeWorkEmployeeTask(task),
-        notificationSent: false,
+    if (result.action === "COMPLETE") {
+      const task = result.task;
+      after(() => {
+        void notifyTaskCompleted({
+          taskId: task.id,
+          employeeId: task.employeeId,
+          taskTitle: task.title,
+          previousStatus: "IN_PROGRESS",
+        }).catch((error) => {
+          console.error("[TASK COMPLETE NOTIFY]", error);
+        });
       });
     }
 
-    if (task.status !== "IN_PROGRESS" || !task.startedAt) {
-      return NextResponse.json({ ok: false, error: "יש להתחיל את המשימה לפני הסיום" }, { status: 400 });
-    }
-
-    const completedAt = new Date();
-    const actualMinutes = computeActualMinutes(task.startedAt, completedAt);
-    const timerLate = isTaskLate(task.estimatedMinutes, actualMinutes);
-    const dueLate = task.targetDueAt
-      ? completedAt.getTime() > new Date(task.targetDueAt).getTime()
-      : false;
-    const late = timerLate || dueLate;
-    const reason =
-      typeof body.delay_reason === "string" ? body.delay_reason.trim().slice(0, 2000) : "";
-
-    if (late && !reason) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: "המשימה חרגה מהזמן המשוער — נדרשת סיבת איחור",
-          code: "NEED_DELAY_REASON",
-        },
-        { status: 400 },
-      );
-    }
-
-    const previousStatus = task.status;
-    const updated = await prisma.employeeTask.update({
-      where: { id },
-      data: {
-        status: "COMPLETED",
-        completedAt,
-        isActive: false,
-        delayReason: late ? reason : reason || null,
-      },
-    });
-
-    if (task.assignedToUserId) {
-      await clearUserActiveTask(task.assignedToUserId);
-    }
-
-    console.log("[TASK STATUS UPDATED]", {
-      taskId: id,
-      from: previousStatus,
-      to: "COMPLETED",
-      employeeId: task.employeeId,
-    });
-
-    const notificationSent = await notifyTaskCompleted({
-      taskId: id,
-      employeeId: task.employeeId,
-      taskTitle: task.title,
-      previousStatus,
-    });
-
-    return NextResponse.json({
+    const completedTask = serializeWorkEmployeeTask(result.task);
+    const nextTask = result.nextTask ? serializeWorkEmployeeTask(result.nextTask) : null;
+    const response = NextResponse.json({
       ok: true,
-      data: serializeWorkEmployeeTask(updated),
-      notificationSent,
+      success: true,
+      data: completedTask,
+      completedTask,
+      nextTask,
+      notificationSent: result.action === "COMPLETE",
     });
+    response.headers.set("Server-Timing", `auth;dur=${authMs}, db;dur=${result.dbMs}, notify;dur=0`);
+    return response;
   } catch (e) {
     console.error("[POST /api/work/tasks/:id/complete]", e);
     return NextResponse.json({ ok: false, error: "לא ניתן לסיים משימה" }, { status: 500 });

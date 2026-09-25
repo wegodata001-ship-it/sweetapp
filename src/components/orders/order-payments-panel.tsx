@@ -41,7 +41,7 @@ export function OrderPaymentsPanel({
 }) {
   const { t, bcp47 } = useI18n();
   const tP = useCallback((key: string, vars?: Record<string, string | number>) => t(`orderPayments.${key}`, vars), [t]);
-  const locale = bcp47 === "ar" ? "ar-IL" : bcp47 === "en" ? "en-GB" : "he-IL";
+  const locale = bcp47;
 
   const [payments, setPayments] = useState<OrderPayment[]>([]);
   const [loading, setLoading] = useState(true);

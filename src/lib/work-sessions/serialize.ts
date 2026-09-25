@@ -1,3 +1,5 @@
+import { cappedOpenMinutes } from "@/lib/work-sessions/max-shift";
+
 /**
  * DTOs for the multi-cycle work-session model.
  *
@@ -15,6 +17,7 @@ export type WorkSessionDto = {
   clock_out: string | null; // ISO when ENDED
   total_minutes: number | null;
   status: WorkSessionStatus;
+  checkout_type: "MANUAL" | "AUTO_12_HOURS" | null;
   note: string | null;
   created_at: string;
   updated_at: string;
@@ -28,6 +31,7 @@ type WorkSessionRow = {
   clockOut: Date | null;
   totalMinutes: number | null;
   status: WorkSessionStatus;
+  checkoutType?: "MANUAL" | "AUTO_12_HOURS" | null;
   note: string | null;
   createdAt: Date;
   updatedAt: Date;
@@ -47,15 +51,18 @@ export function serializeWorkSession(row: WorkSessionRow): WorkSessionDto {
     clock_out: row.clockOut ? row.clockOut.toISOString() : null,
     total_minutes: row.totalMinutes,
     status: row.status,
+    checkout_type: row.checkoutType ?? null,
     note: row.note,
     created_at: row.createdAt.toISOString(),
     updated_at: row.updatedAt.toISOString(),
   };
 }
 
-/** Live minutes from clock-in to "now" (or to clock_out if ended). */
+/** Minutes from clock-in to the stored clock-out, or a live value capped at 12 hours. */
 export function elapsedMinutes(session: WorkSessionDto, nowMs: number = Date.now()): number {
   const start = new Date(session.clock_in).getTime();
-  const end = session.clock_out ? new Date(session.clock_out).getTime() : nowMs;
-  return Math.max(0, Math.floor((end - start) / 60_000));
+  if (session.clock_out) {
+    return Math.max(0, Math.floor((new Date(session.clock_out).getTime() - start) / 60_000));
+  }
+  return cappedOpenMinutes(start, nowMs);
 }

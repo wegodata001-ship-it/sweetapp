@@ -52,10 +52,12 @@ export async function buildCashflowForecast(
   params?: BuildForecastParams,
 ): Promise<CashflowForecastResult> {
   const { dateFrom, dateTo } = resolveForecastRange(params);
-  const bankBalance = await getForecastBankBalance();
   const openingDate = dateFrom;
 
-  const allMovements = await collectForecastMovements(dateFrom);
+  const [bankBalance, allMovements] = await Promise.all([
+    getForecastBankBalance(),
+    collectForecastMovements(dateFrom),
+  ]);
   const movements = movementsInForecastRange(allMovements, dateFrom, dateTo);
 
   const rows: CashflowForecastRow[] = [];

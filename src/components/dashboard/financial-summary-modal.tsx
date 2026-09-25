@@ -20,7 +20,7 @@ function rateLabel(value: string): string {
 }
 
 export function FinancialSummaryModal({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const { t, locale, dir } = useI18n();
+  const { t, bcp47, dir } = useI18n();
   const router = useRouter();
   const today = new Date().toISOString().slice(0, 10);
   const [kind, setKind] = useState<"week" | "month" | "year" | "custom">("month");
@@ -33,6 +33,10 @@ export function FinancialSummaryModal({ open, onClose }: { open: boolean; onClos
   const [needsReview, setNeedsReview] = useState(false);
   const [copied, setCopied] = useState("");
   const [selectedZ, setSelectedZ] = useState<VatSourceLine | null>(null);
+  const [pdfOpen, setPdfOpen] = useState(false);
+  const [exporting, setExporting] = useState("");
+  const [exportError, setExportError] = useState("");
+  const [pdfSections, setPdfSections] = useState({ summary: true, z: true, income: true, input: true });
   const zRef = useRef<HTMLElement>(null);
   const incomeRef = useRef<HTMLElement>(null);
   const range = kind === "custom" ? { from: customFrom, to: customTo } : periodBounds(kind, anchor);
@@ -53,7 +57,7 @@ export function FinancialSummaryModal({ open, onClose }: { open: boolean; onClos
       .catch(() => setSummary(null));
   }, [open, range.from, range.to]);
 
-  const dateLocale = locale === "en" ? "en" : locale === "ar" ? "ar" : "he";
+  const dateLocale = bcp47;
   const formatDay = (value: string) => {
     const d = new Date(`${value}T00:00:00.000Z`);
     if (Number.isNaN(d.getTime())) return value;
@@ -112,9 +116,56 @@ export function FinancialSummaryModal({ open, onClose }: { open: boolean; onClos
     void copyText(row.sourceId, text);
   }
 
-  function copyTable(key: string, header: string[], rows: string[][]) {
-    const text = [header.join(" | "), ...rows.map((row) => row.join(" | "))].join("\n");
-    void copyText(key, text);
+  function copySummary() {
+    if (!summary) return;
+    const text = [
+      t("dashboard.redesign.financialSummary"),
+      `${range.from} – ${range.to}`,
+      `${t("dashboard.redesign.vatOutput")}: ${money(summary.outputVat)}`,
+      `${t("dashboard.redesign.vatInput")}: ${money(summary.inputVat)}`,
+      `${summary.payableSide === "credit" ? t("dashboard.redesign.vatCredit") : t("dashboard.redesign.vatEstimated")}: ${money(summary.payableVat)}`,
+      `${t("dashboard.redesign.vatZSource")}: ${money(summary.outputBySource.zReports.vatAmount)}`,
+      `${t("dashboard.redesign.vatIncomeSource")}: ${money(summary.outputBySource.incomeDocuments.vatAmount)}`,
+    ].join("\n");
+    void copyText("summary", text);
+  }
+
+  async function downloadExport(format: "pdf" | "xlsx") {
+    if (!summary || needsReview) return;
+    setExporting(format);
+    setExportError("");
+    try {
+      const res = await fetch("/api/dashboard/vat-summary/export", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          from: range.from,
+          to: range.to,
+          format,
+          sections: format === "pdf" ? pdfSections : undefined,
+        }),
+      });
+      if (!res.ok) {
+        setExportError(t("dashboard.redesign.vatExportBlocked"));
+        return;
+      }
+      const blob = await res.blob();
+      const header = res.headers.get("Content-Disposition") ?? "";
+      const match = /filename\*=UTF-8''([^;]+)/.exec(header);
+      const name = match ? decodeURIComponent(match[1]) : `WEGO_summary.${format === "pdf" ? "pdf" : "xlsx"}`;
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = name;
+      link.click();
+      URL.revokeObjectURL(url);
+      setPdfOpen(false);
+    } catch {
+      setExportError(t("dashboard.redesign.vatExportBlocked"));
+    } finally {
+      setExporting("");
+    }
   }
 
   function openDocument(row: VatSourceLine) {
@@ -207,6 +258,46 @@ export function FinancialSummaryModal({ open, onClose }: { open: boolean; onClos
             </div>
           )}
           <p className="mt-2 text-xs text-slate-500">{range.from} — {range.to}. {t("dashboard.redesign.vatDisclaimer")}</p>
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <button type="button" disabled={!summary} className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-sm font-bold disabled:opacity-50" onClick={copySummary}>
+              {copied === "summary" ? t("dashboard.redesign.vatCopied") : t("dashboard.redesign.vatCopySummary")}
+            </button>
+            <button type="button" disabled={!summary || needsReview || exporting !== ""} className="rounded-xl bg-[#081224] px-3 py-1.5 text-sm font-bold text-white disabled:opacity-50" onClick={() => void downloadExport("xlsx")}>
+              {exporting === "xlsx" ? t("dashboard.redesign.vatExporting") : t("dashboard.redesign.vatExcel")}
+            </button>
+            <button type="button" disabled={!summary || needsReview || exporting !== ""} className="rounded-xl bg-[#081224] px-3 py-1.5 text-sm font-bold text-white disabled:opacity-50" onClick={() => setPdfOpen(true)}>
+              {t("dashboard.redesign.vatPdf")}
+            </button>
+          </div>
+          {exportError ? <p className="mt-2 text-sm font-bold text-amber-800">{exportError}</p> : null}
+          {pdfOpen ? (
+            <div className="mt-3 max-w-sm rounded-2xl border border-slate-200 bg-white p-4 shadow-lg">
+              <p className="font-black text-[#081224]">{t("dashboard.redesign.vatPdfTitle")}</p>
+              <p className="mt-1 text-sm text-slate-600">{t("dashboard.redesign.vatPdfPeriod")}: {label}</p>
+              <p className="mt-3 text-sm font-bold">{t("dashboard.redesign.vatPdfInclude")}</p>
+              {([
+                ["summary", "dashboard.redesign.vatPdfSummary"],
+                ["z", "dashboard.redesign.vatPdfZ"],
+                ["income", "dashboard.redesign.vatPdfIncome"],
+                ["input", "dashboard.redesign.vatPdfInput"],
+              ] as const).map(([key, textKey]) => (
+                <label key={key} className="mt-2 flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={pdfSections[key]}
+                    onChange={(event) => setPdfSections((current) => ({ ...current, [key]: event.target.checked }))}
+                  />
+                  {t(textKey)}
+                </label>
+              ))}
+              <div className="mt-3 flex gap-2">
+                <button type="button" className="rounded-xl bg-[#c9a227] px-3 py-1.5 text-sm font-black text-[#081224] disabled:opacity-50" disabled={exporting !== "" || !Object.values(pdfSections).some(Boolean)} onClick={() => void downloadExport("pdf")}>
+                  {exporting === "pdf" ? t("dashboard.redesign.vatExporting") : t("dashboard.redesign.vatPdfMake")}
+                </button>
+                <button type="button" className="rounded-xl px-3 py-1.5 text-sm font-bold text-slate-600" onClick={() => setPdfOpen(false)}>{t("dashboard.redesign.vatClose")}</button>
+              </div>
+            </div>
+          ) : null}
         </div>
 
         <div className="min-h-0 flex-1 overflow-auto px-4 py-4 sm:px-6">
@@ -272,17 +363,7 @@ export function FinancialSummaryModal({ open, onClose }: { open: boolean; onClos
                   </section>
 
                   <section ref={zRef}>
-                    <SectionHead
-                      title={t("dashboard.redesign.vatZSection")}
-                      copyLabel={copied === "z-table" ? t("dashboard.redesign.vatCopied") : t("dashboard.redesign.vatCopyTable")}
-                      onCopy={() =>
-                        copyTable(
-                          "z-table",
-                          [t("dashboard.redesign.vatColDate"), t("dashboard.redesign.vatColZ"), t("dashboard.redesign.vatTaxable"), t("dashboard.redesign.vatComputed")],
-                          zRows.map((row) => [formatDay(row.date), row.documentNumber, money(row.grossAmount), money(row.vatAmount)]),
-                        )
-                      }
-                    />
+                    <h3 className="mb-2 font-black">{t("dashboard.redesign.vatZSection")}</h3>
                     {zRows.length === 0 ? <Empty text={t("dashboard.redesign.vatEmptyOutput")} /> : (
                       <>
                         <div className="hidden overflow-x-auto md:block">
@@ -323,17 +404,7 @@ export function FinancialSummaryModal({ open, onClose }: { open: boolean; onClos
                   </section>
 
                   <section ref={incomeRef}>
-                    <SectionHead
-                      title={t("dashboard.redesign.vatIncomeSection")}
-                      copyLabel={copied === "income-table" ? t("dashboard.redesign.vatCopied") : t("dashboard.redesign.vatCopyTable")}
-                      onCopy={() =>
-                        copyTable(
-                          "income-table",
-                          [t("dashboard.redesign.vatColDate"), t("dashboard.redesign.vatColDocNo"), t("dashboard.redesign.vatColCustomer"), t("dashboard.redesign.vatColNet"), t("dashboard.redesign.vatComputed"), t("dashboard.redesign.vatColGross")],
-                          incomeRows.map((row) => [formatDay(row.date), row.documentNumber, row.partyName || "—", money(row.netAmount), money(row.vatAmount), money(row.grossAmount)]),
-                        )
-                      }
-                    />
+                    <h3 className="mb-2 font-black">{t("dashboard.redesign.vatIncomeSection")}</h3>
                     {incomeRows.length === 0 ? <Empty text={t("dashboard.redesign.vatEmptyOutput")} /> : (
                       <>
                         <div className="hidden overflow-x-auto md:block">
@@ -379,17 +450,7 @@ export function FinancialSummaryModal({ open, onClose }: { open: boolean; onClos
 
               {tab === "input" ? (
                 <section className="mt-4">
-                  <SectionHead
-                    title={t("dashboard.redesign.vatInputSection")}
-                    copyLabel={copied === "input-table" ? t("dashboard.redesign.vatCopied") : t("dashboard.redesign.vatCopyTable")}
-                    onCopy={() =>
-                      copyTable(
-                        "input-table",
-                        [t("dashboard.redesign.vatColDate"), t("dashboard.redesign.vatColSupplier"), t("dashboard.redesign.vatColDocNo"), t("dashboard.redesign.vatColNet"), t("dashboard.redesign.vatColDeductible")],
-                        inputRows.map((row) => [formatDay(row.date), row.partyName || "—", row.documentNumber, money(row.netAmount), row.deductible ? money(row.vatAmount) : t("dashboard.redesign.vatNotDeductible")]),
-                      )
-                    }
-                  />
+                  <h3 className="mb-2 font-black">{t("dashboard.redesign.vatInputSection")}</h3>
                   <p className="mb-3 text-sm">
                     <span className="font-bold">{t("dashboard.redesign.vatInput")}: </span>
                     {money(summary.inputVat)}
@@ -521,15 +582,6 @@ function SourceCard(props: {
       <p className="text-sm"><span className="text-slate-500">{props.countLabel}: </span><span className="font-bold">{props.count}</span></p>
       <button type="button" className="mt-2 text-sm font-black text-[#081224] underline decoration-[#c9a227]" onClick={props.onShow}>{props.action}</button>
     </article>
-  );
-}
-
-function SectionHead({ title, copyLabel, onCopy }: { title: string; copyLabel: string; onCopy: () => void }) {
-  return (
-    <div className="mb-2 flex items-center justify-between gap-3">
-      <h3 className="font-black">{title}</h3>
-      <button type="button" className="rounded-xl border border-slate-200 px-3 py-1 text-sm font-bold" onClick={onCopy}>{copyLabel}</button>
-    </div>
   );
 }
 

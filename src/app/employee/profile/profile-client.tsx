@@ -52,7 +52,7 @@ export function EmployeeProfileClient() {
     void refresh({ sync: true });
   }, [loadEmailPrefs, refresh]);
 
-  const locale = bcp47 === "ar" ? "ar-IL" : bcp47 === "en" ? "en-GB" : "he-IL";
+  const locale = bcp47;
   const lastLogin = user?.lastLogin;
   const lastLoginAtLabel =
     lastLogin?.at

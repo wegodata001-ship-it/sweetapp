@@ -20,7 +20,7 @@ import { playEmployeeSound } from "@/lib/employee-experience/sounds";
  * push them to /employee.
  */
 export function ClockInScreen() {
-  const { t, dir, locale } = useI18n();
+  const { t, dir, bcp47 } = useI18n();
   const { showToast } = useToast();
   const { user } = useAuth();
   const router = useRouter();
@@ -34,9 +34,6 @@ export function ClockInScreen() {
     const id = window.setInterval(() => setNow(new Date()), 1000);
     return () => window.clearInterval(id);
   }, []);
-
-  const bcp47 =
-    locale === "ar" ? "ar-EG" : locale === "en" ? "en-US" : "he-IL";
 
   const clockText = now
     ? now.toLocaleTimeString(bcp47, {

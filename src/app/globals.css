@@ -62,6 +62,15 @@ body.locale-ar {
   text-align: right;
 }
 
+/* Cairo and Tajawal swap 0-9 for ٠-٩ with the locl feature when lang is Arabic.
+   The language still shapes Arabic letters. This only turns that digit swap off.
+   !important wins over `font: inherit` on inputs, which resets the feature. */
+html[lang^="ar"],
+html[lang^="ar"] body,
+html[lang^="ar"] body * {
+  font-feature-settings: "locl" 0 !important;
+}
+
 .font-arabic-brand {
   font-family: var(--font-main);
 }

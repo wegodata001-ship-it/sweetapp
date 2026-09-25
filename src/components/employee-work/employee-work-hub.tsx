@@ -23,6 +23,7 @@ import { EmployeeWorkAdminPanel } from "@/components/employee-work/employee-work
 import { PickGroupDrawer, type GroupTemplateOption } from "@/components/employee-work/pick-group-drawer";
 import { getCached, invalidateCacheKey, setCached } from "@/lib/client/fetch-cache";
 import { computeDayTaskLocks } from "@/lib/work-tasks/employee-work-lock";
+import { TASK_BLOCK_REASONS, activeWorkMs, formatClockHms, isWorkLate } from "@/lib/work-tasks/task-timing";
 import {
   buildOptimisticTask,
   mergeGroupIntoDay,
@@ -516,6 +517,31 @@ export function EmployeeWorkHub({
     return day.loose_tasks.find((x) => x.id === taskId) ?? null;
   };
 
+  const delayTask = async (taskId: string, reason: string) => {
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/work/tasks/${encodeURIComponent(taskId)}/delay`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({ reason }),
+      });
+      const j = (await res.json()) as {
+        ok?: boolean;
+        error?: string;
+        data?: SerializedEmployeeTask;
+      };
+      if (!j.ok || !j.data) {
+        showToast({ tone: "error", title: j.error ?? t("common.error") });
+      } else {
+        const updated = j.data;
+        setDay((current) => (current ? patchTaskInDay(current, taskId, updated) : current));
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const employeeStartComplete = async (taskId: string, action: "start" | "complete") => {
     if (!day) return;
     if (action === "complete") {
@@ -542,10 +568,12 @@ export function EmployeeWorkHub({
         method: "POST",
         credentials: "same-origin",
       });
-      const j = (await res.json()) as { ok?: boolean; error?: string };
+      const j = (await res.json()) as { ok?: boolean; error?: string; data?: SerializedEmployeeTask };
       if (!j.ok) {
         setDay(prev);
         showToast({ tone: "error", title: j.error ?? t("common.error") });
+      } else if (j.data) {
+        setDay((current) => (current ? patchTaskInDay(current, taskId, j.data!) : current));
       }
     } catch {
       setDay(prev);
@@ -556,12 +584,15 @@ export function EmployeeWorkHub({
   const submitHubComplete = async () => {
     if (!completeModal || completeModal.submitting || !day) return;
     const task = completeModal.task;
-    const late = isEmployeeWorkTaskLate({
-      status: task.status,
-      startedAt: task.started_at,
-      estimatedMinutes: task.estimated_minutes,
-      targetDueAt: task.target_due_at,
-    });
+    const late = isWorkLate(
+      activeWorkMs({
+        activeWorkMs: task.active_work_ms,
+        segmentStartedAt: task.segment_started_at ?? task.started_at,
+        status: task.status,
+        nowMs: Date.now(),
+      }),
+      task.estimated_minutes,
+    );
     const lateReason = completeModal.lateReason.trim();
     const note = completeModal.completionNote.trim();
     if (late && !lateReason) {
@@ -583,9 +614,9 @@ export function EmployeeWorkHub({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "same-origin",
-        body: JSON.stringify(delayReason ? { delay_reason: delayReason } : {}),
+        body: JSON.stringify(late ? { late_reason: lateReason } : {}),
       });
-      const j = (await res.json()) as { ok?: boolean; error?: string };
+      const j = (await res.json()) as { ok?: boolean; error?: string; data?: SerializedEmployeeTask };
       if (!j.ok) {
         setDay(prev);
         setCompleteModal((cur) =>
@@ -593,9 +624,11 @@ export function EmployeeWorkHub({
         );
         return;
       }
+      if (j.data) {
+        setDay((current) => (current ? patchTaskInDay(current, task.id, j.data!) : current));
+      }
       setCompleteModal(null);
       showToast({ tone: "success", title: t("completeTask.success") });
-      await loadDay({ force: true, silent: true });
     } catch {
       setDay(prev);
       setCompleteModal((cur) =>
@@ -612,12 +645,15 @@ export function EmployeeWorkHub({
       estimatedMinutes: task.estimated_minutes,
       targetDueAt: task.target_due_at,
     });
-    const late = isEmployeeWorkTaskLate({
-      status: task.status,
-      startedAt: task.started_at,
-      estimatedMinutes: task.estimated_minutes,
-      targetDueAt: task.target_due_at,
-    });
+    const late = isWorkLate(
+      activeWorkMs({
+        activeWorkMs: task.active_work_ms,
+        segmentStartedAt: task.segment_started_at ?? task.started_at,
+        status: task.status,
+        nowMs: Date.now(),
+      }),
+      task.estimated_minutes,
+    );
     return {
       title: task.title,
       dueLabel: formatTaskDateTime(deadline, bcp47),
@@ -844,6 +880,7 @@ export function EmployeeWorkHub({
                     onReorderTask={(ids) => void reorderTasks(ids, group.id)}
                     onStartTask={(id) => void employeeStartComplete(id, "start")}
                     onCompleteTask={(id) => void employeeStartComplete(id, "complete")}
+                    onDelayTask={(id, reason) => void delayTask(id, reason)}
                   />
                 );
               })}
@@ -879,8 +916,13 @@ export function EmployeeWorkHub({
                         }}
                         onDelete={() => void deleteTask(task.id)}
                         onStart={
-                          !canManage && task.status === "PENDING"
+                          !canManage && (task.status === "PENDING" || task.status === "DELAYED")
                             ? () => void employeeStartComplete(task.id, "start")
+                            : undefined
+                        }
+                        onDelay={
+                          !canManage && task.status === "IN_PROGRESS"
+                            ? (reason) => void delayTask(task.id, reason)
                             : undefined
                         }
                         onComplete={
@@ -908,6 +950,23 @@ export function EmployeeWorkHub({
           submitting={completeModal.submitting}
           error={completeModal.error}
           requireLateReason={hubCompleteModel.isLate}
+          showCompletionNote={false}
+          reasonChoices={TASK_BLOCK_REASONS.map((value) => ({ value, label: t(`taskTiming.reason.${value}`) }))}
+          clockSummary={(() => {
+            const task = completeModal.task;
+            const worked = activeWorkMs({
+              activeWorkMs: task.active_work_ms,
+              segmentStartedAt: task.segment_started_at ?? task.started_at,
+              status: task.status,
+              nowMs: Date.now(),
+            });
+            const target = task.estimated_minutes * 60_000;
+            return {
+              target: formatClockHms(target),
+              actual: formatClockHms(worked),
+              late: formatClockHms(Math.max(0, worked - target)),
+            };
+          })()}
           onLateReasonChange={(lateReason) =>
             setCompleteModal((cur) => (cur ? { ...cur, lateReason, error: null } : cur))
           }

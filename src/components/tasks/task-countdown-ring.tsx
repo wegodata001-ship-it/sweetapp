@@ -2,7 +2,7 @@
 
 import { memo, useEffect, useId, useMemo, useRef, useState } from "react";
 import { useI18n } from "@/components/i18n-provider";
-import { computeCountdownTimer, type TimerVisualTier } from "@/lib/tasks/countdown-timer";
+import { activeTaskClockState, computeCountdownTimer, type TimerVisualTier } from "@/lib/tasks/countdown-timer";
 import styles from "./task-countdown-ring.module.css";
 
 const RING_R = 88;
@@ -19,7 +19,17 @@ type Props = {
   showMeta?: boolean;
   showTitle?: boolean;
   className?: string;
+  /** Strong critical styling used only on the active card in My Tasks. */
+  activeFocus?: boolean;
 };
+
+const STATE_CLASS = {
+  normal: styles.state_normal,
+  warning: styles.state_warning,
+  critical: styles.state_critical,
+  expired: styles.state_expired,
+  overdue: styles.state_overdue,
+} as const;
 
 const TIER_CLASS: Record<TimerVisualTier, string> = {
   onTrack: styles.onTrack,
@@ -42,6 +52,7 @@ function TaskCountdownRingInner({
   showMeta = true,
   showTitle = true,
   className = "",
+  activeFocus = false,
 }: Props) {
   const { t, locale } = useI18n();
   const gradId = useId().replace(/:/g, "");
@@ -105,11 +116,18 @@ function TaskCountdownRingInner({
   const sizeClass =
     size === "large" ? styles.sizeLarge : size === "compact" ? styles.sizeCompact : styles.sizeDefault;
 
-  const statusLabel = t(`tasks.timer.status.${snap.statusKey}`);
+  const clockState = activeTaskClockState(snap.remainingMs, snap.isOverdue);
+  const statusLabel = activeFocus && clockState === "critical"
+    ? t("tasks.timer.underMinute")
+    : activeFocus && clockState === "overdue"
+      ? t("tasks.timer.overdueShort")
+      : activeFocus && clockState === "expired"
+        ? t("tasks.timer.expired")
+        : t(`tasks.timer.status.${snap.statusKey}`);
 
   return (
     <div
-      className={`${styles.wrap} ${sizeClass} ${tierClass} ${snap.criticalMinute ? styles.criticalMinute : ""} ${className}`}
+      className={`${styles.wrap} ${sizeClass} ${tierClass} ${snap.criticalMinute ? styles.criticalMinute : ""} ${activeFocus ? `${styles.activeFocus} ${STATE_CLASS[clockState]}` : ""} ${className}`}
       aria-live={isLive ? "polite" : undefined}
       role="timer"
     >
@@ -133,6 +151,7 @@ function TaskCountdownRingInner({
               <stop offset="100%" stopColor="#f43f5e" />
             </linearGradient>
           </defs>
+          <g transform="rotate(-90 100 100)">
           <circle className={styles.ringTrack} cx="100" cy="100" r={RING_R} />
           <circle
             className={styles.ringProgress}
@@ -153,11 +172,17 @@ function TaskCountdownRingInner({
             strokeDasharray={RING_C}
             strokeDashoffset={strokeOffset}
           />
+          </g>
         </svg>
         <div className={styles.innerGlow} aria-hidden />
         <div className={styles.glassPlate} aria-hidden />
         <div className={styles.center}>
-          <p className={`${styles.time} ${displayFlash ? styles.timeTick : ""}`}>{snap.display}</p>
+          <p
+            className={`${styles.time} ${displayFlash && clockState !== "critical" ? styles.timeTick : ""}`}
+            dir="ltr"
+          >
+            {snap.display}
+          </p>
           <p className={styles.status}>{statusLabel}</p>
           {snap.isLive || snap.visualTier === "idle" ? (
             <p className={styles.progressPct}>{snap.progressPct}%</p>

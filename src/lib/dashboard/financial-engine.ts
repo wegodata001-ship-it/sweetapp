@@ -357,7 +357,7 @@ export function runFinancialEngine(
     };
   });
 
-  const bcp = locale === "ar" ? "ar-IL" : locale === "en" ? "en-IL" : "he-IL";
+  const bcp = locale === "ar" ? "ar-u-nu-latn" : locale === "en" ? "en-IL" : "he-IL";
   const dailyChart = [...dailyMap.entries()].map(([date, v]) => {
     const d = new Date(date + "T12:00:00");
     return {

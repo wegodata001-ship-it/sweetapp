@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { prisma, prismaAny } from "@/lib/prisma";
 import { getSessionFromCookie } from "@/lib/auth/get-session";
 import { canManageAllTasks } from "@/lib/tasks/task-access";
 import { ensureMissedClockInAlertsForToday } from "@/lib/staff/missed-shift";
 import { israelCalendarDateString, parseCalendarDateToDbDate } from "@/lib/staff/work-date";
+import { enforceMaxShiftLength } from "@/lib/work-sessions/auto-checkout";
+import { isOpenShiftPastMax } from "@/lib/work-sessions/max-shift";
 
 export async function GET() {
   const session = await getSessionFromCookie();
@@ -11,15 +13,21 @@ export async function GET() {
     return NextResponse.json({ ok: false, error: "אין הרשאה" }, { status: 403 });
   }
 
+  await enforceMaxShiftLength();
   await ensureMissedClockInAlertsForToday();
 
   const todayStr = israelCalendarDateString();
   const workDate = parseCalendarDateToDbDate(todayStr);
 
-  const [activeNow, lateToday, overtimeToday, openTasks, shiftsToday, attendToday] =
+  const now = new Date();
+  const [activeSessions, openAttendance, lateToday, overtimeToday, openTasks, shiftsToday, attendToday] =
     await Promise.all([
+      prismaAny.workSession.findMany({
+        where: { status: "ACTIVE", clockOut: null },
+        include: { user: { select: { id: true, fullName: true } } },
+      }),
       prisma.attendance.findMany({
-        where: { workDate, clockOut: null },
+        where: { clockOut: null },
         include: { user: { select: { id: true, fullName: true } } },
       }),
       prisma.attendance.findMany({
@@ -68,11 +76,26 @@ export async function GET() {
     ok: true,
     data: {
       date: todayStr,
-      activeNow: activeNow.map((a) => ({
-        userId: a.userId,
-        name: a.user.fullName,
-        clockIn: a.clockIn.toISOString(),
-      })),
+      activeNow: [
+        ...activeSessions
+          .filter((a: { clockIn: Date }) => !isOpenShiftPastMax(a.clockIn, now))
+          .map((a: { userId: string; clockIn: Date; user: { fullName: string } }) => ({
+            userId: a.userId,
+            name: a.user.fullName,
+            clockIn: a.clockIn.toISOString(),
+          })),
+        ...openAttendance
+          .filter(
+            (a) =>
+              !isOpenShiftPastMax(a.clockIn, now) &&
+              !activeSessions.some((s: { userId: string }) => s.userId === a.userId),
+          )
+          .map((a) => ({
+            userId: a.userId,
+            name: a.user.fullName,
+            clockIn: a.clockIn.toISOString(),
+          })),
+      ],
       lateToday: lateToday.map((a) => ({
         userId: a.userId,
         name: a.user.fullName,

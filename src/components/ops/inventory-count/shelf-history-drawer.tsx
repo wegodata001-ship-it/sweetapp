@@ -57,7 +57,7 @@ export function ShelfHistoryDrawer({ open, shelfName, onClose }: Props) {
 
   if (!open) return null;
 
-  const locale = bcp47 === "ar" ? "ar-IL" : bcp47 === "en" ? "en-GB" : "he-IL";
+  const locale = bcp47;
   const fmt = (iso: string) =>
     new Date(iso).toLocaleString(locale, {
       day: "2-digit",

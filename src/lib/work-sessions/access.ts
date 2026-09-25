@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { getSessionFromCookie } from "@/lib/auth/get-session";
 import { prismaAny } from "@/lib/prisma";
 import type { SessionJwtPayload } from "@/lib/auth/jwt";
+import { enforceMaxShiftLength } from "@/lib/work-sessions/auto-checkout";
 
 /**
  * Require the caller to be authenticated AND (if they are an EMPLOYEE) to
@@ -18,6 +19,7 @@ export async function requireActiveWorkSession(): Promise<SessionJwtPayload> {
     redirect("/login");
   }
   if (session.role === "EMPLOYEE") {
+    await enforceMaxShiftLength({ userId: session.sub });
     const active = await prismaAny.workSession.findFirst({
       where: { userId: session.sub, status: "ACTIVE" },
       select: { id: true },
@@ -35,6 +37,7 @@ export async function requireActiveWorkSession(): Promise<SessionJwtPayload> {
  * (return a JSON 403) rather than redirect.
  */
 export async function hasActiveWorkSession(userId: string): Promise<boolean> {
+  await enforceMaxShiftLength({ userId });
   const active = await prismaAny.workSession.findFirst({
     where: { userId, status: "ACTIVE" },
     select: { id: true },

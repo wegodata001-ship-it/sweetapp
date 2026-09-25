@@ -1,6 +1,7 @@
 import { UserRole } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { formatElapsedMs, resolvePresenceState, type WorkPresenceState } from "@/lib/work-status/presence";
+import { activeWorkMs } from "@/lib/work-tasks/task-timing";
 
 export type WorkStatusTimelineEvent = {
   at: string;
@@ -22,6 +23,7 @@ export type WorkStatusBoardRow = {
     estimated_minutes: number;
     elapsed: string;
     started_at: string | null;
+    active_work_ms: number;
     group_title: string | null;
     step_index: number;
     step_total: number;
@@ -107,6 +109,10 @@ export async function loadWorkStatusBoard(): Promise<WorkStatusBoardRow[]> {
           color: true,
           estimatedMinutes: true,
           startedAt: true,
+          activeWorkMs: true,
+          segmentStartedAt: true,
+          delayReason: true,
+          lateReason: true,
           targetDueAt: true,
           description: true,
           materials: true,
@@ -134,8 +140,12 @@ export async function loadWorkStatusBoard(): Promise<WorkStatusBoardRow[]> {
 
     let active_task: WorkStatusBoardRow["active_task"] = null;
     if (task && task.status === "IN_PROGRESS") {
-      const started = task.startedAt ?? u.activeTaskStartedAt;
-      const elapsedMs = started ? now - started.getTime() : 0;
+      const elapsedMs = activeWorkMs({
+        activeWorkMs: task.activeWorkMs,
+        segmentStartedAt: task.segmentStartedAt ?? task.startedAt ?? u.activeTaskStartedAt,
+        status: task.status,
+        nowMs: now,
+      });
       const prog = await stepProgress(task.id, task.employeeId, task.taskGroupId);
       active_task = {
         id: task.id,
@@ -144,7 +154,8 @@ export async function loadWorkStatusBoard(): Promise<WorkStatusBoardRow[]> {
         color: task.color,
         estimated_minutes: task.estimatedMinutes,
         elapsed: formatElapsedMs(elapsedMs),
-        started_at: started?.toISOString() ?? null,
+        started_at: (task.segmentStartedAt ?? task.startedAt)?.toISOString() ?? null,
+        active_work_ms: task.activeWorkMs,
         group_title: task.taskGroup?.title ?? null,
         step_index: prog.index,
         step_total: prog.total,
@@ -209,13 +220,21 @@ export async function loadWorkStatusMe(userId: string) {
   });
 
   let next_task: { id: string; title: string } | null = null;
-  if (u.employeeId && !task) {
-    const next = await prisma.employeeTask.findFirst({
-      where: { employeeId: u.employeeId, status: "PENDING" },
+  let delayed_tasks: Array<{ id: string; title: string; delayReason: string | null }> = [];
+  if (u.employeeId) {
+    delayed_tasks = await prisma.employeeTask.findMany({
+      where: { employeeId: u.employeeId, status: "DELAYED" },
       orderBy: { orderIndex: "asc" },
-      select: { id: true, title: true },
+      select: { id: true, title: true, delayReason: true },
     });
-    if (next) next_task = next;
+    if (!task || task.status !== "IN_PROGRESS") {
+      const next = await prisma.employeeTask.findFirst({
+        where: { employeeId: u.employeeId, status: "PENDING" },
+        orderBy: { orderIndex: "asc" },
+        select: { id: true, title: true },
+      });
+      if (next) next_task = next;
+    }
   }
 
   return {
@@ -223,7 +242,8 @@ export async function loadWorkStatusMe(userId: string) {
     name: u.fullName,
     employee_id: u.employeeId,
     presence,
-    active_task: task,
+    active_task: task && task.status === "IN_PROGRESS" ? task : null,
     next_task,
+    delayed_tasks,
   };
 }

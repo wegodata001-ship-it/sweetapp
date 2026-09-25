@@ -40,7 +40,7 @@ function priorityTone(priority: NotePriority): string {
 }
 
 export function MyNotesClient() {
-  const { t, dir, locale } = useI18n();
+  const { t, dir, bcp47 } = useI18n();
   const { user } = useAuth();
   const { showToast } = useToast();
   const searchParams = useSearchParams();
@@ -52,8 +52,6 @@ export function MyNotesClient() {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [formOpen, setFormOpen] = useState(false);
   const [form, setForm] = useState<NoteFormState>(EMPTY_FORM);
-
-  const bcp47 = locale === "ar" ? "ar-EG" : locale === "en" ? "en-US" : "he-IL";
 
   const formatDate = useCallback(
     (iso: string) =>

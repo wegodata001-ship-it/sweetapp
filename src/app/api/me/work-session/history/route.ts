@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSessionFromCookie } from "@/lib/auth/get-session";
 import { prismaAny } from "@/lib/prisma";
 import { requireDb } from "@/lib/api-route";
+import { enforceMaxShiftLength } from "@/lib/work-sessions/auto-checkout";
 import {
   serializeWorkSession,
   type WorkSessionDto,
@@ -32,6 +33,8 @@ export async function GET(req: NextRequest) {
   const limit = Math.min(500, Math.max(1, Number(url.searchParams.get("limit") ?? "200") || 200));
 
   try {
+    await enforceMaxShiftLength({ userId: session.sub });
+
     const start = new Date();
     start.setUTCHours(0, 0, 0, 0);
     start.setUTCDate(start.getUTCDate() - (days - 1));

@@ -414,6 +414,7 @@ async function loadSummary(locale: string): Promise<DashboardSummary> {
     openInvoices,
     shortageProducts,
     notifyWidgets,
+    cashflowForecast,
   ] = await Promise.all([
     prisma.cashFlowEntry.findMany({
       where: { entryDate: { gte: fetchFrom } },
@@ -504,6 +505,7 @@ async function loadSummary(locale: string): Promise<DashboardSummary> {
           pendingChecks: 0,
           upcomingOrders: 0,
         })),
+    buildCashflowForecast().catch(() => null),
   ]);
 
   const docIdsNeedingType = cashRows
@@ -595,8 +597,7 @@ async function loadSummary(locale: string): Promise<DashboardSummary> {
     });
   }
 
-  try {
-    const cashflowForecast = await buildCashflowForecast();
+  if (cashflowForecast) {
     for (const s of cashflowForecast.shortages.slice(0, 5)) {
       const [y, m, d] = s.date.split("-");
       const dateLabel = y && m && d ? `${d}/${m}/${y}` : s.date;
@@ -609,8 +610,6 @@ async function loadSummary(locale: string): Promise<DashboardSummary> {
         titleParams: { date: dateLabel, amount: formatShekel(s.shortageAmount) },
       });
     }
-  } catch {
-    /* תחזית תזרים — לא לשבור דשבורד */
   }
 
   const shortageRows = shortageProducts.map((item) => ({

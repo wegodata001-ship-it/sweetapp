@@ -19,7 +19,10 @@ import {
   normalizeLocale,
   type AppLocale,
 } from "@/lib/i18n/constants";
+import { installLatinDigits } from "@/lib/i18n/latin-digits";
 import { createTranslator, type Messages, type TranslateFn } from "@/lib/i18n/translator";
+
+installLatinDigits();
 
 type I18nContextValue = {
   locale: AppLocale;
@@ -98,20 +101,30 @@ export function I18nProvider({
 
   const [devMessages, setDevMessages] = useState<Messages | null>(null);
 
-  /** בפיתוח — טוען JSON מהדיסק כדי שעדכוני locales/ar.json יופיעו בלי restart */
+  /** בפיתוח — טוען JSON מהדיסק כדי שעדכוני locales יופיעו בלי restart */
   useEffect(() => {
     if (process.env.NODE_ENV !== "development") return;
     let cancelled = false;
-    void fetch(`/api/dev/messages?locale=${encodeURIComponent(locale)}`, { cache: "no-store" })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data) => {
-        if (!cancelled && data) setDevMessages(data as Messages);
+    const load = () => {
+      void fetch(`/api/dev/messages?locale=${encodeURIComponent(locale)}`, {
+        cache: "no-store",
+        credentials: "same-origin",
       })
-      .catch(() => {
-        if (!cancelled) setDevMessages(null);
-      });
+        .then((r) => (r.ok ? r.json() : null))
+        .then((data) => {
+          if (!cancelled && data && typeof data === "object" && "nav" in data) {
+            setDevMessages(data as Messages);
+          }
+        })
+        .catch(() => {
+          if (!cancelled) setDevMessages(null);
+        });
+    };
+    load();
+    window.addEventListener("focus", load);
     return () => {
       cancelled = true;
+      window.removeEventListener("focus", load);
     };
   }, [locale]);
 

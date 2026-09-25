@@ -1,4 +1,5 @@
 import type { RGB } from "pdf-lib";
+import type { PdfFontWeight } from "./pdf-fonts";
 import type { PdfLayout } from "./pdf-layout";
 import {
   PDF_COLORS,
@@ -25,6 +26,7 @@ export type PdfTableColumn<Row> = {
   /** Defaults to `start`; numeric columns usually want `end`. */
   align?: TextAlign;
   color?: (row: Row) => RGB | undefined;
+  weight?: (row: Row) => PdfFontWeight | undefined;
   /** Allow the cell to wrap onto several lines instead of being ellipsized. */
   wrap?: boolean;
 };
@@ -313,6 +315,7 @@ export async function drawTable<Row>(
           y: lineY,
           boxWidth,
           size: cellSize,
+          weight: col.weight?.(row) ?? "regular",
           color: col.color?.(row) ?? PDF_COLORS.text,
           align: col.align ?? "start",
         });
