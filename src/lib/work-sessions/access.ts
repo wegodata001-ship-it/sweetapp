@@ -19,13 +19,14 @@ export async function requireActiveWorkSession(): Promise<SessionJwtPayload> {
     redirect("/login");
   }
   if (session.role === "EMPLOYEE") {
-    await enforceMaxShiftLength({ userId: session.sub });
+    const closed = await enforceMaxShiftLength({ userId: session.sub });
     const active = await prismaAny.workSession.findFirst({
       where: { userId: session.sub, status: "ACTIVE" },
       select: { id: true },
     });
     if (!active) {
-      redirect("/employee/clock");
+      const auto = closed.some((row) => row.userId === session.sub);
+      redirect(auto ? "/employee/clock?ended=auto" : "/employee/clock");
     }
   }
   return session;
@@ -36,6 +37,15 @@ export async function requireActiveWorkSession(): Promise<SessionJwtPayload> {
  * has an active session. Useful for API routes that want to soft-fail
  * (return a JSON 403) rather than redirect.
  */
+/** Employees cannot start or finish work tasks after the 12h shift is closed. */
+export async function assertEmployeeShiftOpen(
+  session: SessionJwtPayload,
+): Promise<{ ok: true } | { ok: false }> {
+  if (session.role !== "EMPLOYEE") return { ok: true };
+  const open = await hasActiveWorkSession(session.sub);
+  return open ? { ok: true } : { ok: false };
+}
+
 export async function hasActiveWorkSession(userId: string): Promise<boolean> {
   await enforceMaxShiftLength({ userId });
   const active = await prismaAny.workSession.findFirst({

@@ -41,7 +41,8 @@ export async function GET() {
     startOfDay.setUTCHours(0, 0, 0, 0);
     const tomorrow = new Date(startOfDay.getTime() + 24 * 60 * 60 * 1000);
 
-    await enforceMaxShiftLength({ userId: uid });
+    const closedShifts = await enforceMaxShiftLength({ userId: uid });
+    const autoClosed = closedShifts.some((row) => row.userId === uid);
 
     const [activeSession, todaySessions, activeRunsRaw, dailyWorkTasksOpen] = await Promise.all([
       prismaAny.workSession.findFirst({
@@ -102,6 +103,7 @@ export async function GET() {
       ok: true,
       data: {
         session: activeSession ? serializeWorkSession(activeSession) : null,
+        auto_closed: autoClosed,
         today: {
           sessions: todaySessions.map(serializeWorkSession),
           completed_minutes: todayCompletedMinutes,

@@ -10,7 +10,7 @@ import {
 import { israelCalendarDateString } from "@/lib/staff/work-date";
 import { notifyEarlyClockOut } from "@/lib/notifications/checkMissedAttendance";
 import { requireDb } from "@/lib/api-route";
-import { claimWorkSessionCheckout } from "@/lib/work-sessions/auto-checkout";
+import { claimWorkSessionCheckout, pauseTasksAtShiftCutoff } from "@/lib/work-sessions/auto-checkout";
 import { notifyManagers } from "@/lib/notifications/dispatch";
 import { serializeWorkSession } from "@/lib/work-sessions/serialize";
 
@@ -20,7 +20,7 @@ import { serializeWorkSession } from "@/lib/work-sessions/serialize";
  * Ends the caller's currently-open work session.
  *
  * Side-effects:
- *  - Computes `totalMinutes` from clockIn → now.
+ *  - Past 12 hours, clockOut is clockIn + 12h. Before that, it is now.
  *  - Updates the legacy daily `Attendance` row's clock-out so the admin
  *    staff page sums the day correctly (we accumulate all ENDED sessions
  *    of the day into `workedMinutes`).
@@ -86,6 +86,9 @@ export async function POST(req: NextRequest) {
         where: { employeeId: taskUser.employeeId, status: "ACTIVE" },
         data: { endedAt: clockOut, status: "ENDED" },
       });
+    }
+    if (claim.checkoutType === "AUTO_12_HOURS") {
+      await pauseTasksAtShiftCutoff(taskUser?.employeeId, session.sub, clockOut);
     }
 
     // Update legacy daily Attendance summary — accumulate all ENDED sessions

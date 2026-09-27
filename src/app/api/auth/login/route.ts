@@ -7,6 +7,7 @@ import { signSessionToken, COOKIE_NAME } from "@/lib/auth/jwt";
 import { getPermissionStringsForUser } from "@/lib/auth/user-permissions";
 import { logActivity } from "@/lib/activity-log";
 import { createUserSession, requestClientMeta } from "@/lib/auth/session-binding";
+import { enforceMaxShiftLength } from "@/lib/work-sessions/auto-checkout";
 import {
   AUTH_API_CODES,
   authErrorResponse,
@@ -130,6 +131,9 @@ export async function POST(req: NextRequest) {
         identifier: rawIdentifier,
         action: "login_success",
         req,
+      }),
+      enforceMaxShiftLength({ userId: user.id }).catch((error) => {
+        console.error("[login] auto checkout", error);
       }),
     ]);
 

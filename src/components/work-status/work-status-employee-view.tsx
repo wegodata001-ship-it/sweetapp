@@ -1,8 +1,12 @@
 "use client";
 
 import { Check, Loader2, Play, Radio } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
+import { useAuth } from "@/components/auth-provider";
 import { useI18n } from "@/components/i18n-provider";
+import { useToast } from "@/components/toast-provider";
+import { useAutoShiftGuard } from "@/hooks/use-auto-shift-guard";
 import { CompleteTaskModal } from "@/components/tasks/complete-task-modal";
 import { WorkStatusHeartbeat } from "@/components/work-status/work-status-heartbeat";
 import {
@@ -37,6 +41,10 @@ const POLL_MS = 15_000;
 
 export function WorkStatusEmployeeView() {
   const { t, dir, bcp47 } = useI18n();
+  const { user } = useAuth();
+  const { showToast } = useToast();
+  const router = useRouter();
+  useAutoShiftGuard(user?.role === "EMPLOYEE");
   const [data, setData] = useState<MeData | null>(null);
   const [busy, setBusy] = useState(false);
   const [tick, setTick] = useState(0);
@@ -88,8 +96,15 @@ export function WorkStatusEmployeeView() {
       const j = (await res.json()) as {
         ok?: boolean;
         error?: string;
+        code?: string;
         data?: { id: string; title: string; status: string; estimated_minutes: number; started_at: string | null; active_work_ms: number; segment_started_at: string | null; description: string | null };
       };
+      if (j.code === "SHIFT_ENDED") {
+        showToast({ tone: "success", title: t("employee.dashboard.autoShiftEnded") });
+        router.push("/employee/clock");
+        router.refresh();
+        return;
+      }
       if (!j.ok || !j.data) {
         alert(j.error ?? t("common.error"));
       } else {
@@ -143,8 +158,16 @@ export function WorkStatusEmployeeView() {
       const j = (await res.json()) as {
         ok?: boolean;
         error?: string;
+        code?: string;
         nextTask?: { id: string; title: string } | null;
       };
+      if (j.code === "SHIFT_ENDED") {
+        setCompleteOpen(false);
+        showToast({ tone: "success", title: t("employee.dashboard.autoShiftEnded") });
+        router.push("/employee/clock");
+        router.refresh();
+        return;
+      }
       if (!j.ok) {
         setCompleteError(j.error ?? t("completeTask.failed"));
         return;

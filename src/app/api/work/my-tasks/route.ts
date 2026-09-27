@@ -9,6 +9,7 @@ import {
 } from "@/lib/auth/strict-user-isolation";
 import { warnDuplicateEmployeeIds } from "@/lib/work-tasks/duplicate-employee-check";
 import { serializeWorkEmployeeTask } from "@/lib/work-tasks/serialize-work-task";
+import { enforceMaxShiftLength } from "@/lib/work-sessions/auto-checkout";
 
 export const dynamic = "force-dynamic";
 
@@ -28,6 +29,7 @@ export async function GET() {
   const uid = strictUserId(session);
 
   try {
+    await enforceMaxShiftLength({ userId: uid });
     void warnDuplicateEmployeeIds();
     const rowsRaw = await prisma.employeeTask.findMany({
       where: { assignedToUserId: uid },

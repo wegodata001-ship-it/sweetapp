@@ -5,6 +5,7 @@ import { canManageAllTasks } from "@/lib/tasks/task-access";
 import { strictUserId } from "@/lib/auth/strict-user-isolation";
 import { serializeWorkEmployeeTask } from "@/lib/work-tasks/serialize-work-task";
 import { delayEmployeeTaskFast, readTaskActionSession } from "@/lib/work-tasks/fast-task-actions";
+import { assertEmployeeShiftOpen } from "@/lib/work-sessions/access";
 import { isTaskBlockReason } from "@/lib/work-tasks/task-timing";
 
 export const dynamic = "force-dynamic";
@@ -19,6 +20,13 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   if (!session) return NextResponse.json({ ok: false, error: "נדרשת התחברות" }, { status: 401 });
 
   const { id } = await ctx.params;
+  const shift = await assertEmployeeShiftOpen(session);
+  if (!shift.ok) {
+    return NextResponse.json(
+      { ok: false, error: "יום העבודה הסתיים אוטומטית לאחר 12 שעות.", code: "SHIFT_ENDED" },
+      { status: 403 },
+    );
+  }
   const body = (await req.json().catch(() => ({}))) as { reason?: string; delayReason?: string };
   const reason = body.reason ?? body.delayReason ?? "";
   if (!isTaskBlockReason(reason)) {

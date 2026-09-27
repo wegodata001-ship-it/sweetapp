@@ -2796,6 +2796,7 @@
       "clockOutBtn": "סיום יום עבודה",
       "clockOutConfirm": "לסיים את יום העבודה?",
       "clockOutOk": "יום עבודה הסתיים · {{minutes}} שעות",
+      "autoShiftEnded": "יום העבודה הסתיים אוטומטית לאחר 12 שעות.",
       "clockOutErr": "לא ניתן לסיים יום עבודה",
       "kpiToday": "שעות היום",
       "kpiLive": "זמן פעיל כרגע",

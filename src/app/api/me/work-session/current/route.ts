@@ -24,7 +24,8 @@ export async function GET() {
   }
 
   try {
-    await enforceMaxShiftLength({ userId: session.sub });
+    const closedShifts = await enforceMaxShiftLength({ userId: session.sub });
+    const autoClosed = closedShifts.some((row) => row.userId === session.sub);
     const active = await prismaAny.workSession.findFirst({
       where: { userId: session.sub, status: "ACTIVE" },
       orderBy: { clockIn: "desc" },
@@ -53,6 +54,7 @@ export async function GET() {
       ok: true,
       data: {
         session: active ? serializeWorkSession(active) : null,
+        auto_closed: autoClosed,
         today: {
           completed_minutes: completedMinutes,
           sessions_count: todayRows.length,

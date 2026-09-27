@@ -2800,6 +2800,7 @@
       "clockOutBtn": "End work day",
       "clockOutConfirm": "End the work day now?",
       "clockOutOk": "Work day ended · {{minutes}} hours",
+      "autoShiftEnded": "The work day ended automatically after 12 hours.",
       "clockOutErr": "Cannot end work day",
       "kpiToday": "Hours today",
       "kpiLive": "Active time now",

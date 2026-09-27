@@ -35,6 +35,13 @@ export function ClockInScreen() {
     return () => window.clearInterval(id);
   }, []);
 
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("ended") !== "auto") return;
+    showToast({ tone: "success", title: t("employee.dashboard.autoShiftEnded") });
+    router.replace("/employee/clock");
+  }, [router, showToast, t]);
+
   const clockText = now
     ? now.toLocaleTimeString(bcp47, {
         hour: "2-digit",

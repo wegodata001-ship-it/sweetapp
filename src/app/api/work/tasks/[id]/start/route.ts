@@ -5,6 +5,7 @@ import { canManageAllTasks } from "@/lib/tasks/task-access";
 import { strictUserId } from "@/lib/auth/strict-user-isolation";
 import { serializeWorkEmployeeTask } from "@/lib/work-tasks/serialize-work-task";
 import { readTaskActionSession, startEmployeeTaskFast } from "@/lib/work-tasks/fast-task-actions";
+import { assertEmployeeShiftOpen } from "@/lib/work-sessions/access";
 
 export const dynamic = "force-dynamic";
 
@@ -21,6 +22,13 @@ export async function POST(_req: NextRequest, ctx: { params: Promise<{ id: strin
 
   const { id } = await ctx.params;
   const userId = strictUserId(session);
+  const shift = await assertEmployeeShiftOpen(session);
+  if (!shift.ok) {
+    return NextResponse.json(
+      { ok: false, error: "יום העבודה הסתיים אוטומטית לאחר 12 שעות.", code: "SHIFT_ENDED" },
+      { status: 403 },
+    );
+  }
 
   try {
     const result = await startEmployeeTaskFast(prisma, {

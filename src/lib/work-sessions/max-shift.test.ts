@@ -113,6 +113,25 @@ describe("12h max shift", () => {
     assert.equal(shift.checkoutType, "MANUAL");
   });
 
+  it("TEST 7 — 36:36 hours later still stores exactly 12:00, not 36:36", () => {
+    const clockIn = at("2026-10-01T08:00:00.000Z");
+    const now = new Date(clockIn.getTime() + (36 * 60 + 36) * 60 * 1000);
+    const resolved = resolveCheckout(clockIn, now);
+    assert.equal(resolved.checkoutType, "AUTO_12_HOURS");
+    assert.equal(resolved.clockOut.getTime(), clockIn.getTime() + MAX_SHIFT_MS);
+    assert.equal(resolved.totalMinutes, 12 * 60);
+    assert.notEqual(resolved.totalMinutes, 36 * 60 + 36);
+    assert.equal(shiftWorkedMinutes(clockIn, resolved.clockOut, now), 12 * 60);
+  });
+
+  it("a check five minutes after the cap still writes the cap, not the discovery time", () => {
+    const clockIn = at("2026-10-01T08:00:00.000Z");
+    const now = at("2026-10-01T20:05:00.000Z");
+    const resolved = resolveCheckout(clockIn, now);
+    assert.equal(resolved.clockOut.toISOString(), "2026-10-01T20:00:00.000Z");
+    assert.equal(resolved.totalMinutes, 12 * 60);
+  });
+
   it("12 hours is a fixed millisecond span across a DST fallback", () => {
     const clockIn = at("2026-10-24T22:30:00.000Z");
     const clockOut = autoCheckoutAt(clockIn);

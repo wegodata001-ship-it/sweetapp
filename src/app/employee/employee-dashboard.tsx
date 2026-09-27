@@ -30,10 +30,11 @@ import type { SerializedWorkEmployeeTask } from "@/lib/work-tasks/serialize-work
 import { WorkflowRunCard } from "@/components/workflows/workflow-run-card";
 import type { WorkflowRunDetailDto } from "@/lib/workflows/serialize";
 import type { WorkSessionDto } from "@/lib/work-sessions/serialize";
-import { cappedOpenMinutes, MAX_SHIFT_MS } from "@/lib/work-sessions/max-shift";
+import { cappedOpenMinutes, MAX_SHIFT_MINUTES, MAX_SHIFT_MS } from "@/lib/work-sessions/max-shift";
 
 type DashboardData = {
   session: WorkSessionDto | null;
+  auto_closed?: boolean;
   today: { sessions: WorkSessionDto[]; completed_minutes: number };
   active_run: WorkflowRunDetailDto | null;
   other_active_run_count: number;
@@ -69,6 +70,7 @@ export function EmployeeDashboard() {
   const [now, setNow] = useState(() => Date.now());
   const [clockingOut, setClockingOut] = useState(false);
   const [workTasks, setWorkTasks] = useState<SerializedWorkEmployeeTask[]>([]);
+  const askedServerToClose = useRef(false);
   const { todayMinutes } = useEmployeeTodayMinutes(true);
 
   const middayLine = useMemo(() => t("employee.experience.middayToast"), [t]);
@@ -107,8 +109,10 @@ export function EmployeeDashboard() {
             /* */
           }
         }
-        // Session gone (clocked out from another tab/device) — bounce to gate.
         if (!json.data.session && user?.role === "EMPLOYEE") {
+          if (json.data.auto_closed || askedServerToClose.current) {
+            showToast({ tone: "success", title: t("employee.dashboard.autoShiftEnded") });
+          }
           router.push("/employee/clock");
           router.refresh();
         }
@@ -116,7 +120,7 @@ export function EmployeeDashboard() {
     } finally {
       setLoading(false);
     }
-  }, [router, user?.role]);
+  }, [router, showToast, t, user?.role]);
 
   useEffect(() => {
     try {
@@ -154,7 +158,6 @@ export function EmployeeDashboard() {
     return cappedOpenMinutes(sessionStartMs, now);
   }, [now, sessionStartMs]);
 
-  const askedServerToClose = useRef(false);
   useEffect(() => {
     if (!sessionStartMs || askedServerToClose.current) return;
     if (now < sessionStartMs + MAX_SHIFT_MS) return;
@@ -200,11 +203,13 @@ export function EmployeeDashboard() {
         });
         return;
       }
+      const storedMinutes = Math.min(json.data.total_minutes ?? 0, MAX_SHIFT_MINUTES);
       showToast({
         tone: "success",
-        title: t("employee.dashboard.clockOutOk", {
-          minutes: fmtHMM(json.data.total_minutes ?? 0),
-        }),
+        title:
+          json.data.checkout_type === "AUTO_12_HOURS"
+            ? t("employee.dashboard.autoShiftEnded")
+            : t("employee.dashboard.clockOutOk", { minutes: fmtHMM(storedMinutes) }),
       });
       try {
         sessionStorage.removeItem(EMPLOYEE_WORK_SESSION_STARTED_AT_KEY);

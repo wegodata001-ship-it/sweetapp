@@ -65,6 +65,43 @@ async function endEmployeeTaskSession(employeeId: string | null | undefined, clo
   });
 }
 
+/**
+ * Freeze an in-progress task at the shift cutoff.
+ * The task stays open (DELAYED), never COMPLETED.
+ * A second call matches zero IN_PROGRESS rows, so duration is not added twice.
+ */
+export async function pauseTasksAtShiftCutoff(
+  employeeId: string | null | undefined,
+  userId: string,
+  cutoff: Date,
+): Promise<void> {
+  if (employeeId) {
+    await prisma.$executeRaw`
+      UPDATE "EmployeeTask"
+      SET
+        "activeWorkMs" = LEAST(
+          2147483647,
+          "activeWorkMs"::bigint + GREATEST(
+            0,
+            FLOOR(
+              EXTRACT(EPOCH FROM (${cutoff} - COALESCE("segmentStartedAt", "startedAt"))) * 1000
+            )
+          )::bigint
+        )::int,
+        "segmentStartedAt" = NULL,
+        status = 'DELAYED',
+        "delayedAt" = ${cutoff},
+        "isActive" = false
+      WHERE "employeeId" = ${employeeId}
+        AND status = 'IN_PROGRESS'
+    `;
+  }
+  await prisma.user.updateMany({
+    where: { id: userId },
+    data: { activeTaskId: null, activeTaskStartedAt: null },
+  });
+}
+
 async function sumEndedSessionMinutes(userId: string, workDate: Date): Promise<number> {
   const rows = (await prismaAny.workSession.findMany({
     where: { userId, workDate, status: "ENDED" },
@@ -113,6 +150,7 @@ async function closeWorkSessionRow(
   const employeeId = row.user?.employeeId;
   try {
     await endEmployeeTaskSession(employeeId, resolved.clockOut);
+    await pauseTasksAtShiftCutoff(employeeId, row.userId, resolved.clockOut);
   } catch (error) {
     console.error("[auto-checkout] employee session", row.id, error);
   }
@@ -215,6 +253,16 @@ async function closeStaleAttendanceRow(
     },
   });
   if (claimed.count !== 1) return null;
+
+  const owner = await prisma.user.findUnique({
+    where: { id: row.userId },
+    select: { employeeId: true },
+  });
+  try {
+    await pauseTasksAtShiftCutoff(owner?.employeeId, row.userId, clockOut);
+  } catch (error) {
+    console.error("[auto-checkout] pause tasks", row.id, error);
+  }
 
   await prismaAny.workSession.create({
     data: {

@@ -11,6 +11,7 @@ import { israelCalendarDateString, parseCalendarDateToDbDate } from "@/lib/staff
 import { notifyEarlyClockOut } from "@/lib/notifications/checkMissedAttendance";
 import { notifyManagers } from "@/lib/notifications/dispatch";
 import { resolveCheckout } from "@/lib/work-sessions/max-shift";
+import { pauseTasksAtShiftCutoff } from "@/lib/work-sessions/auto-checkout";
 
 export async function POST(req: NextRequest) {
   const session = await getSessionFromCookie();
@@ -68,10 +69,11 @@ export async function POST(req: NextRequest) {
 
   const user = await prisma.user.findUnique({
     where: { id: session.sub },
-    select: { fullName: true },
+    select: { fullName: true, employeeId: true },
   });
 
   if (resolved.checkoutType === "AUTO_12_HOURS") {
+    await pauseTasksAtShiftCutoff(user?.employeeId, session.sub, clockOut);
     await notifyManagers(
       {
         type: "CLOCK_OUT",

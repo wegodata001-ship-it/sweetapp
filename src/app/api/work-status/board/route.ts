@@ -3,6 +3,7 @@ import { requireDb } from "@/lib/api-route";
 import { getSessionFromCookie } from "@/lib/auth/get-session";
 import { canManageAllTasks } from "@/lib/tasks/task-access";
 import { loadWorkStatusBoard } from "@/lib/work-status/board-service";
+import { enforceMaxShiftLength } from "@/lib/work-sessions/auto-checkout";
 
 export const dynamic = "force-dynamic";
 
@@ -14,6 +15,7 @@ export async function GET() {
     return NextResponse.json({ ok: false, error: "אין הרשאה" }, { status: 403 });
   }
   try {
+    await enforceMaxShiftLength();
     const rows = await loadWorkStatusBoard();
     const online = rows.filter((r) => r.presence !== "OFFLINE").length;
     const working = rows.filter((r) => r.presence === "WORKING" || r.presence === "LATE").length;

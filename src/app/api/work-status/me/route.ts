@@ -4,6 +4,7 @@ import { getSessionFromCookie } from "@/lib/auth/get-session";
 import { strictUserId } from "@/lib/auth/strict-user-isolation";
 import { loadWorkStatusMe } from "@/lib/work-status/board-service";
 import { touchUserPresence } from "@/lib/work-status/active-task";
+import { enforceMaxShiftLength } from "@/lib/work-sessions/auto-checkout";
 
 export const dynamic = "force-dynamic";
 
@@ -16,6 +17,7 @@ export async function GET() {
   }
   const uid = strictUserId(session);
   try {
+    await enforceMaxShiftLength({ userId: uid });
     await touchUserPresence(uid);
     const data = await loadWorkStatusMe(uid);
     return NextResponse.json({ ok: true, data });

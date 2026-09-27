@@ -1,6 +1,7 @@
 "use client";
 
 import { KeyRound, Loader2, Timer } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { SerializedWorkEmployeeTask } from "@/lib/work-tasks/serialize-work-task";
 import { computeCountdownTimer } from "@/lib/tasks/countdown-timer";
@@ -27,6 +28,7 @@ import { useAuth } from "@/components/auth-provider";
 import { useI18n } from "@/components/i18n-provider";
 import { useToast } from "@/components/toast-provider";
 import { TaskCelebrationOverlay } from "@/components/employee/task-celebration-overlay";
+import { useAutoShiftGuard } from "@/hooks/use-auto-shift-guard";
 import { useEmployeeMiddayToast } from "@/hooks/use-employee-midday-toast";
 import { useEmployeeTodayMinutes } from "@/hooks/use-employee-today-minutes";
 
@@ -54,6 +56,7 @@ function sortTasksForFocus(tasks: SerializedWorkEmployeeTask[]): SerializedWorkE
 
 export function EmployeeTasksClient() {
   const { t, dir, bcp47 } = useI18n();
+  const router = useRouter();
   const { showToast } = useToast();
   const { user, refresh: refreshAuth } = useAuth();
   const [tasks, setTasks] = useState<SerializedWorkEmployeeTask[]>([]);
@@ -76,6 +79,7 @@ export function EmployeeTasksClient() {
     showToast,
     middayMessage: middayLine,
   });
+  useAutoShiftGuard(user?.role === "EMPLOYEE");
 
   const load = useCallback(async () => {
     setError(null);
@@ -154,6 +158,12 @@ export function EmployeeTasksClient() {
         return;
       }
       setTasks(snapshot);
+      if (j.code === "SHIFT_ENDED") {
+        showToast({ tone: "success", title: t("employee.dashboard.autoShiftEnded") });
+        router.push("/employee/clock");
+        router.refresh();
+        return;
+      }
       let msg = j.error?.trim() || t("employee.tasks.errors.startFailed");
       if (j.code === "NOT_YOUR_TASK" || j.code === "NO_EMPLOYEE_CARD") {
         msg = t("employee.tasks.errors.ownershipMismatch");
@@ -237,6 +247,13 @@ export function EmployeeTasksClient() {
         return true;
       }
 
+      if (raw.code === "SHIFT_ENDED") {
+        setCompleteModal(null);
+        showToast({ tone: "success", title: t("employee.dashboard.autoShiftEnded") });
+        router.push("/employee/clock");
+        router.refresh();
+        return false;
+      }
       const msg =
         raw.code === "NOT_YOUR_TASK" || raw.code === "NO_EMPLOYEE_CARD"
           ? t("employee.tasks.errors.ownershipMismatch")
