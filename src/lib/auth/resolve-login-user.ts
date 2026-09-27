@@ -16,6 +16,7 @@ const userSelect = {
   role: true,
   isActive: true,
   mustChangePassword: true,
+  currentSessionId: true,
 } as const;
 
 export type LoginUserRow = {
@@ -28,6 +29,7 @@ export type LoginUserRow = {
   role: string;
   isActive: boolean;
   mustChangePassword: boolean;
+  currentSessionId: string | null;
 };
 
 /** מוצא משתמש לפי אימייל, ת.ז. (כולל וריאציות), שם מלא, או טלפון */

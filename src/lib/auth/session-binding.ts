@@ -123,12 +123,19 @@ async function writeStoredSessionIds(
 export async function createUserSession(
   userId: string,
   meta: { ip: string | null; device: string },
-  options?: { allowMultiple?: boolean; role?: UserRole | string },
+  options?: {
+    allowMultiple?: boolean;
+    role?: UserRole | string;
+    /** Already loaded with the user row, so login does not read it again. */
+    knownSessionIds?: string[];
+  },
 ): Promise<string> {
   const sessionId = newSessionId();
   const allowMultiple =
     options?.allowMultiple ?? allowsMultipleAuthSessions(options?.role);
-  const existing = allowMultiple ? await readStoredSessionIds(userId) : [];
+  const existing = !allowMultiple
+    ? []
+    : options?.knownSessionIds ?? (await readStoredSessionIds(userId));
   const next = sessionIdsAfterLogin(existing, sessionId, allowMultiple);
   await writeStoredSessionIds(userId, next, {
     lastLoginAt: new Date(),

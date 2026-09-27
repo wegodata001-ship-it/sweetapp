@@ -37,8 +37,43 @@ type SessionRow = {
   user?: { fullName: string; employeeId: string | null };
 };
 
+const MAX_SHIFT_MS = 12 * 60 * 60 * 1000;
+
+function asClockIn(value: unknown): Date | null {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) return value;
+  if (typeof value === "string" || typeof value === "number") {
+    const parsed = new Date(value);
+    if (!Number.isNaN(parsed.getTime())) return parsed;
+  }
+  return null;
+}
+
 function cutoff(now: Date): Date {
-  return new Date(now.getTime() - 12 * 60 * 60 * 1000);
+  return new Date(now.getTime() - MAX_SHIFT_MS);
+}
+
+/**
+ * Nothing open can reach 12 hours before this instant.
+ * A new check-in uses the current time, so its deadline is later than any
+ * shift that was already open when the bound was computed.
+ * Calls that pass an explicit `now` do not read or write this.
+ */
+let noShiftDueBeforeMs = 0;
+const noUserShiftDueBeforeMs = new Map<string, number>();
+
+function shiftDueCached(userId: string | undefined, nowMs: number): boolean {
+  if (nowMs < noShiftDueBeforeMs) return true;
+  if (userId) {
+    const until = noUserShiftDueBeforeMs.get(userId) ?? 0;
+    if (nowMs < until) return true;
+  }
+  return false;
+}
+
+function rememberNoShiftDue(userId: string | undefined, earliestOpen: Date | null, now: Date) {
+  const until = earliestOpen ? earliestOpen.getTime() + MAX_SHIFT_MS : now.getTime() + MAX_SHIFT_MS;
+  if (userId) noUserShiftDueBeforeMs.set(userId, until);
+  else noShiftDueBeforeMs = until;
 }
 
 async function notifyAutoCheckout(userId: string, employeeName: string, dedupeId: string) {
@@ -314,6 +349,32 @@ export async function enforceMaxShiftLength(options?: {
 }): Promise<AutoCheckoutChange[]> {
   const now = options?.now ?? new Date();
   const userFilter = options?.userId ? { userId: options.userId } : {};
+  const cacheable = options?.now == null;
+  if (cacheable && shiftDueCached(options?.userId, now.getTime())) return [];
+
+  if (cacheable) {
+    const [sessionMin, attendanceMin] = await Promise.all([
+      prismaAny.workSession.aggregate({
+        where: { ...userFilter, status: "ACTIVE", clockOut: null },
+        _min: { clockIn: true },
+      }),
+      prisma.attendance.aggregate({
+        where: { ...userFilter, clockOut: null },
+        _min: { clockIn: true },
+      }),
+    ]);
+    const openAt = [sessionMin?._min?.clockIn, attendanceMin?._min?.clockIn]
+      .map(asClockIn)
+      .filter((value: Date | null): value is Date => value != null);
+    const earliest = openAt.length
+      ? new Date(Math.min(...openAt.map((value) => value.getTime())))
+      : null;
+    if (!earliest || earliest.getTime() > cutoff(now).getTime()) {
+      rememberNoShiftDue(options?.userId, earliest, now);
+      return [];
+    }
+  }
+
   const changes: AutoCheckoutChange[] = [];
   const notified = new Set<string>();
 

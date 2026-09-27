@@ -1,12 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prismaAny } from "@/lib/prisma";
-import { ensureBootstrapSuperAdmin } from "@/lib/auth/bootstrap";
+import { ensureBootstrapSuperAdmin, markUsersKnownToExist } from "@/lib/auth/bootstrap";
 import { verifyPassword } from "@/lib/auth/password";
 import { resolveLoginUser } from "@/lib/auth/resolve-login-user";
 import { signSessionToken, COOKIE_NAME } from "@/lib/auth/jwt";
 import { getPermissionStringsForUser } from "@/lib/auth/user-permissions";
 import { logActivity } from "@/lib/activity-log";
-import { createUserSession, requestClientMeta } from "@/lib/auth/session-binding";
+import {
+  createUserSession,
+  parseActiveSessionIds,
+  requestClientMeta,
+} from "@/lib/auth/session-binding";
 import { enforceMaxShiftLength } from "@/lib/work-sessions/auto-checkout";
 import {
   AUTH_API_CODES,
@@ -51,15 +55,6 @@ export async function POST(req: NextRequest) {
   let sessionMs = 0;
   let afterMs = 0;
   try {
-    const bootstrapStarted = performance.now();
-    try {
-      await ensureBootstrapSuperAdmin();
-    } catch (bootstrapErr) {
-      // bootstrap ראשוני — כשל כאן לא אמור לחשוף Prisma ללקוח; התחברות רגילה תמשיך
-      logAuthApiError("AUTH_BOOTSTRAP_ERROR", bootstrapErr);
-    }
-    bootstrapMs = performance.now() - bootstrapStarted;
-
     const body = (await req.json()) as {
       identifier?: string;
       email?: string;
@@ -78,8 +73,21 @@ export async function POST(req: NextRequest) {
     }
 
     const userStarted = performance.now();
-    const user = await resolveLoginUser(rawIdentifier);
+    let user = await resolveLoginUser(rawIdentifier);
     userMs = performance.now() - userStarted;
+    if (user) markUsersKnownToExist();
+
+    if (!user) {
+      const bootstrapStarted = performance.now();
+      try {
+        if (await ensureBootstrapSuperAdmin()) {
+          user = await resolveLoginUser(rawIdentifier);
+        }
+      } catch (bootstrapErr) {
+        logAuthApiError("AUTH_BOOTSTRAP_ERROR", bootstrapErr);
+      }
+      bootstrapMs = performance.now() - bootstrapStarted;
+    }
 
     if (!user) {
       await writeAudit({
@@ -117,16 +125,55 @@ export async function POST(req: NextRequest) {
       return authErrorResponse(AUTH_API_CODES.INVALID_CREDENTIALS, 401);
     }
 
-    const sessionStarted = performance.now();
-    const permissions = await getPermissionStringsForUser(
+    const joinedStarted = performance.now();
+    let activityMs = 0;
+    let auditMs = 0;
+    let enforceMs = 0;
+    const permissionsPromise = getPermissionStringsForUser(
       user.id,
       user.role as "EMPLOYEE" | "ADMIN" | "SUPER_ADMIN",
     );
     const clientMeta = requestClientMeta(req.headers);
-    const sessionId = await createUserSession(user.id, clientMeta, {
-      role: user.role,
-      allowMultiple: user.role === "ADMIN" || user.role === "SUPER_ADMIN",
-    });
+    const sessionPromise = (async () => {
+      const sessionStarted = performance.now();
+      const id = await createUserSession(user.id, clientMeta, {
+        role: user.role,
+        allowMultiple: user.role === "ADMIN" || user.role === "SUPER_ADMIN",
+        knownSessionIds: parseActiveSessionIds(user.currentSessionId),
+      });
+      sessionMs = performance.now() - sessionStarted;
+      return id;
+    })();
+    const [, sessionId, permissions] = await Promise.all([
+      Promise.all([
+        (async () => {
+          const t = performance.now();
+          await logActivity(user.id, "login");
+          activityMs = performance.now() - t;
+        })(),
+        (async () => {
+          const t = performance.now();
+          await writeAudit({
+            userId: user.id,
+            identifier: rawIdentifier,
+            action: "login_success",
+            req,
+          });
+          auditMs = performance.now() - t;
+        })(),
+        (async () => {
+          const t = performance.now();
+          await enforceMaxShiftLength({ userId: user.id }).catch((error) => {
+            console.error("[login] auto checkout", error);
+          });
+          enforceMs = performance.now() - t;
+        })(),
+      ]),
+      sessionPromise,
+      permissionsPromise,
+    ]);
+    afterMs = Math.max(activityMs, auditMs, enforceMs);
+    const joinedMs = performance.now() - joinedStarted;
 
     const token = await signSessionToken({
       sub: user.id,
@@ -136,22 +183,6 @@ export async function POST(req: NextRequest) {
       sid: sessionId,
       mustChangePassword: Boolean(user.mustChangePassword),
     });
-    sessionMs = performance.now() - sessionStarted;
-
-    const afterStarted = performance.now();
-    await Promise.all([
-      logActivity(user.id, "login"),
-      writeAudit({
-        userId: user.id,
-        identifier: rawIdentifier,
-        action: "login_success",
-        req,
-      }),
-      enforceMaxShiftLength({ userId: user.id }).catch((error) => {
-        console.error("[login] auto checkout", error);
-      }),
-    ]);
-    afterMs = performance.now() - afterStarted;
 
     const res = NextResponse.json({
       ok: true,
@@ -174,7 +205,11 @@ export async function POST(req: NextRequest) {
         ["user", userMs],
         ["password", passwordMs],
         ["session", sessionMs],
+        ["activity", activityMs],
+        ["audit", auditMs],
+        ["enforce", enforceMs],
         ["after", afterMs],
+        ["joined", joinedMs],
         ["total", performance.now() - started],
       ]
         .map(([name, ms]) => `${name};dur=${Math.max(0, Math.round(Number(ms)))}`)

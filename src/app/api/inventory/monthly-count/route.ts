@@ -14,7 +14,6 @@ import {
   type StockFilterTier,
 } from "@/lib/inventory/product-filters";
 import {
-  orderedProductIdsOnShelf,
   productsOnShelfWhere,
   resolveShelf,
   resolveShelfWithWorkers,
@@ -36,8 +35,8 @@ import {
   normalizeCountDay,
   resolveCountRoundScope,
 } from "@/lib/inventory/count-exclusions";
+import { loadExistingCountToday, type ExistingCountToday } from "@/lib/inventory/count-round-guard";
 import { ACTIVE_COUNT_LINE_WHERE } from "@/lib/inventory/count-session-status";
-import { loadExistingCountToday } from "@/lib/inventory/count-round-guard";
 import { scheduleCountSessionCompletedAlert } from "@/lib/inventory/count-session-alert";
 import { ensureLocationSchemaColumns } from "@/lib/inventory/ensure-location-schema";
 import {
@@ -235,6 +234,116 @@ const ROSTER_STALE_MSG =
 const COUNT_CONFLICT_MSG =
   "הספירה עודכנה על ידי משתמש אחר. יש לרענן את הנתונים לפני שמירה.";
 
+function mergeShelfProductIds(placed: string[], legacy: string[]): string[] {
+  const seen = new Set(placed);
+  return [...placed, ...legacy.filter((id) => !seen.has(id))];
+}
+
+async function placementIdsForShelf(locationId: string): Promise<string[]> {
+  const rows = (await prismaAny.inventoryProductOnLocation.findMany({
+    where: { locationId },
+    orderBy: [{ displayOrder: "asc" }, { createdAt: "asc" }],
+    select: { inventoryProductId: true },
+  })) as { inventoryProductId: string }[];
+  return rows.map((row) => row.inventoryProductId);
+}
+
+async function legacyIdsForShelf(shelf: { id: string | null; name: string }): Promise<string[]> {
+  const where = shelf.id
+    ? {
+        AND: [productsOnShelfWhere(shelf), { placements: { none: { locationId: shelf.id } } }],
+      }
+    : productsOnShelfWhere(shelf);
+  const rows = (await prismaAny.inventoryProduct.findMany({
+    where,
+    orderBy: [{ displayOrder: "asc" }, { name: "asc" }],
+    select: { id: true },
+  })) as { id: string }[];
+  return rows.map((row) => row.id);
+}
+
+/**
+ * Shelf, roster order, exclusions and today's saved count in one database wave.
+ * Product rows and quantities stay a second wave, after the page slice is known.
+ */
+async function loadCountRoster(
+  locationId: string | undefined,
+  locationName: string | undefined,
+  countDate: string | null,
+): Promise<{
+  shelf: NonNullable<Awaited<ReturnType<typeof resolveShelfWithWorkers>>> | null;
+  orderedIds: string[];
+  excludedProductIds: string[];
+  existingCountToday: ExistingCountToday;
+  waveMs: number;
+}> {
+  const started = performance.now();
+  const emptyToday: ExistingCountToday = {
+    sessionCount: 0,
+    lastSessionNumber: null,
+    lastSavedAt: null,
+    lastCountedByName: null,
+  };
+  if (locationId) {
+    const hintedName = locationName?.trim() ?? "";
+    const scope = resolveCountRoundScope({ id: locationId, name: hintedName }, countDate);
+    const [shelf, placed, legacy, excludedProductIds, existingCountToday] = await Promise.all([
+      resolveShelfWithWorkers(locationId, locationName),
+      placementIdsForShelf(locationId),
+      hintedName
+        ? legacyIdsForShelf({ id: locationId, name: hintedName })
+        : Promise.resolve([] as string[]),
+      loadExcludedProductIds(scope),
+      loadExistingCountToday(scope),
+    ]);
+    if (!shelf) {
+      return {
+        shelf: null,
+        orderedIds: [],
+        excludedProductIds,
+        existingCountToday,
+        waveMs: performance.now() - started,
+      };
+    }
+    const legacyIds =
+      hintedName.toLowerCase() === shelf.name.trim().toLowerCase()
+        ? legacy
+        : await legacyIdsForShelf(shelf);
+    return {
+      shelf,
+      orderedIds: mergeShelfProductIds(placed, legacyIds),
+      excludedProductIds,
+      existingCountToday,
+      waveMs: performance.now() - started,
+    };
+  }
+
+  const shelf = await resolveShelfWithWorkers(null, locationName);
+  if (!shelf) {
+    return {
+      shelf: null,
+      orderedIds: [],
+      excludedProductIds: [],
+      existingCountToday: emptyToday,
+      waveMs: performance.now() - started,
+    };
+  }
+  const scope = resolveCountRoundScope(shelf, countDate);
+  const [placed, legacy, excludedProductIds, existingCountToday] = await Promise.all([
+    shelf.id ? placementIdsForShelf(shelf.id) : Promise.resolve([] as string[]),
+    legacyIdsForShelf(shelf),
+    loadExcludedProductIds(scope),
+    loadExistingCountToday(scope),
+  ]);
+  return {
+    shelf,
+    orderedIds: mergeShelfProductIds(placed, legacy),
+    excludedProductIds,
+    existingCountToday,
+    waveMs: performance.now() - started,
+  };
+}
+
 export async function GET(req: NextRequest) {
   const requestStarted = performance.now();
   const block = await requireDb();
@@ -260,7 +369,12 @@ export async function GET(req: NextRequest) {
 
   try {
     await ensureLocationSchemaColumns();
-    const shelf = await resolveShelfWithWorkers(locationIdParam ?? null, locationEq);
+    const roster = await loadCountRoster(
+      locationIdParam,
+      locationEq,
+      searchParams.get("countDate"),
+    );
+    const shelf = roster.shelf;
     if (!shelf) {
       return NextResponse.json({
         ok: true,
@@ -275,10 +389,8 @@ export async function GET(req: NextRequest) {
      * וה־infinite scroll יישארו נכונים גם אחרי רענון הדף.
      */
     const roundScope = resolveCountRoundScope(shelf, searchParams.get("countDate"));
-    const [excludedProductIds, existingCountToday] = await Promise.all([
-      loadExcludedProductIds(roundScope),
-      loadExistingCountToday(roundScope),
-    ]);
+    const excludedProductIds = roster.excludedProductIds;
+    const existingCountToday = roster.existingCountToday;
 
     const where: Record<string, unknown> = {
       AND: [
@@ -303,7 +415,7 @@ export async function GET(req: NextRequest) {
     };
 
     // סדר לפי placement.displayOrder של המקום — לא גלובלי בין מחסנים
-    let orderedIds = await orderedProductIdsOnShelf(shelf);
+    let orderedIds = roster.orderedIds;
     if (excludedProductIds.length > 0) {
       const excluded = new Set(excludedProductIds);
       orderedIds = orderedIds.filter((id) => !excluded.has(id));
@@ -361,18 +473,20 @@ export async function GET(req: NextRequest) {
 
     const total = orderedIds.length;
     const pageIds = orderedIds.slice((page - 1) * pageSize, page * pageSize);
-    const products = (await prismaAny.inventoryProduct.findMany({
-      where: { id: { in: pageIds } },
-      select: PRODUCT_SELECT,
-    })) as ProductRow[];
+    const pageStarted = performance.now();
+    const [products, countsByProduct, placementWeekdays] = await Promise.all([
+      pageIds.length === 0
+        ? Promise.resolve([] as ProductRow[])
+        : (prismaAny.inventoryProduct.findMany({
+            where: { id: { in: pageIds } },
+            select: PRODUCT_SELECT,
+          }) as Promise<ProductRow[]>),
+      loadLatestCountsForProducts(pageIds),
+      loadPlacementWeekdayData(shelf.id, pageIds),
+    ]);
+    const pageMs = Math.round(performance.now() - pageStarted);
     const byId = new Map(products.map((p) => [p.id, p]));
     const orderedPage = pageIds.map((id) => byId.get(id)).filter((p): p is ProductRow => !!p);
-
-    const pageProductIds = orderedPage.map((p) => p.id);
-    const [countsByProduct, placementWeekdays] = await Promise.all([
-      loadLatestCountsForProducts(pageProductIds),
-      loadPlacementWeekdayData(shelf.id, pageProductIds),
-    ]);
     const paged = orderedPage.map((p) => {
       const { stockTier: _s, ...rest } = mapProductRow(
         p,
@@ -401,7 +515,10 @@ export async function GET(req: NextRequest) {
         existingCountToday,
       },
     });
-    response.headers.set("Server-Timing", `total;dur=${Math.round(performance.now() - requestStarted)}`);
+    response.headers.set(
+      "Server-Timing",
+      `roster;dur=${Math.round(roster.waveMs)}, page;dur=${pageMs}, total;dur=${Math.round(performance.now() - requestStarted)}`,
+    );
     return response;
   } catch (e) {
     return NextResponse.json(
