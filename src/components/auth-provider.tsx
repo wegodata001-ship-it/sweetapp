@@ -10,6 +10,7 @@ import {
   type ReactNode,
 } from "react";
 import { fetchWithDedupe, invalidateCacheKey, setCached } from "@/lib/client/fetch-cache";
+import { isDocumentVisible } from "@/lib/client/visible-poll";
 
 const SESSION_SUPERSEDED_CODE = "SESSION_SUPERSEDED";
 
@@ -129,7 +130,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!user) return;
 
-    const poll = () => void refresh();
+    const poll = () => {
+      if (!isDocumentVisible()) return;
+      void refresh();
+    };
 
     const interval = window.setInterval(poll, SESSION_POLL_MS);
 

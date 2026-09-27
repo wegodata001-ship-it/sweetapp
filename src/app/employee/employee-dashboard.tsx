@@ -140,7 +140,10 @@ export function EmployeeDashboard() {
   }, [load]);
 
   useEffect(() => {
-    const id = window.setInterval(() => void load(), 30_000);
+    const id = window.setInterval(() => {
+      if (document.visibilityState === "hidden") return;
+      void load();
+    }, 30_000);
     return () => window.clearInterval(id);
   }, [load]);
 

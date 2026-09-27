@@ -18,10 +18,13 @@ export const dynamic = "force-dynamic";
  * עובד — WHERE assignedToUserId = session.sub בלבד
  */
 export async function GET() {
+  const started = performance.now();
   const dbErr = await requireDb();
   if (dbErr) return dbErr;
 
+  const authStarted = performance.now();
   const session = await getSessionFromCookie();
+  const authMs = performance.now() - authStarted;
   if (!session) {
     return NextResponse.json({ ok: false, error: "נדרשת התחברות" }, { status: 401 });
   }
@@ -29,14 +32,18 @@ export async function GET() {
   const uid = strictUserId(session);
 
   try {
+    const enforceStarted = performance.now();
     await enforceMaxShiftLength({ userId: uid });
+    const enforceMs = performance.now() - enforceStarted;
     void warnDuplicateEmployeeIds();
+    const queryStarted = performance.now();
     const rowsRaw = await prisma.employeeTask.findMany({
       where: { assignedToUserId: uid },
       orderBy: [{ orderIndex: "asc" }, { createdAt: "asc" }],
       take: 500,
     });
 
+    const queryMs = performance.now() - queryStarted;
     const rows = filterEmployeeTasksForUser(rowsRaw, uid);
 
     logStrictScope("[GET /api/work/my-tasks]", session, {
@@ -45,10 +52,15 @@ export async function GET() {
       returnedAssignees: rows.map((t) => t.assignedToUserId),
     });
 
-    return NextResponse.json({
+    const response = NextResponse.json({
       ok: true,
       data: rows.map(serializeWorkEmployeeTask),
     });
+    response.headers.set(
+      "Server-Timing",
+      `auth;dur=${Math.round(authMs)}, enforce;dur=${Math.round(enforceMs)}, query;dur=${Math.round(queryMs)}, total;dur=${Math.round(performance.now() - started)}`,
+    );
+    return response;
   } catch (e) {
     console.error("[GET /api/work/my-tasks]", e);
     return NextResponse.json({ ok: false, error: "שגיאה בטעינת משימות" }, { status: 500 });

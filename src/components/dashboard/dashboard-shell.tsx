@@ -31,7 +31,7 @@ export function DashboardShell() {
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
-  const load = useCallback(async (opts?: { force?: boolean }) => {
+  const load = useCallback(async (opts?: { force?: boolean; signal?: AbortSignal }) => {
     if (opts?.force) {
       const { invalidateCacheKey } = await import("@/lib/client/fetch-cache");
       invalidateCacheKey(HERO_KEY);
@@ -45,6 +45,7 @@ export function DashboardShell() {
       async () => {
         const res = await fetch("/api/dashboard/summary?section=hero", {
           credentials: "same-origin",
+          signal: opts?.signal,
         });
         const json = (await res.json()) as { ok: boolean; data?: DashboardHeroSlice };
         if (!res.ok || !json.ok || !json.data) return null;
@@ -56,7 +57,10 @@ export function DashboardShell() {
     const fullPromise = fetchWithDedupe<DashboardSummary | null>(
       FULL_KEY,
       async () => {
-        const res = await fetch("/api/dashboard/summary", { credentials: "same-origin" });
+        const res = await fetch("/api/dashboard/summary", {
+          credentials: "same-origin",
+          signal: opts?.signal,
+        });
         const json = (await res.json()) as { ok: boolean; data?: DashboardSummary; error?: string };
         if (!res.ok || !json.ok || !json.data) {
           throw new Error(json.error ?? t("dashboard.redesign.loadError"));
@@ -68,6 +72,7 @@ export function DashboardShell() {
 
     try {
       const hero = await heroPromise;
+      if (opts?.signal?.aborted) return;
       if (hero) {
         setData((prev) =>
           prev
@@ -105,19 +110,23 @@ export function DashboardShell() {
       }
 
       const full = await fullPromise;
+      if (opts?.signal?.aborted) return;
       if (full) {
         setData(full);
         setBodyReady(true);
       }
-    } catch {
+    } catch (error) {
+      if (opts?.signal?.aborted || (error instanceof DOMException && error.name === "AbortError")) return;
       if (!heroReady) setError(t("dashboard.redesign.loadError"));
     } finally {
-      setRefreshing(false);
+      if (!opts?.signal?.aborted) setRefreshing(false);
     }
   }, [t]);
 
   useEffect(() => {
-    void load();
+    const ac = new AbortController();
+    void load({ signal: ac.signal });
+    return () => ac.abort();
   }, [load]);
 
   if (!heroReady && !data) {

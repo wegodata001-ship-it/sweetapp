@@ -12,7 +12,10 @@ export function WorkStatusHeartbeat({ enabled = true }: { enabled?: boolean }) {
       void fetch("/api/work-status/heartbeat", { method: "POST", credentials: "same-origin" });
     };
     ping();
-    const t = setInterval(ping, HEARTBEAT_MS);
+    const t = setInterval(() => {
+      if (document.visibilityState === "hidden") return;
+      ping();
+    }, HEARTBEAT_MS);
     return () => clearInterval(t);
   }, [enabled]);
   return null;

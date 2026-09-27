@@ -53,19 +53,20 @@ export async function GET(req: NextRequest) {
     if (accountant === "sent") where.sentToCpa = true;
     else if (accountant === "not_sent") where.sentToCpa = false;
 
-    const rows = await prismaAny.financialDocument.findMany({
-      where,
-      include: {
-        customer: { select: { name: true } },
-        payments: { select: { amount: true } },
-        sentToCpaBy: { select: { id: true, fullName: true } },
-      },
-      orderBy: { createdAt: "desc" },
-    });
+    const [rows, totalCount, notSentCount] = await Promise.all([
+      prismaAny.financialDocument.findMany({
+        where,
+        include: {
+          customer: { select: { name: true } },
+          payments: { select: { amount: true } },
+          sentToCpaBy: { select: { id: true, fullName: true } },
+        },
+        orderBy: { createdAt: "desc" },
+      }),
+      prismaAny.financialDocument.count(),
+      prismaAny.financialDocument.count({ where: { sentToCpa: false } }),
+    ]);
     const data = rows.map((r: Parameters<typeof prismaDocToFinanceRow>[0]) => prismaDocToFinanceRow(r));
-
-    const totalCount = await prismaAny.financialDocument.count();
-    const notSentCount = await prismaAny.financialDocument.count({ where: { sentToCpa: false } });
     const sentCount = totalCount - notSentCount;
 
     return NextResponse.json({

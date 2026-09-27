@@ -9,7 +9,7 @@ export async function GET() {
   const block = await requireDb();
   if (block) return block;
   try {
-    const [incomeDocs, expenseDocs, payments, cashRows, openDepositDocs] = await Promise.all([
+    const [incomeDocs, expenseDocs, payments, cashRows, openDepositDocs, openInvoices] = await Promise.all([
       prisma.financialDocument.findMany({
         where: { category: "הכנסה" },
         select: { id: true, totalAmount: true, depositAmount: true },
@@ -29,6 +29,7 @@ export async function GET() {
         where: { depositStatus: "open" },
         select: { depositAmount: true },
       }),
+      countOpenInvoices({ log: true }),
     ]);
 
     let cashNet = 0;
@@ -67,7 +68,6 @@ export async function GET() {
       return sum + amount;
     }, 0);
     const totalOrders = incomeDocRows.reduce((sum, row) => sum + Math.max(0, row.totalAmount), 0);
-    const openInvoices = await countOpenInvoices({ log: true });
     // Open-invoice / operational KPI — not the entity ledger SSOT.
     const openBalancesTotal = Math.max(0, totalOrders - totalPayments);
 

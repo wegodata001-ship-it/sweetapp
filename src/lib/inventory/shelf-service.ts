@@ -420,7 +420,7 @@ async function loadLocationsForSummaries() {
  * סטטוס ספירה לפי ספירות של אותו locationId בלבד.
  */
 export async function listShelfSummaries(): Promise<ShelfSummaryStats[]> {
-  const [locations, products, placements] = await Promise.all([
+  const [locations, products, placements, latestCountsAll] = await Promise.all([
     loadLocationsForSummaries(),
     prismaAny.inventoryProduct.findMany({
       where: {
@@ -440,6 +440,18 @@ export async function listShelfSummaries(): Promise<ShelfSummaryStats[]> {
     prismaAny.inventoryProductOnLocation.findMany({
       select: { inventoryProductId: true, locationId: true },
     }),
+    prismaAny.inventoryCount.findMany({
+      where: ACTIVE_COUNT_LINE_WHERE,
+      orderBy: LATEST_COUNT_ORDER_BY,
+      distinct: ["inventoryProductId", "locationId"],
+      select: {
+        inventoryProductId: true,
+        locationId: true,
+        difference: true,
+        countDate: true,
+        countedBy: { select: { fullName: true } },
+      },
+    }) as Promise<CountDiffRow[]>,
   ]);
 
   type LocRow = {
@@ -561,21 +573,11 @@ export async function listShelfSummaries(): Promise<ShelfSummaryStats[]> {
   }
 
   const allProductIds = [...new Set([...members.values()].flatMap((s) => [...s]))];
+  const wantedProducts = new Set(allProductIds);
   const latestCounts =
     allProductIds.length === 0
       ? []
-      : ((await prismaAny.inventoryCount.findMany({
-          where: { inventoryProductId: { in: allProductIds }, ...ACTIVE_COUNT_LINE_WHERE },
-          orderBy: LATEST_COUNT_ORDER_BY,
-          distinct: ["inventoryProductId", "locationId"],
-          select: {
-            inventoryProductId: true,
-            locationId: true,
-            difference: true,
-            countDate: true,
-            countedBy: { select: { fullName: true } },
-          },
-        })) as CountDiffRow[]);
+      : latestCountsAll.filter((row) => wantedProducts.has(row.inventoryProductId));
 
   const countsByProduct = new Map<string, CountDiffRow[]>();
   for (const c of latestCounts) {

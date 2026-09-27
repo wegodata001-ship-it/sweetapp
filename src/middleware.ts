@@ -24,15 +24,20 @@ export async function middleware(request: NextRequest) {
   }
 
   if (pathname === "/login") {
+    const loginMwStarted = performance.now();
     const loginTok = request.cookies.get(COOKIE_NAME)?.value;
     const loginSession = loginTok ? await verifySessionToken(loginTok) : null;
+    const stampLogin = (res: NextResponse) => {
+      res.headers.set("x-wego-middleware-ms", String(Math.round(performance.now() - loginMwStarted)));
+      return res;
+    };
     if (loginSession) {
       if (loginSession.mustChangePassword === true) {
-        return NextResponse.redirect(new URL("/change-password", request.url));
+        return stampLogin(NextResponse.redirect(new URL("/change-password", request.url)));
       }
-      return NextResponse.redirect(new URL("/", request.url));
+      return stampLogin(NextResponse.redirect(new URL("/", request.url)));
     }
-    return NextResponse.next();
+    return stampLogin(NextResponse.next());
   }
   if (pathname === "/api/auth/login") {
     return NextResponse.next();

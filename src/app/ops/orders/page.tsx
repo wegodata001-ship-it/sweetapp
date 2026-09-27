@@ -35,12 +35,12 @@ function OrdersPageInner() {
     if (!canDaily && !canFuture) return;
     let cancelled = false;
     const load = async (category: string) => {
-      const res = await fetch(`/api/future-orders?category=${category}`, {
+      const res = await fetch(`/api/future-orders?category=${category}&countOnly=1`, {
         credentials: "same-origin",
         cache: "no-store",
       });
-      const json = (await res.json()) as { ok?: boolean; data?: unknown[] };
-      return json.ok && Array.isArray(json.data) ? json.data.length : undefined;
+      const json = (await res.json()) as { ok?: boolean; total?: number };
+      return json.ok && typeof json.total === "number" ? json.total : undefined;
     };
     void Promise.all([load("daily"), canFuture ? load("wedding") : Promise.resolve(undefined)])
       .then(([daily, wedding]) => {

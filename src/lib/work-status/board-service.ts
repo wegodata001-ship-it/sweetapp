@@ -38,54 +38,38 @@ function todayUtc(): Date {
   return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
 }
 
-async function buildTimeline(userId: string, employeeId: string | null): Promise<WorkStatusTimelineEvent[]> {
-  if (!employeeId) return [];
-  const since = todayUtc();
-  const tasks = await prisma.employeeTask.findMany({
-    where: {
-      employeeId,
-      OR: [{ startedAt: { gte: since } }, { completedAt: { gte: since } }],
-    },
-    orderBy: [{ startedAt: "asc" }, { completedAt: "asc" }],
-    take: 12,
-    select: { title: true, startedAt: true, completedAt: true, status: true },
-  });
+function timelineFromTasks(
+  tasks: Array<{ title: string; startedAt: Date | null; completedAt: Date | null }>,
+): WorkStatusTimelineEvent[] {
   const events: { t: number; label: string }[] = [];
-  for (const t of tasks) {
-    if (t.startedAt) {
-      events.push({
-        t: t.startedAt.getTime(),
-        label: `התחיל: ${t.title}`,
-      });
+  for (const task of tasks) {
+    if (task.startedAt) {
+      events.push({ t: task.startedAt.getTime(), label: `התחיל: ${task.title}` });
     }
-    if (t.completedAt) {
-      events.push({
-        t: t.completedAt.getTime(),
-        label: `סיים: ${t.title}`,
-      });
+    if (task.completedAt) {
+      events.push({ t: task.completedAt.getTime(), label: `סיים: ${task.title}` });
     }
   }
   return events
     .sort((a, b) => a.t - b.t)
     .slice(-8)
-    .map((e) => ({
-      at: new Date(e.t).toISOString(),
-      label: e.label,
+    .map((event) => ({
+      at: new Date(event.t).toISOString(),
+      label: event.label,
     }));
 }
 
-async function stepProgress(taskId: string, employeeId: string, groupId: string | null) {
-  if (!groupId) return { index: 1, total: 1 };
-  const tasks = await prisma.employeeTask.findMany({
-    where: { taskGroupId: groupId, employeeId },
-    orderBy: { orderIndex: "asc" },
-    select: { id: true },
-  });
-  const idx = tasks.findIndex((t) => t.id === taskId);
-  return { index: idx >= 0 ? idx + 1 : 1, total: tasks.length || 1 };
-}
+export type WorkBoardQueryTimings = {
+  userMs: number;
+  timelineMs: number;
+  groupMs: number;
+};
 
-export async function loadWorkStatusBoard(): Promise<WorkStatusBoardRow[]> {
+export async function loadWorkStatusBoard(
+  timings?: WorkBoardQueryTimings,
+): Promise<WorkStatusBoardRow[]> {
+  const since = todayUtc();
+  const userStarted = performance.now();
   const users = await prisma.user.findMany({
     where: {
       isActive: true,
@@ -123,8 +107,76 @@ export async function loadWorkStatusBoard(): Promise<WorkStatusBoardRow[]> {
       },
     },
   });
+  if (timings) timings.userMs = Math.round(performance.now() - userStarted);
 
   const now = Date.now();
+  const employeeIds = users
+    .map((user) => user.employeeId)
+    .filter((id): id is string => Boolean(id));
+  const progressKeys = users.flatMap((user) => {
+    const task = user.activeTask;
+    if (!task || task.status !== "IN_PROGRESS" || !task.taskGroupId) return [];
+    return [{ taskGroupId: task.taskGroupId, employeeId: task.employeeId }];
+  });
+
+  const [timelineTasks, groupTasks] = await Promise.all([
+    (async () => {
+      const started = performance.now();
+      const rows =
+        employeeIds.length === 0
+          ? []
+          : await prisma.employeeTask.findMany({
+              where: {
+                employeeId: { in: employeeIds },
+                OR: [{ startedAt: { gte: since } }, { completedAt: { gte: since } }],
+              },
+              orderBy: [{ startedAt: "asc" }, { completedAt: "asc" }],
+              select: { employeeId: true, title: true, startedAt: true, completedAt: true },
+            });
+      if (timings) timings.timelineMs = Math.round(performance.now() - started);
+      return rows;
+    })(),
+    (async () => {
+      const started = performance.now();
+      const rows =
+        progressKeys.length === 0
+          ? []
+          : await prisma.employeeTask.findMany({
+              where: { OR: progressKeys },
+              orderBy: { orderIndex: "asc" },
+              select: { id: true, taskGroupId: true, employeeId: true },
+            });
+      if (timings) timings.groupMs = Math.round(performance.now() - started);
+      return rows;
+    })(),
+  ]);
+
+  const timelineByEmployee = new Map<string, typeof timelineTasks>();
+  for (const task of timelineTasks) {
+    const list = timelineByEmployee.get(task.employeeId) ?? [];
+    list.push(task);
+    timelineByEmployee.set(task.employeeId, list);
+  }
+  for (const list of timelineByEmployee.values()) {
+    list.sort((a, b) => {
+      const aStart = a.startedAt?.getTime() ?? Number.POSITIVE_INFINITY;
+      const bStart = b.startedAt?.getTime() ?? Number.POSITIVE_INFINITY;
+      if (aStart !== bStart) return aStart - bStart;
+      const aEnd = a.completedAt?.getTime() ?? Number.POSITIVE_INFINITY;
+      const bEnd = b.completedAt?.getTime() ?? Number.POSITIVE_INFINITY;
+      return aEnd - bEnd;
+    });
+    list.splice(12);
+  }
+
+  const stepsByGroup = new Map<string, Array<{ id: string }>>();
+  for (const task of groupTasks) {
+    const key = `${task.employeeId}:${task.taskGroupId ?? ""}`;
+    const list = stepsByGroup.get(key) ?? [];
+    list.push(task);
+    stepsByGroup.set(key, list);
+  }
+
   const rows: WorkStatusBoardRow[] = [];
 
   for (const u of users) {
@@ -146,7 +198,13 @@ export async function loadWorkStatusBoard(): Promise<WorkStatusBoardRow[]> {
         status: task.status,
         nowMs: now,
       });
-      const prog = await stepProgress(task.id, task.employeeId, task.taskGroupId);
+      const steps = task.taskGroupId
+        ? (stepsByGroup.get(`${task.employeeId}:${task.taskGroupId}`) ?? [])
+        : [];
+      const stepIndex = steps.findIndex((row) => row.id === task.id);
+      const prog = task.taskGroupId
+        ? { index: stepIndex >= 0 ? stepIndex + 1 : 1, total: steps.length || 1 }
+        : { index: 1, total: 1 };
       active_task = {
         id: task.id,
         title: task.title,
@@ -164,7 +222,7 @@ export async function loadWorkStatusBoard(): Promise<WorkStatusBoardRow[]> {
       };
     }
 
-    const timeline = await buildTimeline(u.id, u.employeeId);
+    const timeline = timelineFromTasks(timelineByEmployee.get(u.employeeId ?? "") ?? []);
 
     rows.push({
       user_id: u.id,

@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { loadSharedForecastSettings } from "@/lib/finance/shared-forecast-reads";
 
 function isMissingForecastColumnError(e: unknown): boolean {
   const msg = e instanceof Error ? e.message : String(e);
@@ -11,7 +12,7 @@ function isMissingForecastColumnError(e: unknown): boolean {
 /** קריאה בטוחה — מחזירה 0 אם השורה/העמודה חסרים */
 export async function getForecastBankBalance(): Promise<number> {
   try {
-    const row = await prisma.financeSettings.findUnique({ where: { id: 1 } });
+    const row = await loadSharedForecastSettings();
     if (!row) return 0;
     const val = row.forecastBankBalance;
     return typeof val === "number" && Number.isFinite(val) ? val : 0;

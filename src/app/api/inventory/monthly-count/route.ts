@@ -236,6 +236,7 @@ const COUNT_CONFLICT_MSG =
   "הספירה עודכנה על ידי משתמש אחר. יש לרענן את הנתונים לפני שמירה.";
 
 export async function GET(req: NextRequest) {
+  const requestStarted = performance.now();
   const block = await requireDb();
   if (block) return block;
   const { searchParams } = req.nextUrl;
@@ -383,7 +384,7 @@ export async function GET(req: NextRequest) {
       return rest;
     });
 
-    return NextResponse.json({
+    const response = NextResponse.json({
       ok: true,
       data: paged,
       meta: {
@@ -400,6 +401,8 @@ export async function GET(req: NextRequest) {
         existingCountToday,
       },
     });
+    response.headers.set("Server-Timing", `total;dur=${Math.round(performance.now() - requestStarted)}`);
+    return response;
   } catch (e) {
     return NextResponse.json(
       { ok: false, error: e instanceof Error ? e.message : "שגיאה" },

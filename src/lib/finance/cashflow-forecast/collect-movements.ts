@@ -13,6 +13,10 @@ import {
 import { parseNum } from "@/lib/format-shekel";
 import { parseDateKey, toDateKey } from "@/lib/finance/cashflow-forecast/date-utils";
 import { listManualForecastEntries } from "@/lib/finance/cashflow-forecast/forecast-manual-entries";
+import {
+  loadSharedExpenseDocuments,
+  loadSharedIncomeDocuments,
+} from "@/lib/finance/shared-forecast-reads";
 import type { ForecastSourceType } from "@/lib/finance/cashflow-forecast/types";
 
 export type ForecastMovement = {
@@ -94,20 +98,7 @@ export async function collectForecastMovements(fallbackDate: string): Promise<Fo
       document: { select: { id: true, title: true } },
     },
   }),
-    prisma.financialDocument.findMany({
-      where: { category: "הכנסה" },
-      select: {
-        id: true,
-        title: true,
-        paymentStatus: true,
-        totalAmount: true,
-        paidAmount: true,
-        remainingAmount: true,
-        docDate: true,
-        metadata: true,
-        customer: { select: { name: true } },
-      },
-    }),
+    loadSharedIncomeDocuments(),
     prisma.futureOrder.findMany({
       where: {
         isCompleted: false,
@@ -125,20 +116,7 @@ export async function collectForecastMovements(fallbackDate: string): Promise<Fo
         orderCategory: true,
       },
     }),
-    prisma.financialDocument.findMany({
-      where: { category: "הוצאה" },
-      select: {
-        id: true,
-        title: true,
-        totalAmount: true,
-        paidAmount: true,
-        remainingAmount: true,
-        docDate: true,
-        metadata: true,
-        supplier: { select: { name: true } },
-        employee: { select: { name: true } },
-      },
-    }),
+    loadSharedExpenseDocuments(),
     listManualForecastEntries(),
   ]);
 

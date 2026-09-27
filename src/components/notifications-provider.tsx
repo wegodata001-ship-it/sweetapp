@@ -13,6 +13,7 @@ import { useAuth } from "@/components/auth-provider";
 import { useToast } from "@/components/toast-provider";
 import { NOTIFICATIONS_REFRESH_EVENT } from "@/lib/notifications/refresh-event";
 import { fetchWithDedupe, invalidateCacheKey } from "@/lib/client/fetch-cache";
+import { isDocumentVisible } from "@/lib/client/visible-poll";
 
 export type InboxKind = "employee" | "admin";
 
@@ -148,7 +149,10 @@ export function NotificationsProvider({ children }: { children: ReactNode }) {
       return;
     }
     void refresh();
-    const timer = setInterval(() => void refresh(), POLL_MS);
+    const timer = setInterval(() => {
+      if (!isDocumentVisible()) return;
+      void refresh();
+    }, POLL_MS);
     const onRefresh = () => {
       if (refreshDebounceRef.current) clearTimeout(refreshDebounceRef.current);
       refreshDebounceRef.current = setTimeout(() => void refresh({ force: true }), REFRESH_DEBOUNCE_MS);

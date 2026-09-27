@@ -1,4 +1,4 @@
-import { prisma } from "@/lib/prisma";
+import { loadSharedIncomeDocuments } from "@/lib/finance/shared-forecast-reads";
 
 /** סטטוסים שמוצגים כ"חשבונית פתוחה" */
 export const OPEN_INVOICE_PAYMENT_STATUSES = ["unpaid", "partial", "overdue", "UNPAID", "PARTIAL"] as const;
@@ -45,17 +45,7 @@ export function isOpenInvoiceDoc(doc: {
 }
 
 export async function fetchOpenIncomeDocuments(): Promise<OpenInvoiceRow[]> {
-  const rows = await prisma.financialDocument.findMany({
-    where: { category: "הכנסה" },
-    select: {
-      id: true,
-      paymentStatus: true,
-      totalAmount: true,
-      paidAmount: true,
-      remainingAmount: true,
-      documentType: true,
-    },
-  });
+  const rows = await loadSharedIncomeDocuments();
   return rows.filter(isOpenInvoiceDoc);
 }
 

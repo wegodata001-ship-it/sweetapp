@@ -99,7 +99,8 @@ export function installLatinDigits(): void {
     RelativeTimeFormat.prototype = Relative.prototype;
     RelativeTimeFormat.supportedLocalesOf = Relative.supportedLocalesOf.bind(Relative);
     Object.setPrototypeOf(RelativeTimeFormat, Relative);
-    Intl.RelativeTimeFormat = RelativeTimeFormat as unknown as typeof Intl.RelativeTimeFormat;
+    (Intl as { RelativeTimeFormat: typeof Intl.RelativeTimeFormat }).RelativeTimeFormat =
+      RelativeTimeFormat as unknown as typeof Intl.RelativeTimeFormat;
   }
 
   const originalNumberToLocale = Number.prototype.toLocaleString;

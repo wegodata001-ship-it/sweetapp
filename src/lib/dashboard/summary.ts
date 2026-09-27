@@ -4,6 +4,7 @@ import { getAdminNotificationWidgets } from "@/lib/notifications/admin-widgets";
 import { buildCashflowForecast } from "@/lib/finance/cashflow-forecast/build-forecast";
 import { formatShekel } from "@/lib/format-shekel";
 import { countOpenInvoices } from "@/lib/finance/open-invoices";
+import { loadSharedExpenseDocuments } from "@/lib/finance/shared-forecast-reads";
 import { isSystemCleanMode } from "@/lib/system/clean-mode";
 import { ORDER_CATEGORY_DAILY, ORDER_CATEGORY_WEDDING } from "@/lib/future-orders/helpers";
 import { isDbConnectionError } from "@/lib/prisma-db-health";
@@ -68,38 +69,106 @@ function monthStart(offset = 0) {
   return new Date(d.getFullYear(), d.getMonth() + offset, 1, 0, 0, 0, 0);
 }
 
-async function countZReportsInRange(from: Date, to: Date): Promise<number> {
-  return prisma.financialDocument.count({
-    where: {
-      documentType: "דוח Z",
-      OR: [
-        { docDate: { gte: from, lte: to } },
-        { docDate: null, createdAt: { gte: from, lte: to } },
-      ],
-    },
-  });
-}
+type DashboardWindowCounts = {
+  zToday: number;
+  zWeek: number;
+  zMonth: number;
+  weddingToday: WeddingSectionStats;
+  weddingWeek: WeddingSectionStats;
+  weddingMonth: WeddingSectionStats;
+};
 
-async function loadWeddingSectionStats(from: Date, to: Date): Promise<WeddingSectionStats> {
-  const [weddings, orders, documented] = await Promise.all([
-    prisma.futureOrder.count({
-      where: { orderCategory: ORDER_CATEGORY_WEDDING, createdAt: { gte: from, lte: to } },
-    }),
-    prisma.futureOrder.count({
-      where: { orderCategory: ORDER_CATEGORY_DAILY, createdAt: { gte: from, lte: to } },
-    }),
-    prisma.financialDocument.count({
-      where: {
-        category: "הכנסה",
-        sentToCpa: true,
-        OR: [
-          { docDate: { gte: from, lte: to } },
-          { docDate: null, createdAt: { gte: from, lte: to } },
-        ],
-      },
-    }),
-  ]);
-  return { weddings, orders, documented };
+/**
+ * Same numbers as the previous 12 count queries, in one round trip.
+ * docDate is a DATE column. Prisma compares it to the UTC calendar date of the JS bound.
+ */
+async function loadDashboardWindowCounts(
+  today0: Date,
+  todayEnd: Date,
+  weekFrom: Date,
+  monthFrom: Date,
+): Promise<DashboardWindowCounts> {
+  const rows = await prisma.$queryRaw<
+    Array<{
+      z_today: number;
+      z_week: number;
+      z_month: number;
+      weddings_today: number;
+      weddings_week: number;
+      weddings_month: number;
+      orders_today: number;
+      orders_week: number;
+      orders_month: number;
+      documented_today: number;
+      documented_week: number;
+      documented_month: number;
+    }>
+  >`
+    SELECT
+      (SELECT count(*)::int FROM "FinancialDocument"
+        WHERE "documentType" = 'דוח Z'
+          AND (("docDate" >= (${today0} AT TIME ZONE 'UTC')::date AND "docDate" <= (${todayEnd} AT TIME ZONE 'UTC')::date)
+            OR ("docDate" IS NULL AND "createdAt" >= ${today0} AND "createdAt" <= ${todayEnd}))) AS z_today,
+      (SELECT count(*)::int FROM "FinancialDocument"
+        WHERE "documentType" = 'דוח Z'
+          AND (("docDate" >= (${weekFrom} AT TIME ZONE 'UTC')::date AND "docDate" <= (${todayEnd} AT TIME ZONE 'UTC')::date)
+            OR ("docDate" IS NULL AND "createdAt" >= ${weekFrom} AND "createdAt" <= ${todayEnd}))) AS z_week,
+      (SELECT count(*)::int FROM "FinancialDocument"
+        WHERE "documentType" = 'דוח Z'
+          AND (("docDate" >= (${monthFrom} AT TIME ZONE 'UTC')::date AND "docDate" <= (${todayEnd} AT TIME ZONE 'UTC')::date)
+            OR ("docDate" IS NULL AND "createdAt" >= ${monthFrom} AND "createdAt" <= ${todayEnd}))) AS z_month,
+      (SELECT count(*)::int FROM "FutureOrder"
+        WHERE "orderCategory" = ${ORDER_CATEGORY_WEDDING}
+          AND "createdAt" >= ${today0} AND "createdAt" <= ${todayEnd}) AS weddings_today,
+      (SELECT count(*)::int FROM "FutureOrder"
+        WHERE "orderCategory" = ${ORDER_CATEGORY_WEDDING}
+          AND "createdAt" >= ${weekFrom} AND "createdAt" <= ${todayEnd}) AS weddings_week,
+      (SELECT count(*)::int FROM "FutureOrder"
+        WHERE "orderCategory" = ${ORDER_CATEGORY_WEDDING}
+          AND "createdAt" >= ${monthFrom} AND "createdAt" <= ${todayEnd}) AS weddings_month,
+      (SELECT count(*)::int FROM "FutureOrder"
+        WHERE "orderCategory" = ${ORDER_CATEGORY_DAILY}
+          AND "createdAt" >= ${today0} AND "createdAt" <= ${todayEnd}) AS orders_today,
+      (SELECT count(*)::int FROM "FutureOrder"
+        WHERE "orderCategory" = ${ORDER_CATEGORY_DAILY}
+          AND "createdAt" >= ${weekFrom} AND "createdAt" <= ${todayEnd}) AS orders_week,
+      (SELECT count(*)::int FROM "FutureOrder"
+        WHERE "orderCategory" = ${ORDER_CATEGORY_DAILY}
+          AND "createdAt" >= ${monthFrom} AND "createdAt" <= ${todayEnd}) AS orders_month,
+      (SELECT count(*)::int FROM "FinancialDocument"
+        WHERE category = 'הכנסה' AND "sentToCpa" = true
+          AND (("docDate" >= (${today0} AT TIME ZONE 'UTC')::date AND "docDate" <= (${todayEnd} AT TIME ZONE 'UTC')::date)
+            OR ("docDate" IS NULL AND "createdAt" >= ${today0} AND "createdAt" <= ${todayEnd}))) AS documented_today,
+      (SELECT count(*)::int FROM "FinancialDocument"
+        WHERE category = 'הכנסה' AND "sentToCpa" = true
+          AND (("docDate" >= (${weekFrom} AT TIME ZONE 'UTC')::date AND "docDate" <= (${todayEnd} AT TIME ZONE 'UTC')::date)
+            OR ("docDate" IS NULL AND "createdAt" >= ${weekFrom} AND "createdAt" <= ${todayEnd}))) AS documented_week,
+      (SELECT count(*)::int FROM "FinancialDocument"
+        WHERE category = 'הכנסה' AND "sentToCpa" = true
+          AND (("docDate" >= (${monthFrom} AT TIME ZONE 'UTC')::date AND "docDate" <= (${todayEnd} AT TIME ZONE 'UTC')::date)
+            OR ("docDate" IS NULL AND "createdAt" >= ${monthFrom} AND "createdAt" <= ${todayEnd}))) AS documented_month
+  `;
+  const row = rows[0];
+  return {
+    zToday: Number(row?.z_today ?? 0),
+    zWeek: Number(row?.z_week ?? 0),
+    zMonth: Number(row?.z_month ?? 0),
+    weddingToday: {
+      weddings: Number(row?.weddings_today ?? 0),
+      orders: Number(row?.orders_today ?? 0),
+      documented: Number(row?.documented_today ?? 0),
+    },
+    weddingWeek: {
+      weddings: Number(row?.weddings_week ?? 0),
+      orders: Number(row?.orders_week ?? 0),
+      documented: Number(row?.documented_week ?? 0),
+    },
+    weddingMonth: {
+      weddings: Number(row?.weddings_month ?? 0),
+      orders: Number(row?.orders_month ?? 0),
+      documented: Number(row?.documented_month ?? 0),
+    },
+  };
 }
 
 function emptySummary(): DashboardSummary {
@@ -171,102 +240,58 @@ function emptySummary(): DashboardSummary {
   };
 }
 
-function isMissingPrismaColumn(e: unknown, column: string): boolean {
-  if (typeof e !== "object" || e === null || !("code" in e)) return false;
-  if ((e as { code: string }).code !== "P2022") return false;
-  const meta = (e as { meta?: { column?: string } }).meta;
-  return String(meta?.column ?? "").includes(column);
-}
-
-/** טוען מסמכי הוצאה לספקים — עובד גם בלי עמודת supplierId במסד (לפני migration). */
+/** Same expense-document read the cashflow forecast uses, mapped for supplier totals. */
 async function loadSupplierExpenseDocsForDashboard() {
-  const baseSelect = {
-    id: true,
-    totalAmount: true,
-    depositAmount: true,
-    paidAmount: true,
-    paymentStatus: true,
-    metadata: true,
-    docDate: true,
-    title: true,
-  } as const;
-
-  try {
-    const rows = await prisma.financialDocument.findMany({
-      where: { category: "הוצאה" },
-      select: {
-        ...baseSelect,
-        supplierId: true,
-      },
-    });
-    const supplierIds = [
-      ...new Set(rows.map((r) => r.supplierId).filter((id): id is string => Boolean(id))),
-    ];
-    const nameById = new Map<string, string>();
-    if (supplierIds.length > 0) {
-      const suppliers = await prisma.supplier.findMany({
-        where: { id: { in: supplierIds } },
-        select: { id: true, name: true },
-      });
-      for (const s of suppliers) nameById.set(s.id, s.name);
-    }
-    return rows.map((r) => ({
-      id: r.id,
-      totalAmount: r.totalAmount,
-      depositAmount: r.depositAmount,
-      paidAmount: r.paidAmount,
-      paymentStatus: r.paymentStatus,
-      metadata: r.metadata,
-      docDate: r.docDate,
-      supplierId: r.supplierId,
-      supplierName: r.supplierId ? (nameById.get(r.supplierId) ?? null) : null,
-    }));
-  } catch (e) {
-    if (!isMissingPrismaColumn(e, "supplierId")) throw e;
-
-    const rows = await prisma.financialDocument.findMany({
-      where: { category: "הוצאה" },
-      select: baseSelect,
-    });
-
-    const metaIds = new Set<string>();
-    for (const r of rows) {
-      const meta = r.metadata as { supplierId?: string } | null;
-      const sid = typeof meta?.supplierId === "string" ? meta.supplierId.trim() : "";
-      if (sid) metaIds.add(sid);
-    }
-
-    const nameById = new Map<string, string>();
-    if (metaIds.size > 0) {
-      const suppliers = await prisma.supplier.findMany({
-        where: { id: { in: [...metaIds] } },
-        select: { id: true, name: true },
-      });
-      for (const s of suppliers) nameById.set(s.id, s.name);
-    }
-
-    return rows.map((r) => {
-      const meta = r.metadata as { supplierId?: string } | null;
-      const sid = typeof meta?.supplierId === "string" ? meta.supplierId.trim() || null : null;
-      return {
-        id: r.id,
-        totalAmount: r.totalAmount,
-        depositAmount: r.depositAmount,
-        paidAmount: r.paidAmount,
-        paymentStatus: r.paymentStatus,
-        metadata: r.metadata,
-        docDate: r.docDate,
-        supplierId: sid,
-        supplierName: sid ? (nameById.get(sid) ?? r.title) : null,
-      };
-    });
-  }
+  const rows = await loadSharedExpenseDocuments();
+  return rows.map((row) => ({
+    id: row.id,
+    totalAmount: row.totalAmount,
+    depositAmount: row.depositAmount,
+    paidAmount: row.paidAmount,
+    paymentStatus: row.paymentStatus,
+    metadata: row.metadata,
+    docDate: row.docDate,
+    supplierId: row.supplierId,
+    supplierName: row.supplierId ? (row.supplier?.name ?? null) : null,
+  }));
 }
 
 export type DashboardHeroSlice = Pick<
   DashboardSummary,
   "updatedAt" | "dbUnavailable" | "heroMetrics" | "todayPnl" | "monthPnl" | "strip"
 >;
+
+async function loadCashRowsWithExpenseMeta(fetchFrom: Date) {
+  const cashRows = await prisma.cashFlowEntry.findMany({
+    where: { entryDate: { gte: fetchFrom } },
+    select: {
+      entryType: true,
+      amount: true,
+      entryDate: true,
+      paymentMethod: true,
+      source: true,
+      zReportId: true,
+      expenseType: true,
+      documentId: true,
+    },
+  });
+  const docIdsNeedingType = cashRows
+    .filter((r) => !r.expenseType && r.documentId)
+    .map((r) => r.documentId as string);
+  const metaByDocId = new Map<string, ExpenseType>();
+  if (docIdsNeedingType.length > 0) {
+    const uniq = [...new Set(docIdsNeedingType)];
+    const docs = await prisma.financialDocument.findMany({
+      where: { id: { in: uniq } },
+      select: { id: true, metadata: true },
+    });
+    for (const d of docs) {
+      const meta = d.metadata as { expenseType?: unknown } | null;
+      metaByDocId.set(d.id, normalizeExpenseType(meta?.expenseType));
+    }
+  }
+  return { cashRows, metaByDocId };
+}
 
 /** כרטיס עליון — רק תזרים + מנוע כספי (מהיר יותר מ-summary מלא) */
 export async function computeDashboardHeroSlice(locale = "he"): Promise<DashboardHeroSlice> {
@@ -284,44 +309,11 @@ export async function computeDashboardHeroSlice(locale = "he"): Promise<Dashboar
     const weekFrom = boundsForDashboardRange("week").from;
     const monthFrom = boundsForDashboardRange("month").from;
 
-    const [cashRows, zToday, zWeek, zMonth, weddingToday, weddingWeek, weddingMonth] =
-      await Promise.all([
-        prisma.cashFlowEntry.findMany({
-          where: { entryDate: { gte: fetchFrom } },
-          select: {
-            entryType: true,
-            amount: true,
-            entryDate: true,
-            paymentMethod: true,
-            source: true,
-            zReportId: true,
-            expenseType: true,
-            documentId: true,
-          },
-        }),
-        countZReportsInRange(today0, todayEnd),
-        countZReportsInRange(weekFrom, todayEnd),
-        countZReportsInRange(monthFrom, todayEnd),
-        loadWeddingSectionStats(today0, todayEnd),
-        loadWeddingSectionStats(weekFrom, todayEnd),
-        loadWeddingSectionStats(monthFrom, todayEnd),
-      ]);
-
-    const docIdsNeedingType = cashRows
-      .filter((r) => !r.expenseType && r.documentId)
-      .map((r) => r.documentId as string);
-    const metaByDocId = new Map<string, ExpenseType>();
-    if (docIdsNeedingType.length > 0) {
-      const uniq = [...new Set(docIdsNeedingType)];
-      const docs = await prisma.financialDocument.findMany({
-        where: { id: { in: uniq } },
-        select: { id: true, metadata: true },
-      });
-      for (const d of docs) {
-        const meta = d.metadata as { expenseType?: unknown } | null;
-        metaByDocId.set(d.id, normalizeExpenseType(meta?.expenseType));
-      }
-    }
+    const [{ cashRows, metaByDocId }, windowCounts] = await Promise.all([
+      loadCashRowsWithExpenseMeta(fetchFrom),
+      loadDashboardWindowCounts(today0, todayEnd, weekFrom, monthFrom),
+    ]);
+    const { zToday, zWeek, zMonth, weddingToday, weddingWeek, weddingMonth } = windowCounts;
 
     const engine = runFinancialEngine(cashRows, metaByDocId, locale, {
       today: zToday,
@@ -400,13 +392,8 @@ async function loadSummary(locale: string): Promise<DashboardSummary> {
   };
 
   const [
-    cashRows,
-    zToday,
-    zWeek,
-    zMonth,
-    weddingToday,
-    weddingWeek,
-    weddingMonth,
+    cashPack,
+    windowCounts,
     alertOrders,
     employeeTasksToday,
     supplierExpenseDocs,
@@ -416,25 +403,8 @@ async function loadSummary(locale: string): Promise<DashboardSummary> {
     notifyWidgets,
     cashflowForecast,
   ] = await Promise.all([
-    prisma.cashFlowEntry.findMany({
-      where: { entryDate: { gte: fetchFrom } },
-      select: {
-        entryType: true,
-        amount: true,
-        entryDate: true,
-        paymentMethod: true,
-        source: true,
-        zReportId: true,
-        expenseType: true,
-        documentId: true,
-      },
-    }),
-    countZReportsInRange(today0, todayEnd),
-    countZReportsInRange(weekFrom, todayEnd),
-    countZReportsInRange(monthFrom, todayEnd),
-    loadWeddingSectionStats(today0, todayEnd),
-    loadWeddingSectionStats(weekFrom, todayEnd),
-    loadWeddingSectionStats(monthFrom, todayEnd),
+    loadCashRowsWithExpenseMeta(fetchFrom),
+    loadDashboardWindowCounts(today0, todayEnd, weekFrom, monthFrom),
     prisma.futureOrder.findMany({
       where: {
         ...activeOrderWhere,
@@ -507,22 +477,8 @@ async function loadSummary(locale: string): Promise<DashboardSummary> {
         })),
     buildCashflowForecast().catch(() => null),
   ]);
-
-  const docIdsNeedingType = cashRows
-    .filter((r) => !r.expenseType && r.documentId)
-    .map((r) => r.documentId as string);
-  const metaByDocId = new Map<string, ExpenseType>();
-  if (docIdsNeedingType.length > 0) {
-    const uniq = [...new Set(docIdsNeedingType)];
-    const docs = await prisma.financialDocument.findMany({
-      where: { id: { in: uniq } },
-      select: { id: true, metadata: true },
-    });
-    for (const d of docs) {
-      const meta = d.metadata as { expenseType?: unknown } | null;
-      metaByDocId.set(d.id, normalizeExpenseType(meta?.expenseType));
-    }
-  }
+  const { zToday, zWeek, zMonth, weddingToday, weddingWeek, weddingMonth } = windowCounts;
+  const { cashRows, metaByDocId } = cashPack;
 
   const engine = runFinancialEngine(cashRows, metaByDocId, locale, {
     today: zToday,

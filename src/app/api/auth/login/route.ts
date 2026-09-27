@@ -44,13 +44,21 @@ async function writeAudit(params: {
 }
 
 export async function POST(req: NextRequest) {
+  const started = performance.now();
+  let bootstrapMs = 0;
+  let userMs = 0;
+  let passwordMs = 0;
+  let sessionMs = 0;
+  let afterMs = 0;
   try {
+    const bootstrapStarted = performance.now();
     try {
       await ensureBootstrapSuperAdmin();
     } catch (bootstrapErr) {
       // bootstrap ראשוני — כשל כאן לא אמור לחשוף Prisma ללקוח; התחברות רגילה תמשיך
       logAuthApiError("AUTH_BOOTSTRAP_ERROR", bootstrapErr);
     }
+    bootstrapMs = performance.now() - bootstrapStarted;
 
     const body = (await req.json()) as {
       identifier?: string;
@@ -69,7 +77,9 @@ export async function POST(req: NextRequest) {
       return authErrorResponse(AUTH_API_CODES.REQUIRED_FIELDS, 400);
     }
 
+    const userStarted = performance.now();
     const user = await resolveLoginUser(rawIdentifier);
+    userMs = performance.now() - userStarted;
 
     if (!user) {
       await writeAudit({
@@ -93,7 +103,9 @@ export async function POST(req: NextRequest) {
       return authErrorResponse(AUTH_API_CODES.ACCOUNT_DISABLED, 401);
     }
 
+    const passwordStarted = performance.now();
     const ok = await verifyPassword(password, user.passwordHash);
+    passwordMs = performance.now() - passwordStarted;
     if (!ok) {
       await writeAudit({
         userId: user.id,
@@ -105,6 +117,7 @@ export async function POST(req: NextRequest) {
       return authErrorResponse(AUTH_API_CODES.INVALID_CREDENTIALS, 401);
     }
 
+    const sessionStarted = performance.now();
     const permissions = await getPermissionStringsForUser(
       user.id,
       user.role as "EMPLOYEE" | "ADMIN" | "SUPER_ADMIN",
@@ -123,7 +136,9 @@ export async function POST(req: NextRequest) {
       sid: sessionId,
       mustChangePassword: Boolean(user.mustChangePassword),
     });
+    sessionMs = performance.now() - sessionStarted;
 
+    const afterStarted = performance.now();
     await Promise.all([
       logActivity(user.id, "login"),
       writeAudit({
@@ -136,6 +151,7 @@ export async function POST(req: NextRequest) {
         console.error("[login] auto checkout", error);
       }),
     ]);
+    afterMs = performance.now() - afterStarted;
 
     const res = NextResponse.json({
       ok: true,
@@ -150,6 +166,20 @@ export async function POST(req: NextRequest) {
         permissions,
       },
     });
+
+    res.headers.set(
+      "Server-Timing",
+      [
+        ["bootstrap", bootstrapMs],
+        ["user", userMs],
+        ["password", passwordMs],
+        ["session", sessionMs],
+        ["after", afterMs],
+        ["total", performance.now() - started],
+      ]
+        .map(([name, ms]) => `${name};dur=${Math.max(0, Math.round(Number(ms)))}`)
+        .join(", "),
+    );
 
     res.cookies.set(COOKIE_NAME, token, {
       httpOnly: true,

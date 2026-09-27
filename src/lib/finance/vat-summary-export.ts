@@ -232,7 +232,7 @@ export async function buildFinancialSummaryWorkbook(input: {
   const summary = input.summary;
   const wb = new ExcelJS.Workbook();
   wb.creator = "WEGO BUSINESS";
-  wb.views = [{ rightToLeft: true, activeTab: 0 }];
+  wb.views = [{ rightToLeft: true, activeTab: 0 } as unknown as ExcelJS.WorkbookView];
 
   const summarySheet = wb.addWorksheet("סיכום", { views: [{ rightToLeft: true, state: "frozen", ySplit: 1 }] });
   summarySheet.columns = [{ width: 32 }, { width: 22 }];

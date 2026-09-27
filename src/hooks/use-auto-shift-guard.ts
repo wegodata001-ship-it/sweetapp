@@ -52,7 +52,10 @@ export function useAutoShiftGuard(enabled: boolean) {
   useEffect(() => {
     if (!enabled) return;
     const kick = window.setTimeout(() => void check(), 0);
-    const id = window.setInterval(() => void check(), 30_000);
+    const id = window.setInterval(() => {
+      if (document.visibilityState === "hidden") return;
+      void check();
+    }, 30_000);
     return () => {
       window.clearTimeout(kick);
       window.clearInterval(id);

@@ -1,13 +1,16 @@
-import { prismaAny } from "@/lib/prisma";
-
 /**
- * עמודות additive ממיגרציות אחרונות — אם הקוד עלה לפני migrate deploy,
- * שאילתות עם displayOrder/minimumQuantity מפילות את API והמסך נראה ריק.
- * ADD COLUMN IF NOT EXISTS בטוח, לא נוגע בנתונים/ספירות.
+ * Inventory location columns live in prisma migrations:
+ * 20260811120000_location_and_placement_display_order
+ * 20260826120000_weekday_minimums
+ * They were verified present on the live database, so screen requests
+ * do not probe information_schema and do not run ALTER or CREATE.
+ * If a column is missing, callers still fall back through isMissingColumnError.
  */
-let ensured: Promise<void> | null = null;
+export async function ensureLocationSchemaColumns(): Promise<void> {
+  return;
+}
 
-function isMissingColumnError(e: unknown): boolean {
+export function isMissingColumnError(e: unknown): boolean {
   const msg = e instanceof Error ? e.message : String(e);
   return (
     /displayOrder|minimumQuantity/i.test(msg) &&
@@ -15,76 +18,3 @@ function isMissingColumnError(e: unknown): boolean {
       msg.includes("P2022"))
   );
 }
-
-export async function ensureLocationSchemaColumns(): Promise<void> {
-  if (!ensured) {
-    ensured = (async () => {
-      try {
-        await prismaAny.$executeRawUnsafe(`
-          ALTER TABLE "InventoryLocation"
-            ADD COLUMN IF NOT EXISTS "displayOrder" INTEGER NOT NULL DEFAULT 0
-        `);
-        await prismaAny.$executeRawUnsafe(`
-          CREATE INDEX IF NOT EXISTS "InventoryLocation_displayOrder_idx"
-            ON "InventoryLocation"("displayOrder")
-        `);
-        await prismaAny.$executeRawUnsafe(`
-          ALTER TABLE "InventoryProductOnLocation"
-            ADD COLUMN IF NOT EXISTS "displayOrder" INTEGER NOT NULL DEFAULT 0
-        `);
-        await prismaAny.$executeRawUnsafe(`
-          CREATE INDEX IF NOT EXISTS "InventoryProductOnLocation_locationId_displayOrder_idx"
-            ON "InventoryProductOnLocation"("locationId", "displayOrder")
-        `);
-        await prismaAny.$executeRawUnsafe(`
-          ALTER TABLE "InventoryProductOnLocation"
-            ADD COLUMN IF NOT EXISTS "minimumQuantity" DOUBLE PRECISION NOT NULL DEFAULT 0
-        `);
-        for (const col of [
-          "minimumSun",
-          "minimumMon",
-          "minimumTue",
-          "minimumWed",
-          "minimumThu",
-          "minimumFri",
-          "minimumSat",
-        ]) {
-          await prismaAny.$executeRawUnsafe(`
-            ALTER TABLE "InventoryProductOnLocation"
-              ADD COLUMN IF NOT EXISTS "${col}" DOUBLE PRECISION
-          `);
-        }
-        await prismaAny.$executeRawUnsafe(`
-          ALTER TABLE "InventoryCount"
-            ADD COLUMN IF NOT EXISTS "minimumQuantity" DOUBLE PRECISION NOT NULL DEFAULT 0
-        `);
-        // Backfill מינימום ממוצר גלובלי — רק כשעדיין 0 (לא דורס ערכים קיימים)
-        await prismaAny.$executeRawUnsafe(`
-          UPDATE "InventoryProductOnLocation" AS pl
-          SET "minimumQuantity" = COALESCE(p."minimumQuantity", 0)
-          FROM "InventoryProduct" AS p
-          WHERE pl."inventoryProductId" = p."id"
-            AND pl."minimumQuantity" = 0
-            AND COALESCE(p."minimumQuantity", 0) > 0
-        `);
-        // Snapshot היסטורי לשורות ספירה ישנות — placement ואז מוצר; לא דורס ערך > 0
-        await prismaAny.$executeRawUnsafe(`
-          UPDATE "InventoryCount" AS c
-          SET "minimumQuantity" = COALESCE(pl."minimumQuantity", p."minimumQuantity", 0)
-          FROM "InventoryProduct" AS p
-          LEFT JOIN "InventoryProductOnLocation" AS pl
-            ON pl."inventoryProductId" = c."inventoryProductId"
-           AND pl."locationId" = c."locationId"
-          WHERE c."inventoryProductId" = p."id"
-            AND c."minimumQuantity" = 0
-            AND COALESCE(pl."minimumQuantity", p."minimumQuantity", 0) > 0
-        `);
-      } catch {
-        // DB ללא הרשאת DDL / ספק אחר — נשארים עם fallback בשאילתות
-      }
-    })();
-  }
-  await ensured;
-}
-
-export { isMissingColumnError };

@@ -130,7 +130,10 @@ export default function AdminStaffPage({ embedded = false }: { embedded?: boolea
   }, [tab, loadShifts, loadAtt]);
 
   useEffect(() => {
-    const t = setInterval(() => void loadDash(), 30_000);
+    const t = setInterval(() => {
+      if (document.visibilityState === "hidden") return;
+      void loadDash();
+    }, 30_000);
     return () => clearInterval(t);
   }, [loadDash]);
 

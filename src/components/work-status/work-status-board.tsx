@@ -1,7 +1,7 @@
 "use client";
 
 import { Activity, Loader2, Radio, X } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useI18n } from "@/components/i18n-provider";
 import { WorkStatusHeartbeat } from "@/components/work-status/work-status-heartbeat";
 import type { WorkStatusBoardRow } from "@/lib/work-status/board-service";
@@ -40,17 +40,39 @@ export function WorkStatusBoard() {
   const [selected, setSelected] = useState<WorkStatusBoardRow | null>(null);
   const [tick, setTick] = useState(0);
 
+  const loadGate = useRef(false);
+  const abortRef = useRef<AbortController | null>(null);
+
   const load = useCallback(async () => {
-    const res = await fetch("/api/work-status/board", { credentials: "same-origin", cache: "no-store" });
-    const j = (await res.json()) as { ok?: boolean; data?: BoardPayload };
-    if (j.ok && j.data) setData(j.data);
+    if (loadGate.current) return;
+    loadGate.current = true;
+    const ac = new AbortController();
+    abortRef.current = ac;
+    try {
+      const res = await fetch("/api/work-status/board", {
+        credentials: "same-origin",
+        cache: "no-store",
+        signal: ac.signal,
+      });
+      if (ac.signal.aborted) return;
+      const j = (await res.json()) as { ok?: boolean; data?: BoardPayload };
+      if (j.ok && j.data) setData(j.data);
+    } catch (error) {
+      if (ac.signal.aborted || (error instanceof DOMException && error.name === "AbortError")) return;
+    } finally {
+      if (abortRef.current === ac) loadGate.current = false;
+    }
   }, []);
 
   useEffect(() => {
     queueMicrotask(() => void load());
-    const p = setInterval(() => void load(), POLL_MS);
+    const p = setInterval(() => {
+      if (document.visibilityState === "hidden") return;
+      void load();
+    }, POLL_MS);
     const clock = setInterval(() => setTick((n) => n + 1), 1000);
     return () => {
+      abortRef.current?.abort();
       clearInterval(p);
       clearInterval(clock);
     };

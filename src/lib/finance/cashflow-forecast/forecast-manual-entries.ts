@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { parseDateKey } from "@/lib/finance/cashflow-forecast/date-utils";
+import { loadSharedForecastSettings } from "@/lib/finance/shared-forecast-reads";
 
 export type ManualForecastEntryType = "expected_income" | "loan";
 
@@ -30,10 +31,7 @@ function parseEntries(raw: unknown): ManualForecastEntry[] {
 
 export async function listManualForecastEntries(): Promise<ManualForecastEntry[]> {
   try {
-    const row = await prisma.financeSettings.findUnique({
-      where: { id: 1 },
-      select: { forecastManualEntries: true },
-    });
+    const row = await loadSharedForecastSettings();
     return parseEntries(row?.forecastManualEntries);
   } catch {
     return [];

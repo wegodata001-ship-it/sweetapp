@@ -115,6 +115,7 @@ export function EmployeeTasksClient() {
 
   useEffect(() => {
     const h = window.setInterval(() => {
+      if (document.visibilityState === "hidden") return;
       void load();
     }, 30_000);
     return () => window.clearInterval(h);

@@ -158,9 +158,19 @@ export async function backfillOrderCategoriesOnce(
   prisma: import("@prisma/client").PrismaClient,
 ): Promise<void> {
   if (orderCategoriesBackfilled) return;
+  orderCategoriesBackfilled = true;
+  const pending = await prisma.futureOrder.count({
+    where: {
+      eventType: { in: [...WEDDING_EVENT_TYPES] },
+      NOT: { orderCategory: ORDER_CATEGORY_WEDDING },
+    },
+  });
+  if (pending === 0) return;
   await prisma.futureOrder.updateMany({
-    where: { eventType: { in: [...WEDDING_EVENT_TYPES] } },
+    where: {
+      eventType: { in: [...WEDDING_EVENT_TYPES] },
+      NOT: { orderCategory: ORDER_CATEGORY_WEDDING },
+    },
     data: { orderCategory: ORDER_CATEGORY_WEDDING },
   });
-  orderCategoriesBackfilled = true;
 }

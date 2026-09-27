@@ -126,8 +126,15 @@ export async function listCashFlowRows(filters: CashflowListFilters): Promise<Ca
   const rows = await prisma.cashFlowEntry.findMany({
     orderBy: [{ entryDate: "desc" }, { createdAt: "desc" }],
   });
-  let mapped = rows.map((row) => prismaCashFlowToRow(row));
-  mapped = await enrichCashFlowRowsWithExpenseType(rows, mapped);
-  mapped = await enrichCashFlowRowsWithCounterparty(rows, mapped);
-  return applyCashflowListFilters(mapped, filters);
+  const mapped = rows.map((row) => prismaCashFlowToRow(row));
+  const [typed, parties] = await Promise.all([
+    enrichCashFlowRowsWithExpenseType(rows, mapped),
+    enrichCashFlowRowsWithCounterparty(rows, mapped),
+  ]);
+  const merged = typed.map((row, index) => ({
+    ...row,
+    supplier_id: parties[index]?.supplier_id ?? row.supplier_id,
+    employee_id: parties[index]?.employee_id ?? row.employee_id,
+  }));
+  return applyCashflowListFilters(merged, filters);
 }

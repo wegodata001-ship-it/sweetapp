@@ -92,15 +92,35 @@ export async function GET(req: NextRequest) {
       and.push({ eventDate });
     }
     const where = and.length === 1 ? and[0] : { AND: and };
+    const handlerStarted = performance.now();
 
+    if (sp.get("countOnly") === "1") {
+      const total = await prisma.futureOrder.count({ where });
+      const response = NextResponse.json({ ok: true, data: [], total });
+      response.headers.set(
+        "Server-Timing",
+        `count;dur=${Math.round(performance.now() - handlerStarted)}, total;dur=${Math.round(performance.now() - handlerStarted)}`,
+      );
+      return response;
+    }
+
+    const backfillStarted = performance.now();
     await backfillOrderCategoriesOnce(prisma);
     await backfillOrderDepositsOnce();
+    const backfillMs = performance.now() - backfillStarted;
 
+    const queryStarted = performance.now();
     const rows = await prisma.futureOrder.findMany({
       where,
       orderBy: [{ eventDate: "asc" }, { orderNumber: "desc" }],
     });
-    return NextResponse.json({ ok: true, data: rows });
+    const queryMs = performance.now() - queryStarted;
+    const response = NextResponse.json({ ok: true, data: rows });
+    response.headers.set(
+      "Server-Timing",
+      `backfill;dur=${Math.round(backfillMs)}, query;dur=${Math.round(queryMs)}, total;dur=${Math.round(performance.now() - handlerStarted)}`,
+    );
+    return response;
   } catch (e) {
     return NextResponse.json(
       { ok: false, error: e instanceof Error ? e.message : "שגיאה" },

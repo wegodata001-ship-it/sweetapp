@@ -7,6 +7,7 @@ import {
   liveRefreshScopeMatches,
   type LiveRefreshDetail,
 } from "@/lib/client/live-data";
+import { isDocumentVisible } from "@/lib/client/visible-poll";
 
 export type LiveRefreshUiStatus = "idle" | "refreshing" | "updated" | "error";
 
@@ -63,7 +64,10 @@ export function useLiveRefresh({
 
   useEffect(() => {
     if (!enabled) return;
-    const id = window.setInterval(requestRefresh, intervalMs);
+    const id = window.setInterval(() => {
+      if (!isDocumentVisible()) return;
+      requestRefresh();
+    }, intervalMs);
     return () => window.clearInterval(id);
   }, [enabled, intervalMs, requestRefresh]);
 
