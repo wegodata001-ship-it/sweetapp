@@ -23,6 +23,13 @@ const HERO_KEY = "dashboard-hero";
 const FULL_KEY = "dashboard-full";
 const CACHE_MS = 20_000;
 
+function isAbortError(error: unknown): boolean {
+  return (
+    (error instanceof DOMException && error.name === "AbortError") ||
+    (error instanceof Error && error.name === "AbortError")
+  );
+}
+
 export function DashboardShell() {
   const { t } = useI18n();
   const [data, setData] = useState<DashboardSummary | null>(null);
@@ -31,12 +38,14 @@ export function DashboardShell() {
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
-  const load = useCallback(async (opts?: { force?: boolean; signal?: AbortSignal }) => {
+  const load = useCallback(async (opts?: { force?: boolean; isCancelled?: () => boolean }) => {
+    const cancelled = () => opts?.isCancelled?.() === true;
     if (opts?.force) {
       const { invalidateCacheKey } = await import("@/lib/client/fetch-cache");
       invalidateCacheKey(HERO_KEY);
       invalidateCacheKey(FULL_KEY);
     }
+    if (cancelled()) return;
     setError(null);
     setRefreshing(true);
 
@@ -45,7 +54,6 @@ export function DashboardShell() {
       async () => {
         const res = await fetch("/api/dashboard/summary?section=hero", {
           credentials: "same-origin",
-          signal: opts?.signal,
         });
         const json = (await res.json()) as { ok: boolean; data?: DashboardHeroSlice };
         if (!res.ok || !json.ok || !json.data) return null;
@@ -59,7 +67,6 @@ export function DashboardShell() {
       async () => {
         const res = await fetch("/api/dashboard/summary", {
           credentials: "same-origin",
-          signal: opts?.signal,
         });
         const json = (await res.json()) as { ok: boolean; data?: DashboardSummary; error?: string };
         if (!res.ok || !json.ok || !json.data) {
@@ -70,9 +77,14 @@ export function DashboardShell() {
       opts?.force ? 0 : CACHE_MS,
     );
 
+    // Both requests start together. A cancelled caller may return before the
+    // second one settles, so each rejection needs its own handler.
+    void heroPromise.catch(() => undefined);
+    void fullPromise.catch(() => undefined);
+
     try {
       const hero = await heroPromise;
-      if (opts?.signal?.aborted) return;
+      if (cancelled()) return;
       if (hero) {
         setData((prev) =>
           prev
@@ -110,23 +122,25 @@ export function DashboardShell() {
       }
 
       const full = await fullPromise;
-      if (opts?.signal?.aborted) return;
+      if (cancelled()) return;
       if (full) {
         setData(full);
         setBodyReady(true);
       }
     } catch (error) {
-      if (opts?.signal?.aborted || (error instanceof DOMException && error.name === "AbortError")) return;
+      if (cancelled() || isAbortError(error)) return;
       if (!heroReady) setError(t("dashboard.redesign.loadError"));
     } finally {
-      if (!opts?.signal?.aborted) setRefreshing(false);
+      if (!cancelled()) setRefreshing(false);
     }
   }, [t]);
 
   useEffect(() => {
-    const ac = new AbortController();
-    void load({ signal: ac.signal });
-    return () => ac.abort();
+    let cancelled = false;
+    void load({ isCancelled: () => cancelled });
+    return () => {
+      cancelled = true;
+    };
   }, [load]);
 
   if (!heroReady && !data) {

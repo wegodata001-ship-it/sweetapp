@@ -5,6 +5,7 @@ import { CalendarDays, Check, Loader2, X } from "lucide-react";
 import { useI18n } from "@/components/i18n-provider";
 import { useToast } from "@/components/toast-provider";
 import {
+  activeStorageLocationOptions,
   WEEKDAY_MINIMUM_FIELDS,
   type WeekdayMinimumField,
 } from "@/lib/inventory/weekday-minimum";
@@ -27,7 +28,6 @@ type EditedRow = {
 type Props = {
   open: boolean;
   onClose: () => void;
-  locations: LocationOption[];
 };
 
 const WEEKDAY_I18N_KEYS: WeekdayMinimumField[] = [...WEEKDAY_MINIMUM_FIELDS];
@@ -40,7 +40,7 @@ function emptyEdited(weekdays: Record<WeekdayMinimumField, number | null>): Reco
   return out;
 }
 
-export function WeekdayMinimumsModal({ open, onClose, locations }: Props) {
+export function WeekdayMinimumsModal({ open, onClose }: Props) {
   const { t, dir } = useI18n();
   const { showToast } = useToast();
   const tW = useCallback(
@@ -49,6 +49,8 @@ export function WeekdayMinimumsModal({ open, onClose, locations }: Props) {
     [t],
   );
 
+  const [locations, setLocations] = useState<LocationOption[]>([]);
+  const [locationsLoading, setLocationsLoading] = useState(false);
   const [locationId, setLocationId] = useState("");
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -64,12 +66,43 @@ export function WeekdayMinimumsModal({ open, onClose, locations }: Props) {
 
   useEffect(() => {
     if (!open) return;
-    setLocationId(sortedLocations[0]?.id ?? "");
+    let cancelled = false;
+    setLocationsLoading(true);
     setRows([]);
     setBaseline([]);
     setError(null);
     setSuccess(false);
-  }, [open, sortedLocations]);
+    void (async () => {
+      try {
+        const res = await fetch("/api/inventory/locations", {
+          credentials: "same-origin",
+          cache: "no-store",
+        });
+        const json = (await res.json()) as {
+          ok?: boolean;
+          error?: string;
+          data?: Array<{ id?: string; name?: string; isActive?: boolean }>;
+        };
+        if (!res.ok || !json.ok) {
+          throw new Error(json.error || tW("loadFailed"));
+        }
+        const options = activeStorageLocationOptions(json.data ?? []);
+        if (cancelled) return;
+        setLocations(options);
+        setLocationId(options[0]?.id ?? "");
+      } catch (e) {
+        if (cancelled) return;
+        setLocations([]);
+        setLocationId("");
+        setError(e instanceof Error ? e.message : tW("loadFailed"));
+      } finally {
+        if (!cancelled) setLocationsLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, tW]);
 
   const load = useCallback(async () => {
     if (!locationId) return;
@@ -86,6 +119,12 @@ export function WeekdayMinimumsModal({ open, onClose, locations }: Props) {
         error?: string;
         data?: { rows: WeekdayRow[] };
       };
+      if (res.status === 404) {
+        setRows([]);
+        setBaseline([]);
+        setError(tW("locationUnavailable"));
+        return;
+      }
       if (!res.ok || !json.ok) {
         throw new Error(json.error || tW("loadFailed"));
       }
@@ -240,7 +279,8 @@ export function WeekdayMinimumsModal({ open, onClose, locations }: Props) {
           <select
             value={locationId}
             onChange={(e) => setLocationId(e.target.value)}
-            className="w-full rounded-xl border border-[#e7ecf5] bg-white px-3 py-2.5 text-sm font-bold text-slate-800 outline-none focus:border-[#6c4cff] focus:ring-2 focus:ring-[#6c4cff]/20 sm:max-w-md"
+            disabled={locationsLoading || sortedLocations.length === 0}
+            className="w-full rounded-xl border border-[#e7ecf5] bg-white px-3 py-2.5 text-sm font-bold text-slate-800 outline-none focus:border-[#6c4cff] focus:ring-2 focus:ring-[#6c4cff]/20 disabled:bg-slate-50 sm:max-w-md"
           >
             {sortedLocations.map((loc) => (
               <option key={loc.id} value={loc.id}>{loc.name}</option>
@@ -249,11 +289,13 @@ export function WeekdayMinimumsModal({ open, onClose, locations }: Props) {
         </div>
 
         <div className="min-h-0 flex-1 overflow-auto px-2 py-2 sm:px-4">
-          {loading ? (
+          {locationsLoading || loading ? (
             <div className="flex items-center justify-center gap-2 py-16 text-sm font-bold text-slate-500">
               <Loader2 className="h-5 w-5 animate-spin text-[#6c4cff]" />
               {tW("loading")}
             </div>
+          ) : sortedLocations.length === 0 ? (
+            <p className="py-12 text-center text-sm font-bold text-slate-500">{tW("noActiveLocations")}</p>
           ) : error && rows.length === 0 ? (
             <p className="py-12 text-center text-sm font-bold text-rose-600">{error}</p>
           ) : rows.length === 0 ? (

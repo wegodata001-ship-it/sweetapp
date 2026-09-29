@@ -3438,6 +3438,8 @@
           "productCol": "Product",
           "loading": "Loading…",
           "empty": "No products in this location",
+          "noActiveLocations": "No active storage locations",
+          "locationUnavailable": "This location is inactive or no longer exists",
           "save": "Save changes",
           "saveSuccess": "Minimums saved successfully",
           "saveFailed": "Failed to save minimums",

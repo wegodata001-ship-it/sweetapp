@@ -3170,6 +3170,8 @@
           "productCol": "מוצר",
           "loading": "טוען…",
           "empty": "אין מוצרים במיקום",
+          "noActiveLocations": "אין מקומות אחסון פעילים",
+          "locationUnavailable": "המיקום לא פעיל או לא קיים יותר",
           "save": "שמור שינויים",
           "saveSuccess": "המינימומים נשמרו בהצלחה",
           "saveFailed": "שמירת המינימומים נכשלה",

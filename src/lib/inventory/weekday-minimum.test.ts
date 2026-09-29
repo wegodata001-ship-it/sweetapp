@@ -8,6 +8,7 @@ import {
   resolveTodayMinimumForCountDay,
   weekdayFieldForCountDay,
   WEEKDAY_MINIMUM_FIELDS,
+  activeStorageLocationOptions,
 } from "./weekday-minimum";
 
 function run() {
@@ -131,6 +132,15 @@ function run() {
   assert.equal(canEditWeekdayMinimums("SUPER_ADMIN"), true);
   assert.equal(canEditWeekdayMinimums("EMPLOYEE"), false);
   assert.equal(canEditWeekdayMinimums("USER"), false);
+
+  const options = activeStorageLocationOptions([
+    { id: "active", name: "מחסן", isActive: true },
+    { id: "inactive", name: "ישן", isActive: false },
+    { id: "active", name: "מחסן", isActive: true },
+    { id: "  ", name: "ריק", isActive: true },
+    { id: "ghost", name: "   ", isActive: true },
+  ]);
+  assert.deepEqual(options, [{ id: "active", name: "מחסן" }]);
 
   console.log("weekday-minimum.test.ts: OK");
 }

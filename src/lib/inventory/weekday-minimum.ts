@@ -141,6 +141,29 @@ export function placementToWeekdayValues(
   return out;
 }
 
+export type ActiveStorageLocationOption = { id: string; name: string };
+
+/**
+ * Dropdown options for weekday minimums.
+ * Only rows that are present and active. Duplicates by id are dropped.
+ * Callers must pass InventoryLocation rows, not counts or history.
+ */
+export function activeStorageLocationOptions(
+  rows: Array<{ id?: unknown; name?: unknown; isActive?: unknown }>,
+): ActiveStorageLocationOption[] {
+  const seen = new Set<string>();
+  const out: ActiveStorageLocationOption[] = [];
+  for (const row of rows) {
+    if (row.isActive === false) continue;
+    const id = typeof row.id === "string" ? row.id.trim() : "";
+    const name = typeof row.name === "string" ? row.name.trim() : "";
+    if (!id || !name || seen.has(id)) continue;
+    seen.add(id);
+    out.push({ id, name });
+  }
+  return out;
+}
+
 export function parseWeekdayMinimumInput(
   raw: unknown,
 ): number | null | undefined {

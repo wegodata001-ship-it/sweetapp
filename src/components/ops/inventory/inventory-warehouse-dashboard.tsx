@@ -1033,7 +1033,6 @@ export function InventoryWarehouseDashboard() {
       <WeekdayMinimumsModal
         open={weekdayMinimumsOpen}
         onClose={() => setWeekdayMinimumsOpen(false)}
-        locations={copyLocations}
       />
 
       <ShelfAddProductsModal

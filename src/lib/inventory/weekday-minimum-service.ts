@@ -41,6 +41,7 @@ type PlacementRow = {
   minimumSat: number | null;
 };
 
+/** Active InventoryLocation only. resolveShelf rejects inactive and missing ids. */
 export async function loadWeekdayMinimumRows(locationId: string): Promise<{
   locationId: string;
   locationName: string;
