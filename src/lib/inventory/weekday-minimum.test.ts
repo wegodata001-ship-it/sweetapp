@@ -9,7 +9,9 @@ import {
   weekdayFieldForCountDay,
   WEEKDAY_MINIMUM_FIELDS,
   activeStorageLocationOptions,
+  prepareWeekdayMinimumUpdates,
 } from "./weekday-minimum";
+import { weekdayMinimumUpdateSql } from "./weekday-minimum-service";
 
 function run() {
   const sunday = "2026-08-23";
@@ -141,6 +143,59 @@ function run() {
     { id: "ghost", name: "   ", isActive: true },
   ]);
   assert.deepEqual(options, [{ id: "active", name: "מחסן" }]);
+
+  const zero = prepareWeekdayMinimumUpdates([
+    { productId: "p", minimumSun: 0, minimumMon: "", minimumTue: null, minimumWed: "nope" },
+  ]);
+  assert.equal(zero.length, 1);
+  assert.equal(zero[0].values.minimumSun, 0);
+  assert.equal(zero[0].set.minimumSun, true);
+  assert.equal(zero[0].values.minimumMon, null);
+  assert.equal(zero[0].set.minimumMon, true);
+  assert.equal(zero[0].values.minimumTue, null);
+  assert.equal(zero[0].set.minimumTue, true);
+  assert.equal(zero[0].set.minimumWed, false);
+  assert.equal(zero[0].set.minimumThu, false);
+
+  assert.equal(prepareWeekdayMinimumUpdates([{ productId: "p" }]).length, 0);
+
+  const oneDay = prepareWeekdayMinimumUpdates([{ productId: "p", minimumFri: 7 }]);
+  assert.equal(oneDay[0].set.minimumFri, true);
+  assert.equal(oneDay[0].values.minimumFri, 7);
+  assert.equal(oneDay[0].set.minimumSun, false);
+
+  const merged = prepareWeekdayMinimumUpdates([
+    { productId: "p", minimumSun: 1 },
+    { productId: "p", minimumMon: 2 },
+  ]);
+  assert.equal(merged.length, 1);
+  assert.equal(merged[0].values.minimumSun, 1);
+  assert.equal(merged[0].values.minimumMon, 2);
+
+  for (const size of [1, 10, 25, 50, 100]) {
+    const prepared = prepareWeekdayMinimumUpdates(
+      Array.from({ length: size }, (_, i) => ({
+        productId: `p${i}`,
+        minimumSun: i === 0 ? 0 : i,
+        minimumMon: null,
+        minimumTue: 1,
+        minimumWed: 2,
+        minimumThu: 3,
+        minimumFri: 4,
+        minimumSat: 5,
+      })),
+    );
+    assert.equal(prepared.length, size);
+    const sql = weekdayMinimumUpdateSql("loc-1", prepared);
+    const text = sql.strings.join(" ");
+    assert.match(text, /UPDATE "InventoryProductOnLocation"/);
+    assert.match(text, /p\."locationId"/);
+    assert.match(text, /loc\."isActive" = true/);
+    assert.doesNotMatch(text, /InventoryCount/);
+    assert.doesNotMatch(text, /"minimumQuantity"/);
+    assert.equal(sql.values[sql.values.length - 1], "loc-1");
+    assert.equal(sql.values.filter((v) => v === `p${size - 1}`).length, 1);
+  }
 
   console.log("weekday-minimum.test.ts: OK");
 }

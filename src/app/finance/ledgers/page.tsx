@@ -12,6 +12,9 @@ import {
   fetchEntitiesByType,
   fetchLedgerForFilters,
   fetchLedgerOverview,
+  fetchLedgerSuggestions,
+  fetchRecentLedgerActivity,
+  type LedgerEntityRef,
   type LedgerOverviewResponse,
 } from "@/lib/finance/db";
 import type { EntityType, FinanceEntityRow, LedgerMovementView, LedgerOverviewRow } from "@/lib/finance/types";
@@ -65,6 +68,9 @@ function LedgersPageInner() {
   const [error, setError] = useState<string | null>(null);
 
   const [entityPicker, setEntityPicker] = useState<FinanceEntityRow[]>([]);
+  const [recentActivity, setRecentActivity] = useState<Array<LedgerEntityRef & { lastActivityAt: string }>>([]);
+  const [suggestions, setSuggestions] = useState<LedgerEntityRef[]>([]);
+  const [suggestOpen, setSuggestOpen] = useState(false);
 
   const [detail, setDetail] = useState<{ type: EntityType; id: string } | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -104,6 +110,29 @@ function LedgersPageInner() {
       cancelled = true;
     };
   }, [draft.entityType]);
+
+  const loadRecent = useCallback(async () => {
+    const rows = await fetchRecentLedgerActivity();
+    setRecentActivity(rows);
+  }, []);
+
+  useEffect(() => {
+    const q = draft.q.trim();
+    if (q.length < 1) {
+      setSuggestions([]);
+      return;
+    }
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      void fetchLedgerSuggestions(q).then((rows) => {
+        if (!cancelled) setSuggestions(rows);
+      });
+    }, 200);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [draft.q]);
 
   const loadOverview = useCallback(async (opts?: { silent?: boolean }) => {
     const silent = Boolean(opts?.silent) && overviewRef.current !== null;
@@ -175,9 +204,12 @@ function LedgersPageInner() {
   }, [loadDetail]);
 
   const silentRefresh = useCallback(async () => {
-    await loadOverview({ silent: true });
-    await loadDetail({ silent: true });
-  }, [loadOverview, loadDetail]);
+    await Promise.all([loadOverview({ silent: true }), loadDetail({ silent: true }), loadRecent()]);
+  }, [loadOverview, loadDetail, loadRecent]);
+
+  useEffect(() => {
+    void loadRecent();
+  }, [loadRecent]);
 
   const { status: liveStatus } = useLiveRefresh({
     refresh: silentRefresh,
@@ -199,6 +231,21 @@ function LedgersPageInner() {
     if (next.entityType === "all") next.entityId = "";
     setApplied(next);
     setPage(1);
+    setSuggestOpen(false);
+  };
+
+  const filterToEntity = (entity: LedgerEntityRef) => {
+    const next: Filters = {
+      q: entity.entityName,
+      entityType: entity.entityType,
+      entityId: entity.entityId,
+      dateFrom: applied.dateFrom,
+      dateTo: applied.dateTo,
+    };
+    setDraft(next);
+    setApplied(next);
+    setPage(1);
+    setSuggestOpen(false);
   };
 
   const clearFilters = () => {
@@ -206,6 +253,8 @@ function LedgersPageInner() {
     setDraft(next);
     setApplied(next);
     setPage(1);
+    setSuggestOpen(false);
+    setSuggestions([]);
   };
 
   const setDetailUrl = (next: { type: EntityType; id: string } | null) => {
@@ -364,15 +413,39 @@ function LedgersPageInner() {
           {t("ledgers.filterApplyHint")}
         </p>
         <div className="grid gap-2 md:grid-cols-3 lg:grid-cols-6">
-          <label className="text-xs font-bold text-slate-800">
+          <label className="relative text-xs font-bold text-slate-800">
             {t("ledgers.searchByName")}
             <input
               type="text"
               value={draft.q}
-              onChange={(e) => setDraft((d) => ({ ...d, q: e.target.value }))}
+              onChange={(e) => {
+                setDraft((d) => ({ ...d, q: e.target.value, entityId: "" }));
+                setSuggestOpen(true);
+              }}
+              onFocus={() => setSuggestOpen(true)}
+              onBlur={() => {
+                window.setTimeout(() => setSuggestOpen(false), 150);
+              }}
               className={inputClass}
               placeholder={t("common.searchPlaceholder")}
+              autoComplete="off"
             />
+            {suggestOpen && suggestions.length > 0 ? (
+              <div className="absolute z-30 mt-1 max-h-64 w-full overflow-auto rounded-xl border border-slate-200 bg-white text-right shadow-lg">
+                {suggestions.map((entity) => (
+                  <button
+                    key={`${entity.entityType}:${entity.entityId}`}
+                    type="button"
+                    className="flex w-full items-center justify-between gap-2 px-3 py-2 text-sm hover:bg-slate-50"
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => filterToEntity(entity)}
+                  >
+                    <span className="truncate font-bold text-slate-950">{entity.entityName}</span>
+                    {renderEntityBadge(entity.entityType)}
+                  </button>
+                ))}
+              </div>
+            ) : null}
           </label>
 
           <label className="text-xs font-bold text-slate-800">
@@ -401,6 +474,9 @@ function LedgersPageInner() {
               className={`${inputClass} disabled:opacity-50`}
             >
               <option value="">{draft.entityType === "all" ? t("ledgers.entityPickPrompt") : t("ledgers.allInType")}</option>
+              {draft.entityId && !entityPicker.some((entity) => entity.id === draft.entityId) ? (
+                <option value={draft.entityId}>{draft.q || draft.entityId}</option>
+              ) : null}
               {entityPicker.map((e) => (
                 <option key={e.id} value={e.id}>
                   {e.name}
@@ -448,6 +524,51 @@ function LedgersPageInner() {
         </div>
       </div>
 
+      {recentActivity.length > 0 ? (
+        <div className="mt-3">
+          <p className="mb-1.5 text-xs font-black text-slate-700">{t("ledgers.recentActivity")}</p>
+          <div className="flex gap-2 overflow-x-auto pb-1 [scrollbar-width:thin]">
+            {recentActivity.map((entity) => (
+              <button
+                key={`${entity.entityType}:${entity.entityId}`}
+                type="button"
+                onClick={() => filterToEntity(entity)}
+                className="inline-flex shrink-0 items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-right shadow-sm hover:border-slate-300 hover:bg-slate-50"
+              >
+                <span className="max-w-[10rem] truncate text-xs font-black text-slate-950">{entity.entityName}</span>
+                {renderEntityBadge(entity.entityType)}
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      {applied.entityId && applied.entityType !== "all" ? (
+        <div className="mt-3 flex flex-wrap items-center gap-2 text-xs font-bold text-slate-700">
+          <span>{t("ledgers.filteredBy")}</span>
+          <span className="inline-flex items-center gap-2 rounded-full border border-slate-300 bg-white px-3 py-1 shadow-sm">
+            <span className="max-w-[14rem] truncate">{applied.q}</span>
+            <span className="text-slate-400">—</span>
+            {renderEntityBadge(applied.entityType)}
+            <button
+              type="button"
+              onClick={clearFilters}
+              className="inline-flex h-5 w-5 items-center justify-center rounded-full text-sm font-black text-slate-500 hover:bg-slate-100 hover:text-slate-900"
+              aria-label={t("ledgers.clearEntityFilter")}
+            >
+              ×
+            </button>
+          </span>
+          <button
+            type="button"
+            onClick={() => setDetailUrl({ type: applied.entityType, id: applied.entityId })}
+            className="h-8 rounded-lg border border-cyan-200 bg-cyan-50 px-3 text-xs font-black text-cyan-950 hover:bg-cyan-100"
+          >
+            {t("ledgers.openEntityLedger")}
+          </button>
+        </div>
+      ) : null}
+
       {error && (
         <p className="mt-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-bold text-rose-800" role="alert">
           {error}
@@ -487,7 +608,15 @@ function LedgersPageInner() {
             {!loading &&
               overview?.rows.map((row) => (
                 <tr key={`${row.entity_type}-${row.id}`} className="h-[52px] transition hover:bg-slate-50/80">
-                  <td className={`${tdClass} truncate font-bold text-slate-950`} title={row.name}>{row.name}</td>
+                  <td className={`${tdClass} truncate font-bold text-slate-950`} title={row.name}>
+                    <button
+                      type="button"
+                      className="max-w-full truncate text-right font-bold text-slate-950 underline decoration-slate-300 underline-offset-2 hover:text-cyan-900"
+                      onClick={() => filterToEntity({ entityType: row.entity_type, entityId: row.id, entityName: row.name })}
+                    >
+                      {row.name}
+                    </button>
+                  </td>
                   <td className={tdClass}>{renderEntityBadge(row.entity_type)}</td>
                   <td className={tdClass}>{renderOpenBalanceCell(row)}</td>
                   <td className={`${tdClass} font-semibold text-slate-900`}>{formatShekel(row.total_debit)}</td>
@@ -543,7 +672,15 @@ function LedgersPageInner() {
             <article key={`${row.entity_type}-${row.id}-mobile`} className="rounded-xl border border-slate-100 bg-white p-3 text-[13px] shadow-sm">
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
-                  <h2 className="truncate text-sm font-black text-slate-950">{row.name}</h2>
+                  <h2 className="truncate text-sm font-black text-slate-950">
+                    <button
+                      type="button"
+                      className="max-w-full truncate text-right underline decoration-slate-300 underline-offset-2 hover:text-cyan-900"
+                      onClick={() => filterToEntity({ entityType: row.entity_type, entityId: row.id, entityName: row.name })}
+                    >
+                      {row.name}
+                    </button>
+                  </h2>
                   <div className="mt-1">{renderEntityBadge(row.entity_type)}</div>
                 </div>
                 <details className="relative">

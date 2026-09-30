@@ -43,13 +43,17 @@ import {
   setDocumentAccountantSent,
 } from "@/lib/finance/db";
 import { REPORT_TYPES } from "@/lib/pdf/constants";
+import { fetchPdfBlob, storedReportFileUrl } from "@/lib/pdf/fetch-pdf-client";
 import { DEPOSIT_STATUS_LABELS, DEPOSIT_TYPE_LABELS } from "@/lib/finance/document-payload";
 import type { AccountantTransferLogRow, FinanceDocumentRow } from "@/lib/finance/types";
 import {
   documentMatchesArchiveCounterparty,
+  documentMatchesArchiveKind,
   parseArchiveCounterpartyKey,
   type ArchiveCounterpartyKindFilter,
 } from "@/lib/finance/counterparty-filter";
+import { isInvoiceDocumentType } from "@/lib/finance/invoice-documents";
+import { ManualReceiptArchive } from "@/components/finance/manual-receipt-archive";
 import {
   buildArchiveSelectionCsv,
   computeArchiveSelectionTotals,
@@ -63,7 +67,7 @@ type GeneratedReportRow = {
   relatedId: string | null;
   fileName: string;
   filePath: string;
-  publicUrl: string;
+  publicUrl: string | null;
   createdAt: string;
   createdBy: { id: string; fullName: string; email: string } | null;
 };
@@ -108,7 +112,6 @@ function typeLabelKey(t: string): string | null {
 }
 
 type AccountantFilter = "all" | "sent" | "not_sent";
-type DocCounts = { total: number; sent: number; notSent: number };
 
 function formatDateTime(iso: string | null | undefined, bcp47: string): string {
   if (!iso) return "—";
@@ -144,24 +147,23 @@ function buildSentStatusTooltip(
   return lines.join("\n");
 }
 
-function sourceDocumentAccessUrl(row: FinanceDocumentRow): string | null {
-  const sourcePath = row.payload?.receiptStoragePath?.trim();
-  if (!sourcePath) return null;
+function hasSourceFile(row: FinanceDocumentRow): boolean {
+  return Boolean(row.source_file);
+}
 
-  const q = new URLSearchParams({
-    storagePath: sourcePath,
-    redirect: "1",
-  });
-  if (row.payload?.receiptStorageBucket?.trim()) {
-    q.set("storageBucket", row.payload.receiptStorageBucket.trim());
-  }
-  if (row.payload?.receiptFileName?.trim()) {
-    q.set("fileName", row.payload.receiptFileName.trim());
-  }
-  if (row.payload?.receiptMimeType?.trim()) {
-    q.set("fileType", row.payload.receiptMimeType.trim());
-  }
-  return `/api/source-documents/access?${q.toString()}`;
+function archivePartyName(row: FinanceDocumentRow): string {
+  if (row.supplier_id?.trim() && row.supplier_name?.trim()) return row.supplier_name.trim();
+  if (row.employee_id?.trim() && row.employee_name?.trim()) return row.employee_name.trim();
+  if (row.customer_name?.trim()) return row.customer_name.trim();
+  const storedName =
+    row.payload && "counterpartyName" in row.payload ? row.payload.counterpartyName?.trim() : "";
+  return storedName || row.supplier_name?.trim() || row.employee_name?.trim() || "—";
+}
+
+function isImageSource(mime: string | null, title: string): boolean {
+  const m = (mime ?? "").toLowerCase();
+  if (m.startsWith("image/")) return true;
+  return /\.(png|jpe?g|gif|webp|bmp|heic|heif)$/i.test(title);
 }
 
 function sortFinanceDocumentsNewestFirst(rows: FinanceDocumentRow[]): FinanceDocumentRow[] {
@@ -183,7 +185,6 @@ export default function FinanceArchivePage() {
   const [tab, setTab] = useState<(typeof TAB_OPTIONS)[number]["id"]>("pdf");
 
   const [rows, setRows] = useState<FinanceDocumentRow[]>([]);
-  const [counts, setCounts] = useState<DocCounts>({ total: 0, sent: 0, notSent: 0 });
   const [accountantRecipientEmail, setAccountantRecipientEmail] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [accountantFilter, setAccountantFilter] = useState<AccountantFilter>("all");
@@ -192,6 +193,13 @@ export default function FinanceArchivePage() {
   const [archiveCounterpartyKey, setArchiveCounterpartyKey] = useState("");
   const [archiveCounterpartyKindFilter, setArchiveCounterpartyKindFilter] =
     useState<ArchiveCounterpartyKindFilter>("");
+  const [docQuery, setDocQuery] = useState("");
+  const [invoicesOnly, setInvoicesOnly] = useState(false);
+  const [sourcePreview, setSourcePreview] = useState<{
+    url: string;
+    title: string;
+    mime: string | null;
+  } | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkBusy, setBulkBusy] = useState(false);
   const [emailModalOpen, setEmailModalOpen] = useState(false);
@@ -208,8 +216,28 @@ export default function FinanceArchivePage() {
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
 
-  const [preview, setPreview] = useState<{ url: string; title: string } | null>(null);
+  const [preview, setPreview] = useState<{ url: string; title: string; autoPrint?: boolean } | null>(null);
+  const downloadStoredReport = async (id: string, fileName: string) => {
+    try {
+      const blob = await fetchPdfBlob(storedReportFileUrl(id, true));
+      const href = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = href;
+      a.download = fileName.endsWith(".pdf") ? fileName : `${fileName}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(href);
+    } catch {
+      setPreview({ url: storedReportFileUrl(id), title: fileName });
+    }
+  };
+
+  const openStoredReport = (id: string, fileName: string, autoPrint = false) => {
+    setPreview({ url: storedReportFileUrl(id), title: fileName, autoPrint });
+  };
   const [deleteTarget, setDeleteTarget] = useState<GeneratedReportRow | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
   const [dataReady, setDataReady] = useState(false);
@@ -218,10 +246,9 @@ export default function FinanceArchivePage() {
     const silent = Boolean(opts?.silent) && loadedOnceRef.current;
     if (!silent) setLoading(true);
     try {
-      const { rows: list, counts: c, accountantRecipientEmail: recipientEmail } =
-        await fetchFinanceDocumentsWithCounts({ accountant: accountantFilter });
+      const { rows: list, accountantRecipientEmail: recipientEmail } =
+        await fetchFinanceDocumentsWithCounts({});
       setRows(sortFinanceDocumentsNewestFirst(list));
-      setCounts(c);
       setAccountantRecipientEmail(recipientEmail);
       loadedOnceRef.current = true;
       setDataReady(true);
@@ -230,7 +257,7 @@ export default function FinanceArchivePage() {
     } finally {
       if (!silent) setLoading(false);
     }
-  }, [accountantFilter]);
+  }, []);
 
   const loadReports = useCallback(async () => {
     setReportsLoading(true);
@@ -269,19 +296,21 @@ export default function FinanceArchivePage() {
   );
 
   const matchingDocumentIds = useMemo(() => {
-    if (!archiveCounterpartyRef) return null;
+    if (!archiveCounterpartyKindFilter && !archiveCounterpartyRef) return null;
     return new Set(
       rows
-        .filter((row) =>
-          documentMatchesArchiveCounterparty(
+        .filter((row) => {
+          if (!documentMatchesArchiveKind(row, archiveCounterpartyKindFilter)) return false;
+          if (!archiveCounterpartyRef) return true;
+          return documentMatchesArchiveCounterparty(
             row,
             archiveCounterpartyRef.kind,
             archiveCounterpartyRef.id,
-          ),
-        )
+          );
+        })
         .map((row) => row.id),
     );
-  }, [rows, archiveCounterpartyRef]);
+  }, [rows, archiveCounterpartyKindFilter, archiveCounterpartyRef]);
 
   const markAccountantBusy = (id: string, busy: boolean) => {
     setAccountantBusyIds((prev) => {
@@ -295,27 +324,9 @@ export default function FinanceArchivePage() {
   /** עדכון מיידי של רשומה במקום ב־state בלי refresh מלא */
   const applyUpdatedRow = useCallback((updated: FinanceDocumentRow) => {
     setRows((prev) => {
-      // אם הפילטר ״רק לא הועברו״ פעיל וסומן כהועבר — להסיר משורות
-      const inFilter =
-        accountantFilter === "all" ||
-        (accountantFilter === "sent" && updated.sent_to_cpa) ||
-        (accountantFilter === "not_sent" && !updated.sent_to_cpa);
       const exists = prev.some((r) => r.id === updated.id);
-      if (!inFilter) {
-        return prev.filter((r) => r.id !== updated.id);
-      }
       if (!exists) return sortFinanceDocumentsNewestFirst([updated, ...prev]);
       return sortFinanceDocumentsNewestFirst(prev.map((r) => (r.id === updated.id ? updated : r)));
-    });
-  }, [accountantFilter]);
-
-  const updateCountsAfterToggle = useCallback((wasSent: boolean, isNowSent: boolean) => {
-    setCounts((prev) => {
-      if (wasSent === isNowSent) return prev;
-      if (!wasSent && isNowSent) {
-        return { ...prev, sent: prev.sent + 1, notSent: Math.max(0, prev.notSent - 1) };
-      }
-      return { ...prev, sent: Math.max(0, prev.sent - 1), notSent: prev.notSent + 1 };
     });
   }, []);
 
@@ -330,7 +341,6 @@ export default function FinanceArchivePage() {
         return;
       }
       applyUpdatedRow(res.data);
-      updateCountsAfterToggle(currentlySent, next);
       setAccountantNotice(next ? t("archive.toasts.markedSent") : t("archive.toasts.transferCancelled"));
     } finally {
       markAccountantBusy(id, false);
@@ -433,10 +443,44 @@ export default function FinanceArchivePage() {
     if (res.ok) await refresh().catch(() => undefined);
   };
 
-  const openSourceDocument = (row: FinanceDocumentRow) => {
-    const url = sourceDocumentAccessUrl(row);
-    if (!url) return;
-    window.open(url, "_blank", "noopener,noreferrer");
+  const openSourceDocument = async (row: FinanceDocumentRow) => {
+    const linked = row.source_file?.linked === true;
+    const legacyPath =
+      row.payload && "receiptStoragePath" in row.payload
+        ? row.payload.receiptStoragePath?.trim()
+        : "";
+    if (!linked && !legacyPath) return;
+
+    const q = new URLSearchParams();
+    if (linked) {
+      q.set("financialDocumentId", row.id);
+    } else if (legacyPath) {
+      q.set("storagePath", legacyPath);
+      if (row.payload && "receiptStorageBucket" in row.payload && row.payload.receiptStorageBucket?.trim()) {
+        q.set("storageBucket", row.payload.receiptStorageBucket.trim());
+      }
+      if (row.payload && "receiptFileName" in row.payload && row.payload.receiptFileName?.trim()) {
+        q.set("fileName", row.payload.receiptFileName.trim());
+      }
+      if (row.payload && "receiptMimeType" in row.payload && row.payload.receiptMimeType?.trim()) {
+        q.set("fileType", row.payload.receiptMimeType.trim());
+      }
+    }
+
+    const res = await fetch(`/api/source-documents/access?${q}`, { credentials: "same-origin" });
+    const json = (await res.json().catch(() => null)) as {
+      ok?: boolean;
+      data?: { url?: string; fileName?: string; fileType?: string | null };
+    } | null;
+    if (!res.ok || !json?.ok || !json.data?.url) {
+      setAccountantNotice(t("archive.sourceOpenFailed"));
+      return;
+    }
+    setSourcePreview({
+      url: json.data.url,
+      title: json.data.fileName || t("archive.sourceFile"),
+      mime: json.data.fileType ?? row.source_file?.file_type ?? null,
+    });
   };
 
   const updateDeposit = async (id: string, action: "returned" | "refunded") => {
@@ -477,19 +521,53 @@ export default function FinanceArchivePage() {
     }
     return base;
   }, [reports, matchingDocumentIds]);
-  const filteredRows = (() => {
-    let base = sortFinanceDocumentsNewestFirst(rows);
-    if (archiveCounterpartyRef) {
-      base = base.filter((row) =>
-        documentMatchesArchiveCounterparty(
+  const scopedRows = useMemo(() => {
+    const q = docQuery.trim().toLowerCase();
+    return sortFinanceDocumentsNewestFirst(rows).filter((row) => {
+      if (!documentMatchesArchiveKind(row, archiveCounterpartyKindFilter)) return false;
+      if (
+        archiveCounterpartyRef &&
+        !documentMatchesArchiveCounterparty(
           row,
           archiveCounterpartyRef.kind,
           archiveCounterpartyRef.id,
-        ),
-      );
-    }
-    return base;
-  })();
+        )
+      ) {
+        return false;
+      }
+      if (invoicesOnly && !isInvoiceDocumentType(row.document_type)) return false;
+      if (!q) return true;
+      const blob = [
+        row.title,
+        row.document_type,
+        row.category,
+        row.customer_name,
+        row.supplier_name,
+        row.employee_name,
+        row.payload && "counterpartyName" in row.payload ? row.payload.counterpartyName : "",
+        row.doc_date,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+      return blob.includes(q);
+    });
+  }, [rows, archiveCounterpartyKindFilter, archiveCounterpartyRef, invoicesOnly, docQuery]);
+
+  const displayCounts = useMemo(
+    () => ({
+      total: scopedRows.length,
+      sent: scopedRows.filter((row) => row.sent_to_cpa).length,
+      notSent: scopedRows.filter((row) => !row.sent_to_cpa).length,
+    }),
+    [scopedRows],
+  );
+
+  const filteredRows = useMemo(() => {
+    if (accountantFilter === "sent") return scopedRows.filter((row) => row.sent_to_cpa);
+    if (accountantFilter === "not_sent") return scopedRows.filter((row) => !row.sent_to_cpa);
+    return scopedRows;
+  }, [scopedRows, accountantFilter]);
 
   const selectionTotals = useMemo(
     () => computeArchiveSelectionTotals(filteredRows, selectedIds),
@@ -537,17 +615,36 @@ export default function FinanceArchivePage() {
             <button
               key={opt.id}
               type="button"
-              onClick={() => setTab(opt.id)}
+              onClick={() => {
+                setTab(opt.id);
+                setInvoicesOnly(false);
+              }}
               className={`relative px-4 py-2.5 text-sm font-black transition ${
-                tab === opt.id ? "text-luxury-navy-rich" : "text-slate-500 hover:text-slate-800"
+                tab === opt.id && !invoicesOnly ? "text-luxury-navy-rich" : "text-slate-500 hover:text-slate-800"
               }`}
             >
               {t(opt.labelKey)}
-              {tab === opt.id ? (
+              {tab === opt.id && !invoicesOnly ? (
                 <span className="absolute inset-x-2 bottom-0 h-0.5 rounded-full bg-luxury-navy-rich" />
               ) : null}
             </button>
           ))}
+          <button
+            type="button"
+            onClick={() => {
+              setTab("records");
+              setInvoicesOnly(true);
+              clearSelection();
+            }}
+            className={`relative px-4 py-2.5 text-sm font-black transition ${
+              tab === "records" && invoicesOnly ? "text-luxury-navy-rich" : "text-slate-500 hover:text-slate-800"
+            }`}
+          >
+            {t("archive.invoices")}
+            {tab === "records" && invoicesOnly ? (
+              <span className="absolute inset-x-2 bottom-0 h-0.5 rounded-full bg-luxury-navy-rich" />
+            ) : null}
+          </button>
         </div>
       </section>
 
@@ -652,8 +749,8 @@ export default function FinanceArchivePage() {
                       </div>
                       <button
                         type="button"
-                        disabled={!r.publicUrl}
-                        onClick={() => setPreview({ url: r.publicUrl, title: r.fileName })}
+                        disabled={!r.filePath}
+                        onClick={() => openStoredReport(r.id, r.fileName)}
                         className="inline-flex h-10 shrink-0 items-center justify-center rounded-xl border border-cyan-200 bg-cyan-50 px-3 text-xs font-black text-cyan-900 disabled:opacity-40"
                       >
                         {t("archive.thPdf")}
@@ -672,28 +769,26 @@ export default function FinanceArchivePage() {
                     <div className="mt-3 grid grid-cols-2 gap-2">
                       <button
                         type="button"
-                        disabled={!r.publicUrl}
-                        onClick={() => setPreview({ url: r.publicUrl, title: r.fileName })}
+                        disabled={!r.filePath}
+                        onClick={() => openStoredReport(r.id, r.fileName)}
                         className={`${btnSm} justify-center border-slate-200 bg-white text-slate-800 hover:bg-slate-50 disabled:opacity-40`}
                       >
                         <Eye className="h-3.5 w-3.5" aria-hidden />
                         {t("archive.view")}
                       </button>
-                      <a
-                        href={r.publicUrl || "#"}
-                        download={r.fileName}
-                        aria-disabled={!r.publicUrl}
-                        className={`${btnSm} justify-center border-slate-200 bg-white text-slate-800 hover:bg-slate-50 ${
-                          r.publicUrl ? "" : "pointer-events-none opacity-40"
-                        }`}
+                      <button
+                        type="button"
+                        disabled={!r.filePath}
+                        onClick={() => void downloadStoredReport(r.id, r.fileName)}
+                        className={`${btnSm} justify-center border-slate-200 bg-white text-slate-800 hover:bg-slate-50 disabled:opacity-40`}
                       >
                         <Download className="h-3.5 w-3.5" aria-hidden />
                         {t("archive.download")}
-                      </a>
+                      </button>
                       <button
                         type="button"
-                        disabled={!r.publicUrl}
-                        onClick={() => setPreview({ url: r.publicUrl, title: r.fileName })}
+                        disabled={!r.filePath}
+                        onClick={() => openStoredReport(r.id, r.fileName, true)}
                         className={`${btnSm} justify-center border-slate-200 bg-white text-slate-800 hover:bg-slate-50 disabled:opacity-40`}
                       >
                         <Printer className="h-3.5 w-3.5" aria-hidden />
@@ -771,8 +866,8 @@ export default function FinanceArchivePage() {
                       <td className="px-3 py-2 align-middle">
                         <button
                           type="button"
-                          disabled={!r.publicUrl}
-                          onClick={() => setPreview({ url: r.publicUrl, title: r.fileName })}
+                          disabled={!r.filePath}
+                          onClick={() => openStoredReport(r.id, r.fileName)}
                           className={`${btnSm} border-cyan-200 bg-cyan-50 text-cyan-900 hover:bg-cyan-100 disabled:opacity-40`}
                         >
                           {t("archive.thPdf")}
@@ -782,25 +877,26 @@ export default function FinanceArchivePage() {
                         <div className="flex flex-wrap justify-end gap-1">
                           <button
                             type="button"
-                            disabled={!r.publicUrl}
-                            onClick={() => setPreview({ url: r.publicUrl, title: r.fileName })}
+                            disabled={!r.filePath}
+                            onClick={() => openStoredReport(r.id, r.fileName)}
                             className={`${btnSm} border-slate-200 bg-white text-slate-800 hover:bg-slate-50`}
                           >
                             <Eye className="h-3.5 w-3.5" aria-hidden />
                             {t("archive.view")}
                           </button>
-                          <a
-                            href={r.publicUrl}
-                            download={r.fileName}
-                            className={`${btnSm} border-slate-200 bg-white text-slate-800 hover:bg-slate-50`}
+                          <button
+                            type="button"
+                            disabled={!r.filePath}
+                            onClick={() => void downloadStoredReport(r.id, r.fileName)}
+                            className={`${btnSm} border-slate-200 bg-white text-slate-800 hover:bg-slate-50 disabled:opacity-40`}
                           >
                             <Download className="h-3.5 w-3.5" aria-hidden />
                             {t("archive.download")}
-                          </a>
+                          </button>
                           <button
                             type="button"
-                            disabled={!r.publicUrl}
-                            onClick={() => setPreview({ url: r.publicUrl, title: r.fileName })}
+                            disabled={!r.filePath}
+                            onClick={() => openStoredReport(r.id, r.fileName, true)}
                             className={`${btnSm} border-slate-200 bg-white text-slate-800 hover:bg-slate-50`}
                           >
                             <Printer className="h-3.5 w-3.5" aria-hidden />
@@ -833,7 +929,7 @@ export default function FinanceArchivePage() {
               <div>
                 <p className="text-[11px] font-black uppercase tracking-wide text-slate-500">{t("archive.statTotal")}</p>
                 <p className="mt-1 text-2xl font-black tabular-nums text-slate-900 md:text-3xl">
-                  {counts.total}
+                  {displayCounts.total}
                 </p>
                 <p className="mt-1 text-[11px] font-semibold text-slate-500">{t("archive.statInArchive")}</p>
               </div>
@@ -845,7 +941,7 @@ export default function FinanceArchivePage() {
               <div>
                 <p className="text-[11px] font-black uppercase tracking-wide text-emerald-700">{t("archive.statSent")}</p>
                 <p className="mt-1 text-2xl font-black tabular-nums text-emerald-700 md:text-3xl">
-                  {counts.sent}
+                  {displayCounts.sent}
                 </p>
                 <p className="mt-1 text-[11px] font-semibold text-emerald-700/80">{t("archive.statSentTrend")}</p>
               </div>
@@ -857,7 +953,7 @@ export default function FinanceArchivePage() {
               <div>
                 <p className="text-[11px] font-black uppercase tracking-wide text-amber-800">{t("archive.statPending")}</p>
                 <p className="mt-1 text-2xl font-black tabular-nums text-amber-800 md:text-3xl">
-                  {counts.notSent}
+                  {displayCounts.notSent}
                 </p>
                 <p className="mt-1 text-[11px] font-semibold text-amber-800/80">
                   {t("archive.statPendingTrend")}
@@ -885,7 +981,7 @@ export default function FinanceArchivePage() {
                       : f === "sent"
                         ? t("archive.filterSent")
                         : t("archive.filterNotSent");
-                  const num = f === "all" ? counts.total : f === "sent" ? counts.sent : counts.notSent;
+                  const num = f === "all" ? displayCounts.total : f === "sent" ? displayCounts.sent : displayCounts.notSent;
                   const active = accountantFilter === f;
                   const colors =
                     f === "sent"
@@ -925,16 +1021,31 @@ export default function FinanceArchivePage() {
               </p>
             ) : null}
 
-            <div className="max-w-2xl">
+            <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,16rem)] md:items-end">
               <ArchiveCounterpartyFilter
                 kindFilter={archiveCounterpartyKindFilter}
-                onKindFilterChange={setArchiveCounterpartyKindFilter}
+                onKindFilterChange={(kind) => {
+                  setArchiveCounterpartyKindFilter(kind);
+                  clearSelection();
+                }}
                 valueKey={archiveCounterpartyKey}
                 onChange={(key) => {
                   setArchiveCounterpartyKey(key);
                   clearSelection();
                 }}
               />
+              <label>
+                <span className="block text-[11px] font-bold text-slate-500">{t("archive.filterSearch")}</span>
+                <input
+                  value={docQuery}
+                  onChange={(e) => {
+                    setDocQuery(e.target.value);
+                    clearSelection();
+                  }}
+                  placeholder={t("archive.docSearchPlaceholder")}
+                  className="mt-1 h-[42px] w-full rounded-lg border border-slate-300 px-3 text-right text-sm font-semibold outline-none focus:border-cyan-600 focus:ring-1 focus:ring-cyan-600/25"
+                />
+              </label>
             </div>
 
             {selectedIds.size > 0 ? (
@@ -994,12 +1105,34 @@ export default function FinanceArchivePage() {
               <p className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-6 py-12 text-center text-sm font-semibold text-slate-500">
                 {archiveCounterpartyKey
                   ? t("archive.emptyPartyFilter")
+                  : docQuery.trim()
+                    ? t("archive.emptySearch")
+                  : invoicesOnly
+                    ? t("archive.emptyInvoices")
                   : accountantFilter === "not_sent"
                   ? t("archive.emptyNotSent")
                   : accountantFilter === "sent"
                     ? t("archive.emptySent")
                     : t("archive.emptyAll")}
               </p>
+            ) : invoicesOnly ? (
+              <InvoiceArchiveList
+                rows={filteredRows}
+                bcp47={bcp47}
+                accountantRecipientEmail={accountantRecipientEmail}
+                accountantBusyIds={accountantBusyIds}
+                selectedIds={selectedIds}
+                onToggleSelected={toggleSelected}
+                onSelectAll={selectAllVisible}
+                onClearSelection={clearSelection}
+                onToggleAccountant={(id, sent) => void toggleAccountant(id, sent)}
+                onAudit={(id) => void openAuditLog(id)}
+                onDelete={(id) => void deleteRow(id)}
+                onDeposit={(id, action) => void updateDeposit(id, action)}
+                onSource={(row) => void openSourceDocument(row)}
+                onAfterPdf={() => void loadReports()}
+                t={t}
+              />
             ) : (
               <>
                 <div className="hidden overflow-x-auto rounded-2xl border border-slate-200 md:block">
@@ -1038,7 +1171,7 @@ export default function FinanceArchivePage() {
                       {filteredRows.map((row) => {
                         const busy = accountantBusyIds.has(row.id);
                         const selected = selectedIds.has(row.id);
-                        const sourceUrl = sourceDocumentAccessUrl(row);
+                        const sourceReady = hasSourceFile(row);
                         return (
                           <tr key={row.id} className={selected ? "bg-luxury-navy-rich/5" : ""}>
                             <td className="px-3 py-3 align-top">
@@ -1172,14 +1305,14 @@ export default function FinanceArchivePage() {
                                   {t("archive.actionEditDoc")}
                                   <ExternalLink className="h-3 w-3 opacity-60" aria-hidden />
                                 </Link>
-                                {sourceUrl ? (
+                                {sourceReady ? (
                                   <button
                                     type="button"
-                                    onClick={() => openSourceDocument(row)}
+                                    onClick={() => void openSourceDocument(row)}
                                     className="inline-flex items-center gap-1 rounded-lg border border-cyan-300 bg-cyan-50 px-3 py-2 text-xs font-black text-cyan-900 hover:bg-cyan-100"
                                   >
                                     <ImageIcon className="h-3.5 w-3.5" aria-hidden />
-                                    {t("archive.actionSourceInvoice")}
+                                    {t("archive.sourceFile")}
                                   </button>
                                 ) : null}
                                 <DocumentPdfQuick docId={row.id} onAfter={() => void loadReports()} />
@@ -1225,7 +1358,7 @@ export default function FinanceArchivePage() {
                     const busy = accountantBusyIds.has(row.id);
                     const selected = selectedIds.has(row.id);
                     const menuOpen = mobileMenuId === row.id;
-                    const sourceUrl = sourceDocumentAccessUrl(row);
+                    const sourceReady = hasSourceFile(row);
                     return (
                       <div
                         key={row.id}
@@ -1338,17 +1471,17 @@ export default function FinanceArchivePage() {
                               <PencilLine className="h-3.5 w-3.5" aria-hidden />
                               {t("archive.actionEditDoc")}
                             </Link>
-                            {sourceUrl ? (
+                            {sourceReady ? (
                               <button
                                 type="button"
                                 onClick={() => {
                                   setMobileMenuId(null);
-                                  openSourceDocument(row);
+                                  void openSourceDocument(row);
                                 }}
                                 className="flex items-center gap-2 rounded-lg bg-white px-3 py-2 text-xs font-black text-cyan-900"
                               >
                                 <ImageIcon className="h-3.5 w-3.5" aria-hidden />
-                                {t("archive.actionSourceInvoice")}
+                                {t("archive.sourceFile")}
                               </button>
                             ) : null}
                             <button
@@ -1396,6 +1529,7 @@ export default function FinanceArchivePage() {
                 </div>
               </>
             )}
+            {invoicesOnly ? <ManualReceiptArchive query={docQuery} /> : null}
           </div>
 
           {auditOpenId ? (
@@ -1508,8 +1642,55 @@ export default function FinanceArchivePage() {
         open={Boolean(preview?.url)}
         url={preview?.url ?? ""}
         title={preview?.title ?? ""}
+        autoPrint={Boolean(preview?.autoPrint)}
         onClose={() => setPreview(null)}
       />
+
+      {sourcePreview && isImageSource(sourcePreview.mime, sourcePreview.title) ? (
+        <div
+          className="fixed inset-0 z-[100] flex flex-col bg-black/75 p-3 md:p-6"
+          role="dialog"
+          aria-modal="true"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setSourcePreview(null);
+          }}
+        >
+          <div className="mx-auto flex w-full max-w-4xl flex-1 flex-col overflow-hidden rounded-xl bg-white">
+            <div className="flex items-center justify-between gap-3 border-b border-slate-200 px-4 py-3">
+              <div className="min-w-0">
+                <p className="text-sm font-black text-slate-950">{t("archive.sourceOriginalNote")}</p>
+                <p className="truncate text-xs font-semibold text-slate-500">{sourcePreview.title}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSourcePreview(null)}
+                className="rounded-lg bg-rose-600 px-3 py-2 text-xs font-black text-white"
+              >
+                {t("common.close")}
+              </button>
+            </div>
+            <div className="min-h-0 flex-1 overflow-auto bg-slate-100 p-4">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={sourcePreview.url}
+                alt={sourcePreview.title}
+                className="mx-auto max-h-[75vh] max-w-full object-contain"
+              />
+            </div>
+          </div>
+        </div>
+      ) : (
+        <PdfPreviewModal
+          open={Boolean(sourcePreview?.url)}
+          url={sourcePreview?.url ?? ""}
+          title={
+            sourcePreview
+              ? `${t("archive.sourceOriginalNote")} — ${sourcePreview.title}`
+              : ""
+          }
+          onClose={() => setSourcePreview(null)}
+        />
+      )}
 
       {deleteTarget ? (
         <div
@@ -1562,6 +1743,263 @@ export default function FinanceArchivePage() {
   );
 }
 
+function paymentStatusLabel(
+  status: string,
+  t: (key: string) => string,
+): string {
+  if (status === "paid") return t("archive.payPaid");
+  if (status === "partial") return t("archive.payPartial");
+  return t("archive.payUnpaid");
+}
+
+function InvoiceArchiveList({
+  rows,
+  bcp47,
+  accountantRecipientEmail,
+  accountantBusyIds,
+  selectedIds,
+  onToggleSelected,
+  onSelectAll,
+  onClearSelection,
+  onToggleAccountant,
+  onAudit,
+  onDelete,
+  onDeposit,
+  onSource,
+  onAfterPdf,
+  t,
+}: {
+  rows: FinanceDocumentRow[];
+  bcp47: string;
+  accountantRecipientEmail: string | null;
+  accountantBusyIds: Set<string>;
+  selectedIds: Set<string>;
+  onToggleSelected: (id: string) => void;
+  onSelectAll: () => void;
+  onClearSelection: () => void;
+  onToggleAccountant: (id: string, sent: boolean) => void;
+  onAudit: (id: string) => void;
+  onDelete: (id: string) => void;
+  onDeposit: (id: string, action: "returned" | "refunded") => void;
+  onSource: (row: FinanceDocumentRow) => void;
+  onAfterPdf: () => void;
+  t: (key: string, vars?: Record<string, string>) => string;
+}) {
+  return (
+    <>
+      <div className="hidden overflow-x-auto rounded-2xl border border-slate-200 md:block">
+        <table className="w-full divide-y divide-slate-200 text-right text-sm">
+          <thead className="bg-slate-50">
+            <tr>
+              <th className="w-[44px] px-3 py-3">
+                <input
+                  type="checkbox"
+                  checked={selectedIds.size === rows.length && rows.length > 0}
+                  onChange={(e) => {
+                    if (e.target.checked) onSelectAll();
+                    else onClearSelection();
+                  }}
+                  className="h-4 w-4 accent-luxury-navy-rich"
+                  aria-label={t("archive.selectAllAria")}
+                />
+              </th>
+              <th className="px-3 py-3 font-bold text-slate-600">{t("archive.thDate")}</th>
+              <th className="px-3 py-3 font-bold text-slate-600">{t("archive.thNumber")}</th>
+              <th className="px-3 py-3 font-bold text-slate-600">{t("archive.thInvoiceType")}</th>
+              <th className="px-3 py-3 font-bold text-slate-600">{t("archive.thParty")}</th>
+              <th className="px-3 py-3 font-bold text-slate-600">{t("archive.thAmount")}</th>
+              <th className="px-3 py-3 font-bold text-slate-600">{t("archive.thStatus")}</th>
+              <th className="px-3 py-3 font-bold text-slate-600">{t("archive.thSourceFile")}</th>
+              <th className="px-3 py-3 font-bold text-slate-600">{t("archive.thPdf")}</th>
+              <th className="px-3 py-3 font-bold text-slate-600">{t("archive.thActions")}</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100 bg-white">
+            {rows.map((row) => {
+              const busy = accountantBusyIds.has(row.id);
+              const selected = selectedIds.has(row.id);
+              const sourceReady = hasSourceFile(row);
+              return (
+                <tr key={row.id} className={selected ? "bg-luxury-navy-rich/5" : ""}>
+                  <td className="px-3 py-3 align-top">
+                    <input
+                      type="checkbox"
+                      checked={selected}
+                      onChange={() => onToggleSelected(row.id)}
+                      className="h-4 w-4 accent-luxury-navy-rich"
+                      aria-label={t("archive.selectRowAria", { title: row.title })}
+                    />
+                  </td>
+                  <td className="px-3 py-3 align-top text-slate-700">{row.doc_date ?? "—"}</td>
+                  <td className="px-3 py-3 align-top font-semibold text-slate-900">{row.title}</td>
+                  <td className="px-3 py-3 align-top text-slate-700">{row.document_type || "—"}</td>
+                  <td className="px-3 py-3 align-top text-slate-700">{archivePartyName(row)}</td>
+                  <td className="px-3 py-3 align-top font-bold tabular-nums text-slate-900">
+                    {row.total_amount.toLocaleString(bcp47)}₪
+                  </td>
+                  <td className="px-3 py-3 align-top">
+                    <span className="inline-flex rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-black text-slate-800">
+                      {paymentStatusLabel(row.payment_status, t)}
+                    </span>
+                  </td>
+                  <td className="px-3 py-3 align-top">
+                    {sourceReady ? (
+                      <button
+                        type="button"
+                        onClick={() => onSource(row)}
+                        className="inline-flex items-center gap-1 rounded-lg border border-cyan-300 bg-cyan-50 px-3 py-2 text-xs font-black text-cyan-900 hover:bg-cyan-100"
+                      >
+                        <ImageIcon className="h-3.5 w-3.5" aria-hidden />
+                        {t("archive.sourceFile")}
+                      </button>
+                    ) : (
+                      <span className="inline-flex cursor-not-allowed items-center rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-bold text-slate-400">
+                        {t("archive.sourceMissing")}
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-3 py-3 align-top">
+                    <DocumentPdfQuick docId={row.id} onAfter={onAfterPdf} />
+                  </td>
+                  <td className="px-3 py-3 align-top">
+                    <div className="flex flex-wrap gap-1.5">
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => onToggleAccountant(row.id, row.sent_to_cpa)}
+                        className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-800 disabled:opacity-50"
+                        title={
+                          row.sent_to_cpa
+                            ? buildSentStatusTooltip(row, accountantRecipientEmail, t, bcp47)
+                            : t("archive.actionMarkSent")
+                        }
+                      >
+                        {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : <Send className="h-3.5 w-3.5" aria-hidden />}
+                        {row.sent_to_cpa ? t("archive.statusSent") : t("archive.actionMarkSent")}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onAudit(row.id)}
+                        className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-700"
+                      >
+                        <History className="h-3.5 w-3.5" aria-hidden />
+                        {t("archive.actionLog")}
+                      </button>
+                      <Link
+                        href={`/finance/register?edit=${encodeURIComponent(row.id)}`}
+                        className="inline-flex items-center gap-1 rounded-lg border border-indigo-300 px-3 py-2 text-xs font-black text-indigo-700"
+                      >
+                        <PencilLine className="h-3.5 w-3.5" aria-hidden />
+                        {t("archive.actionEditDoc")}
+                      </Link>
+                      <button
+                        type="button"
+                        onClick={() => onDelete(row.id)}
+                        className="inline-flex items-center gap-1 rounded-lg border border-rose-300 px-3 py-2 text-xs font-black text-rose-700"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" aria-hidden />
+                        {t("archive.delete")}
+                      </button>
+                      {row.deposit_amount > 0 && row.deposit_status === "open" ? (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => onDeposit(row.id, "returned")}
+                            className="inline-flex items-center gap-1 rounded-lg border border-emerald-300 px-3 py-2 text-xs font-black text-emerald-700"
+                          >
+                            {t("archive.depositReturned")}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => onDeposit(row.id, "refunded")}
+                            className="inline-flex items-center gap-1 rounded-lg border border-amber-300 px-3 py-2 text-xs font-black text-amber-800"
+                          >
+                            {t("archive.depositRefund")}
+                          </button>
+                        </>
+                      ) : null}
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="space-y-3 md:hidden">
+        {rows.map((row) => {
+          const sourceReady = hasSourceFile(row);
+          const busy = accountantBusyIds.has(row.id);
+          return (
+            <article key={row.id} className="app-panel space-y-2 p-4">
+              <div className="flex items-start justify-between gap-2">
+                <p className="font-black text-slate-950">{row.title}</p>
+                <span className="shrink-0 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-black text-slate-800">
+                  {paymentStatusLabel(row.payment_status, t)}
+                </span>
+              </div>
+              <p className="text-xs font-semibold text-slate-500">
+                {row.doc_date ?? "—"} · {archivePartyName(row)}
+              </p>
+              <p className="text-sm font-black tabular-nums text-slate-900">
+                {row.total_amount.toLocaleString(bcp47)}₪
+              </p>
+              <div className="grid grid-cols-2 gap-2">
+                {sourceReady ? (
+                  <button
+                    type="button"
+                    onClick={() => onSource(row)}
+                    className="inline-flex items-center justify-center gap-1 rounded-xl border border-cyan-300 bg-cyan-50 px-3 py-2.5 text-xs font-black text-cyan-900"
+                  >
+                    <ImageIcon className="h-3.5 w-3.5" aria-hidden />
+                    {t("archive.sourceFile")}
+                  </button>
+                ) : (
+                  <span className="inline-flex items-center justify-center rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-center text-[11px] font-bold text-slate-400">
+                    {t("archive.sourceMissing")}
+                  </span>
+                )}
+                <DocumentPdfQuick docId={row.id} onAfter={onAfterPdf} />
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => onToggleAccountant(row.id, row.sent_to_cpa)}
+                  className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-800 disabled:opacity-50"
+                >
+                  {row.sent_to_cpa ? t("archive.statusSent") : t("archive.actionMarkSent")}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onAudit(row.id)}
+                  className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-700"
+                >
+                  {t("archive.actionLog")}
+                </button>
+                <Link
+                  href={`/finance/register?edit=${encodeURIComponent(row.id)}`}
+                  className="rounded-xl border border-indigo-300 px-3 py-2 text-xs font-black text-indigo-700"
+                >
+                  {t("archive.actionEditDoc")}
+                </Link>
+                <button
+                  type="button"
+                  onClick={() => onDelete(row.id)}
+                  className="rounded-xl border border-rose-300 px-3 py-2 text-xs font-black text-rose-700"
+                >
+                  {t("archive.delete")}
+                </button>
+              </div>
+            </article>
+          );
+        })}
+      </div>
+    </>
+  );
+}
+
 function DocumentPdfQuick({ docId, onAfter }: { docId: string; onAfter: () => void }) {
   const [busy, setBusy] = useState(false);
   const [preview, setPreview] = useState<{ url: string; title: string } | null>(null);
@@ -1572,9 +2010,9 @@ function DocumentPdfQuick({ docId, onAfter }: { docId: string; onAfter: () => vo
       const latest = await fetch(`/api/reports/latest?relatedId=${encodeURIComponent(docId)}`, {
         credentials: "same-origin",
       });
-      const lj = (await latest.json()) as { data?: { publicUrl: string; fileName: string } | null };
-      if (lj.data?.publicUrl) {
-        setPreview({ url: lj.data.publicUrl, title: lj.data.fileName });
+      const lj = (await latest.json()) as { data?: { id?: string; publicUrl?: string; fileName: string } | null };
+      if (lj.data?.id) {
+        setPreview({ url: storedReportFileUrl(lj.data.id), title: lj.data.fileName });
         return;
       }
       const gen = await fetch("/api/reports/generate", {
@@ -1583,7 +2021,12 @@ function DocumentPdfQuick({ docId, onAfter }: { docId: string; onAfter: () => vo
         credentials: "same-origin",
         body: JSON.stringify({ entity: "document", relatedId: docId }),
       });
-      const gj = (await gen.json()) as { publicUrl?: string; pdfUrl?: string };
+      const gj = (await gen.json()) as { reportId?: string; publicUrl?: string; pdfUrl?: string };
+      if (gj.reportId) {
+        setPreview({ url: storedReportFileUrl(gj.reportId), title: `doc-${docId.slice(0, 8)}.pdf` });
+        onAfter();
+        return;
+      }
       const url = gj.publicUrl ?? gj.pdfUrl;
       if (url) setPreview({ url, title: `doc-${docId.slice(0, 8)}.pdf` });
       onAfter();

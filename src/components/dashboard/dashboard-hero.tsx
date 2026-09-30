@@ -2,9 +2,9 @@
 
 import type { ReactNode } from "react";
 import { useEffect, useState } from "react";
-import { Banknote, RefreshCw, TrendingDown, TrendingUp, Users, Wallet } from "lucide-react";
+import { Banknote, HandCoins, RefreshCw, TrendingDown, TrendingUp, Users, Wallet } from "lucide-react";
 import { CountUp } from "@/components/count-up";
-import { CustomerDebtModal, FinancialSummaryModal } from "@/components/dashboard/dashboard-finance-modals";
+import { CustomerDebtModal, FinancialSummaryModal, OpenPayablesModal } from "@/components/dashboard/dashboard-finance-modals";
 import { useI18n } from "@/components/i18n-provider";
 import { StaffAlertsBell } from "@/components/staff-alerts-bell";
 import type { DashboardHeroMetrics } from "@/lib/dashboard/financial-engine";
@@ -63,23 +63,40 @@ export function DashboardHero({ hero, updatedAt, loading, onRefresh }: Props) {
   const [debtTotal, setDebtTotal] = useState(0);
   const [debtCount, setDebtCount] = useState(0);
   const [debtOpen, setDebtOpen] = useState(false);
+  const [payableTotal, setPayableTotal] = useState(0);
+  const [payablesOpen, setPayablesOpen] = useState(false);
   const [summaryOpen, setSummaryOpen] = useState(false);
   const timeLabel = updatedAt
     ? new Date(updatedAt).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })
     : "—";
 
   useEffect(() => {
+    let cancelled = false;
     void fetch("/api/ledger/v2/overview?side=DEBT&sort=debt&pageSize=5", { credentials: "same-origin" })
       .then((res) => res.json())
       .then((body: { ok?: boolean; totals?: { totalDebt?: number; customersWithDebt?: number } }) => {
-        if (!body.ok || !body.totals) return;
+        if (cancelled || !body.ok || !body.totals) return;
         setDebtTotal(body.totals.totalDebt ?? 0);
         setDebtCount(body.totals.customersWithDebt ?? 0);
       })
       .catch(() => {
+        if (cancelled) return;
         setDebtTotal(0);
         setDebtCount(0);
       });
+    void fetch("/api/ledger/payables", { credentials: "same-origin" })
+      .then((res) => res.json())
+      .then((body: { ok?: boolean; total?: number }) => {
+        if (cancelled || !body.ok) return;
+        setPayableTotal(body.total ?? 0);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setPayableTotal(0);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [updatedAt]);
 
   return (
@@ -154,9 +171,10 @@ export function DashboardHero({ hero, updatedAt, loading, onRefresh }: Props) {
               />
               <MiniKpi
                 variant="expense"
-                label={t("dashboard.redesign.heroProfitLossMonth")}
-                value={hero.monthProfit}
-                icon={hero.monthProfit >= 0 ? TrendingUp : TrendingDown}
+                label={t("dashboard.redesign.oweOthers")}
+                value={payableTotal}
+                icon={HandCoins}
+                onClick={() => setPayablesOpen(true)}
               />
             </div>
           </div>
@@ -169,6 +187,7 @@ export function DashboardHero({ hero, updatedAt, loading, onRefresh }: Props) {
         </div>
       </div>
       <CustomerDebtModal open={debtOpen} totalDebt={debtTotal} count={debtCount} onClose={() => setDebtOpen(false)} />
+      <OpenPayablesModal open={payablesOpen} total={payableTotal} onClose={() => setPayablesOpen(false)} />
       <FinancialSummaryModal open={summaryOpen} onClose={() => setSummaryOpen(false)} />
     </section>
   );

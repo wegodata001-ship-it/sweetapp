@@ -842,8 +842,8 @@ function FinanceRegisterPageInner() {
         }
       }
 
-      if (normalizeExpenseType(prepared.expenseType) === "SUPPLIER_PAYMENTS" && !prepared.supplierId?.trim()) {
-        showErrorModal("יש לבחור ספק קיים או ליצור ספק חדש", "expense");
+      if (normalizeExpenseType(prepared.expenseType) === "SUPPLIER_PAYMENTS" && !prepared.counterpartyName?.trim() && !prepared.supplierId?.trim()) {
+        showErrorModal(t("register.errors.supplierNameRequired"), "expense");
         return;
       }
 

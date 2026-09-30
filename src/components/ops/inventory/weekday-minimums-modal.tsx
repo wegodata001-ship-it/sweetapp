@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CalendarDays, Check, Loader2, X } from "lucide-react";
 import { useI18n } from "@/components/i18n-provider";
 import { useToast } from "@/components/toast-provider";
@@ -54,6 +54,7 @@ export function WeekdayMinimumsModal({ open, onClose }: Props) {
   const [locationId, setLocationId] = useState("");
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
   const [rows, setRows] = useState<EditedRow[]>([]);
@@ -199,22 +200,32 @@ export function WeekdayMinimumsModal({ open, onClose }: Props) {
   };
 
   const save = async () => {
-    if (!locationId || !isDirty) return;
+    if (!locationId || !isDirty || savingRef.current) return;
+    savingRef.current = true;
     setSaving(true);
     setError(null);
     setSuccess(false);
     try {
-      const patchRows = rows.map((r) => {
-        const out: Record<string, unknown> = { productId: r.productId };
+      const patchRows: Array<Record<string, unknown>> = [];
+      for (const r of rows) {
         const base = baseline.find((b) => b.productId === r.productId);
+        const out: Record<string, unknown> = { productId: r.productId };
+        let changed = false;
         for (const f of WEEKDAY_MINIMUM_FIELDS) {
-          if (!base || r.weekdays[f] !== base.weekdays[f]) {
-            const raw = r.weekdays[f].trim();
-            out[f] = raw === "" ? null : Number(raw);
+          if (base && r.weekdays[f] === base.weekdays[f]) continue;
+          const raw = r.weekdays[f].trim();
+          if (raw === "") {
+            out[f] = null;
+          } else {
+            const n = Number(raw);
+            if (!Number.isFinite(n) || n < 0) continue;
+            out[f] = n;
           }
+          changed = true;
         }
-        return out;
-      });
+        if (changed) patchRows.push(out);
+      }
+      if (patchRows.length === 0) return;
 
       const res = await fetch("/api/inventory/weekday-minimums", {
         method: "PATCH",
@@ -223,13 +234,46 @@ export function WeekdayMinimumsModal({ open, onClose }: Props) {
         body: JSON.stringify({ locationId, rows: patchRows }),
       });
       const json = (await res.json()) as { ok?: boolean; error?: string };
-      if (!res.ok || !json.ok) {
-        throw new Error(json.error || tW("saveFailed"));
+      if (res.status === 404 || json.error === "LOCATION_NOT_FOUND") {
+        throw new Error(tW("locationGone"));
       }
-      setBaseline(rows.map((r) => ({
-        productId: r.productId,
-        name: r.name,
-        weekdays: { ...r.weekdays },
+      if (!res.ok || !json.ok) {
+        throw new Error(tW("saveFailed"));
+      }
+
+      const verifyRes = await fetch(
+        `/api/inventory/weekday-minimums?locationId=${encodeURIComponent(locationId)}`,
+        { credentials: "same-origin", cache: "no-store" },
+      );
+      const verified = (await verifyRes.json()) as {
+        ok?: boolean;
+        data?: { rows: WeekdayRow[] };
+      };
+      if (!verifyRes.ok || !verified.ok || !verified.data) {
+        throw new Error(tW("saveFailed"));
+      }
+      const savedById = new Map(verified.data.rows.map((row) => [row.productId, row]));
+      for (const patch of patchRows) {
+        const saved = savedById.get(String(patch.productId));
+        if (!saved) throw new Error(tW("saveFailed"));
+        for (const field of WEEKDAY_MINIMUM_FIELDS) {
+          if (!(field in patch)) continue;
+          const expected = patch[field];
+          const actual = saved.weekdays[field];
+          const same = expected === null ? actual == null : Number(actual) === Number(expected);
+          if (!same) throw new Error(tW("saveFailed"));
+        }
+      }
+      const next = verified.data.rows.map((row) => ({
+        productId: row.productId,
+        name: row.name,
+        weekdays: emptyEdited(row.weekdays),
+      }));
+      setRows(next);
+      setBaseline(next.map((row) => ({
+        productId: row.productId,
+        name: row.name,
+        weekdays: { ...row.weekdays },
       })));
       setSuccess(true);
       showToast({ tone: "success", title: tW("saveSuccess") });
@@ -238,6 +282,7 @@ export function WeekdayMinimumsModal({ open, onClose }: Props) {
       setError(msg);
       showToast({ tone: "error", title: msg });
     } finally {
+      savingRef.current = false;
       setSaving(false);
     }
   };
@@ -368,12 +413,13 @@ export function WeekdayMinimumsModal({ open, onClose }: Props) {
             <button
               type="button"
               disabled={!isDirty || saving || loading}
+              aria-busy={saving}
               onClick={() => void save()}
               className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl px-5 text-sm font-black text-white shadow-md disabled:opacity-50"
               style={{ background: "#6c4cff" }}
             >
               {saving ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : null}
-              {tW("save")}
+              {saving ? tW("saving") : tW("save")}
             </button>
           </div>
         </footer>

@@ -23,6 +23,7 @@ import { ProductPickerCatalogProvider } from "@/components/finance/product-picke
 import { ProductLinePicker } from "@/components/finance/product-line-picker";
 import { SupplierCatalogPanel } from "@/components/finance/supplier-catalog-panel";
 import { FloatingSelect } from "@/components/ui/floating-select";
+import { useI18n } from "@/components/i18n-provider";
 import { getDocumentTypeOptions } from "@/lib/finance/document-type-labels";
 import { documentTypeForEmployeePay } from "@/lib/finance/employee-pay-types";
 import { EXPENSE_TYPE_I18N, EXPENSE_TYPE_VALUES, type ExpenseType } from "@/lib/finance/expense-types";
@@ -49,7 +50,7 @@ import {
   type PaymentLinePayload,
   type VatMode,
 } from "@/lib/finance/document-payload";
-import { useI18n } from "@/components/i18n-provider";
+import { normalizeSupplierName } from "@/lib/document-scan/supplier-aliases";
 import { formatShekel, parseNum } from "@/lib/format-shekel";
 
 const inputClass =
@@ -104,7 +105,8 @@ export function IncomeExpenseFields({
       activeExpenseType === "INVESTMENTS");
   const [focusLineId, setFocusLineId] = useState<string | null>(null);
   const [customerSuggestions, setCustomerSuggestions] = useState<string[]>([]);
-  const [procurementSuppliers, setProcurementSuppliers] = useState<{ id: string; name: string }[]>([]);
+  const [procurementSuppliers, setProcurementSuppliers] = useState<{ id: string; name: string; phone: string | null }[]>([]);
+  const [supplierMenuOpen, setSupplierMenuOpen] = useState(false);
   const [newSupplierName, setNewSupplierName] = useState("");
   const [creatingSupplier, setCreatingSupplier] = useState(false);
   const [employees, setEmployees] = useState<{ id: string; name: string }[]>([]);
@@ -114,6 +116,20 @@ export function IncomeExpenseFields({
     ...procurementSuppliers.map((s) => ({ value: s.id, label: s.name })),
   ];
   const selectedSupplier = procurementSuppliers.find((s) => s.id === value.supplierId);
+  const typedSupplier = value.counterpartyName.trim();
+  const supplierQueryKey = normalizeSupplierName(typedSupplier);
+  const supplierSuggestions = !isSupplierExpense || !supplierQueryKey
+    ? []
+    : procurementSuppliers
+        .filter((supplier) => {
+          if (normalizeSupplierName(supplier.name).includes(supplierQueryKey)) return true;
+          const phone = (supplier.phone ?? "").replace(/[^\d+]/g, "");
+          const digits = typedSupplier.replace(/[^\d+]/g, "");
+          return digits.length >= 3 && phone.includes(digits);
+        })
+        .slice(0, 8);
+  const exactSupplier =
+    procurementSuppliers.find((supplier) => normalizeSupplierName(supplier.name) === supplierQueryKey) ?? null;
   const catalogTargetLineId = focusLineId ?? value.lines[0]?.id ?? null;
 
   const lineTotals = value.lines.map((row) => lineGrossTotal(row.quantity, row.price, row.vatMode));
@@ -127,8 +143,20 @@ export function IncomeExpenseFields({
 
   const setPatch = (patch: Partial<IncomeExpensePayload>) => onChange({ ...value, ...patch });
 
-  async function createSupplier() {
-    const name = newSupplierName.trim();
+  async function refreshSuppliers() {
+    try {
+      const res = await fetch("/api/procurement/suppliers", { credentials: "same-origin" });
+      const j = (await res.json()) as { ok?: boolean; data?: { id: string; name: string; phone?: string | null }[] };
+      if (j.ok && j.data) {
+        setProcurementSuppliers(j.data.map((r) => ({ id: r.id, name: r.name, phone: r.phone ?? null })));
+      }
+    } catch {
+      setProcurementSuppliers([]);
+    }
+  }
+
+  async function createSupplier(nameOverride?: string) {
+    const name = (nameOverride ?? newSupplierName).trim();
     if (!name) return;
     setCreatingSupplier(true);
     try {
@@ -140,7 +168,7 @@ export function IncomeExpenseFields({
       });
       const body = (await res.json()) as { ok?: boolean; data?: { id: string; name: string }; error?: string };
       if (!body.ok || !body.data) return;
-      setProcurementSuppliers((rows) => [...rows, { id: body.data!.id, name: body.data!.name }]);
+      setProcurementSuppliers((rows) => [...rows, { id: body.data!.id, name: body.data!.name, phone: null }]);
       setPatch({ supplierId: body.data.id, counterpartyName: body.data.name });
       setNewSupplierName("");
     } finally {
@@ -333,15 +361,7 @@ export function IncomeExpenseFields({
 
   useEffect(() => {
     if (!isExpense) return;
-    void (async () => {
-      try {
-        const res = await fetch("/api/procurement/suppliers", { credentials: "same-origin" });
-        const j = (await res.json()) as { ok?: boolean; data?: { id: string; name: string }[] };
-        if (j.ok && j.data) setProcurementSuppliers(j.data.map((r) => ({ id: r.id, name: r.name })));
-      } catch {
-        setProcurementSuppliers([]);
-      }
-    })();
+    void refreshSuppliers();
   }, [isExpense]);
 
   useEffect(() => {
@@ -486,10 +506,76 @@ export function IncomeExpenseFields({
               type="text"
               value={value.counterpartyName}
               list={isExpense ? undefined : "customer-suggestions"}
-              onChange={(e) => setPatch({ counterpartyName: e.target.value })}
+              onChange={(e) => {
+                const typed = e.target.value;
+                if (!isSupplierExpense) {
+                  setPatch({ counterpartyName: typed });
+                  return;
+                }
+                const exact = procurementSuppliers.find(
+                  (supplier) => normalizeSupplierName(supplier.name) === normalizeSupplierName(typed),
+                );
+                const nextId = exact?.id ?? null;
+                const changed = (value.supplierId ?? null) !== nextId;
+                setPatch({
+                  counterpartyName: typed,
+                  supplierId: nextId,
+                  ...(changed
+                    ? { lines: value.lines.map((line) => ({ ...line, supplierProductId: null, priceFlag: null })) }
+                    : {}),
+                });
+                setSupplierMenuOpen(true);
+              }}
+              onFocus={() => {
+                if (!isSupplierExpense) return;
+                setSupplierMenuOpen(true);
+                void refreshSuppliers();
+              }}
+              onBlur={() => {
+                window.setTimeout(() => setSupplierMenuOpen(false), 150);
+              }}
               className={inputClass}
               placeholder={isExpense ? t("register.fields.supplierExample") : t("register.fields.customerExample")}
+              autoComplete="off"
             />
+            {isSupplierExpense && supplierMenuOpen && typedSupplier ? (
+              <div className="relative">
+                <div className="absolute z-20 mt-1 max-h-56 w-full overflow-auto rounded-xl border border-slate-200 bg-white text-right shadow-lg">
+                  {supplierSuggestions.map((supplier) => (
+                    <button
+                      key={supplier.id}
+                      type="button"
+                      className="block w-full px-3 py-2 text-sm font-semibold hover:bg-slate-50"
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => {
+                        const changed = value.supplierId !== supplier.id;
+                        setPatch({
+                          supplierId: supplier.id,
+                          counterpartyName: supplier.name,
+                          ...(changed
+                            ? { lines: value.lines.map((line) => ({ ...line, supplierProductId: null, priceFlag: null })) }
+                            : {}),
+                        });
+                        setSupplierMenuOpen(false);
+                      }}
+                    >
+                      {supplier.name}
+                      {supplier.phone ? <span className="ms-2 text-xs font-normal text-slate-500">{supplier.phone}</span> : null}
+                    </button>
+                  ))}
+                  {!exactSupplier ? (
+                    <button
+                      type="button"
+                      className="block w-full px-3 py-2 text-sm font-black text-cyan-800 hover:bg-cyan-50"
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => void createSupplier(typedSupplier)}
+                    >
+                      {t("register.fields.createSupplierNamed", { name: typedSupplier })}
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
             {!isExpense ? (
               <datalist id="customer-suggestions">
                 {customerSuggestions.map((name) => (

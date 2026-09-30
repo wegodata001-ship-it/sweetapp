@@ -10,6 +10,12 @@ import {
   parsePayload,
 } from "@/lib/finance/document-payload";
 import {
+  decodeManualReceiptDetails,
+  encodeManualReceiptDetails,
+  parseManualReceiptLines,
+  quoteManualReceipt,
+} from "@/lib/finance/manual-receipt-lines";
+import {
   MANUAL_DOCUMENT_TYPES,
   MANUAL_VAT_MODES,
   addMoney,
@@ -20,6 +26,7 @@ import {
   type ManualVatMode,
 } from "@/lib/finance/manual-receipt-vat";
 import { prisma } from "@/lib/prisma";
+import { findOrCreateSupplier, isDatabaseSaveError } from "@/lib/finance/supplier-resolve";
 
 export const dynamic = "force-dynamic";
 
@@ -108,6 +115,9 @@ type Body = {
   attachmentMime?: string | null;
   attachmentName?: string | null;
   linkedFinancialDocumentId?: string | null;
+  supplierPhone?: string | null;
+  supplierAddress?: string | null;
+  lines?: unknown;
 };
 
 export function parseBody(body: Body) {
@@ -119,6 +129,8 @@ export function parseBody(body: Body) {
     return { error: "תאריך מסמך חובה" as const };
   }
   if (!supplierName) return { error: "שם ספק חובה" as const };
+  const documentNumber = body.documentNumber?.trim() ?? "";
+  if (!documentNumber) return { error: "מספר מסמך חובה" as const };
   if (!MANUAL_DOCUMENT_TYPES.includes(documentType as (typeof MANUAL_DOCUMENT_TYPES)[number])) {
     return { error: "סוג מסמך לא תקין" as const };
   }
@@ -136,22 +148,38 @@ export function parseBody(body: Body) {
   ) {
     return { error: "אמצעי תשלום לא תקין" as const };
   }
-  const computed = computeManualReceiptVat({
-    enteredAmount: body.enteredAmount ?? "",
-    mode: vatMode as ManualVatMode,
-    vatDeductible: Boolean(body.vatDeductible),
-  });
+  const lineResult = Array.isArray(body.lines) ? parseManualReceiptLines(body.lines) : null;
+  if (lineResult && "error" in lineResult) return { error: lineResult.error };
+  const computed = lineResult
+    ? quoteManualReceipt({
+        lines: lineResult.lines,
+        mode: vatMode as ManualVatMode,
+        vatDeductible: Boolean(body.vatDeductible),
+      })
+    : computeManualReceiptVat({
+        enteredAmount: body.enteredAmount ?? "",
+        mode: vatMode as ManualVatMode,
+        vatDeductible: Boolean(body.vatDeductible),
+      });
   if (!computed) return { error: "סכום לא תקין" as const };
   if (createsExpenseMovement()) return { error: "מסמך ידני לא יוצר הוצאה" as const };
+  const description = lineResult
+    ? encodeManualReceiptDetails({
+        note: body.description?.trim() || "",
+        phone: body.supplierPhone?.trim() || "",
+        address: body.supplierAddress?.trim() || "",
+        lines: lineResult.lines,
+      })
+    : body.description?.trim() || null;
   return {
     data: {
       documentDate: new Date(`${documentDate}T00:00:00.000Z`),
-      documentNumber: body.documentNumber?.trim() || null,
+      documentNumber,
       supplierName,
       supplierTaxId: body.supplierTaxId?.trim() || null,
       documentType,
       category,
-      description: body.description?.trim() || null,
+      description,
       amountBeforeVat: computed.amountBeforeVat,
       vatRate: computed.vatRate,
       vatAmount: computed.vatAmount,
@@ -216,15 +244,19 @@ export function serialize(row: {
   createdAt: Date;
   updatedAt: Date;
 }) {
+  const details = decodeManualReceiptDetails(row.description);
   return {
     id: row.id,
     documentDate: row.documentDate.toISOString().slice(0, 10),
     documentNumber: row.documentNumber,
     supplierName: row.supplierName,
     supplierTaxId: row.supplierTaxId,
+    supplierPhone: details.phone || null,
+    supplierAddress: details.address || null,
     documentType: row.documentType,
     category: row.category,
-    description: row.description,
+    description: details.note,
+    lines: details.lines,
     amountBeforeVat: money(row.amountBeforeVat),
     vatRate: new Prisma.Decimal(row.vatRate).toFixed(4),
     vatAmount: money(row.vatAmount),
@@ -349,9 +381,23 @@ export async function POST(req: NextRequest) {
   const linkError = await assertExpenseLink(parsed.data.linkedFinancialDocumentId);
   if (linkError) return NextResponse.json({ ok: false, error: linkError }, { status: 400 });
 
-  const created = await prisma.manualReceipt.create({
-    data: { ...parsed.data, createdById: session.sub },
-  });
-  await writeAudit(session.sub, "manual_receipt_create", created.id, null, auditSnapshot(created));
-  return NextResponse.json({ ok: true, data: serialize(created) });
+  try {
+    const created = await prisma.$transaction(async (tx) => {
+      await findOrCreateSupplier(tx, parsed.data.supplierName);
+      return tx.manualReceipt.create({
+        data: { ...parsed.data, createdById: session.sub },
+      });
+    });
+    await writeAudit(session.sub, "manual_receipt_create", created.id, null, auditSnapshot(created));
+    return NextResponse.json({ ok: true, data: serialize(created) });
+  } catch (e) {
+    if (isDatabaseSaveError(e)) {
+      console.error("manual receipt save failed");
+      return NextResponse.json({ ok: false, error: "לא נשמר המסמך" }, { status: 500 });
+    }
+    return NextResponse.json(
+      { ok: false, error: e instanceof Error ? e.message : "שגיאה" },
+      { status: 500 },
+    );
+  }
 }

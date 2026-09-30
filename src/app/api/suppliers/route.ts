@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireDb } from "@/lib/api-route";
+import { findOrCreateSupplier, isDatabaseSaveError } from "@/lib/finance/supplier-resolve";
 
 export async function GET() {
   const block = await requireDb();
@@ -22,15 +23,18 @@ export async function POST(req: NextRequest) {
   try {
     const body = (await req.json()) as { name: string; phone?: string | null; openingBalance?: number };
     if (!body.name?.trim()) return NextResponse.json({ ok: false, error: "חסר שם" }, { status: 400 });
-    const row = await prisma.supplier.create({
-      data: {
-        name: body.name.trim(),
-        phone: body.phone?.trim() || null,
-        openingBalance: body.openingBalance ?? 0,
-      },
+    const row = await prisma.$transaction(async (tx) => {
+      const resolved = await findOrCreateSupplier(tx, body.name);
+      if (!resolved) return null;
+      return tx.supplier.findUnique({ where: { id: resolved.id } });
     });
+    if (!row) return NextResponse.json({ ok: false, error: "חסר שם" }, { status: 400 });
     return NextResponse.json({ ok: true, data: row });
   } catch (e) {
+    if (isDatabaseSaveError(e)) {
+      console.error("supplier save failed");
+      return NextResponse.json({ ok: false, error: "לא נשמר המסמך" }, { status: 500 });
+    }
     return NextResponse.json(
       { ok: false, error: e instanceof Error ? e.message : "שגיאה" },
       { status: 500 },

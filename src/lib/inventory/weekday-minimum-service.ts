@@ -1,12 +1,14 @@
+import { Prisma } from "@prisma/client";
 import { prismaAny } from "@/lib/prisma";
 import { orderedProductIdsOnShelf, resolveShelf } from "@/lib/inventory/shelf-service";
 import {
   emptyWeekdayValues,
   placementToWeekdayValues,
+  prepareWeekdayMinimumUpdates,
   type PlacementWeekdayMinimums,
+  type PreparedWeekdayUpdate,
   type WeekdayMinimumField,
   WEEKDAY_MINIMUM_FIELDS,
-  parseWeekdayMinimumInput,
 } from "@/lib/inventory/weekday-minimum";
 
 export type WeekdayMinimumProductRow = {
@@ -116,49 +118,118 @@ export type WeekdayMinimumPatchRow = {
   minimumSat?: number | null;
 };
 
+/**
+ * One UPDATE for every dirty product. Each row sets only the weekday columns
+ * that were sent. No interactive transaction: the pooler closes those, and a
+ * single statement is already atomic.
+ */
+export function weekdayMinimumUpdateSql(
+  locationId: string,
+  rows: PreparedWeekdayUpdate[],
+): Prisma.Sql {
+  const tuples = rows.map((row) => {
+    const parts: Prisma.Sql[] = [Prisma.sql`${row.productId}::text`];
+    for (const field of WEEKDAY_MINIMUM_FIELDS) {
+      parts.push(Prisma.sql`${row.values[field]}::double precision`);
+      parts.push(Prisma.sql`${row.set[field]}::boolean`);
+    }
+    return Prisma.sql`(${Prisma.join(parts, ", ")})`;
+  });
+
+  return Prisma.sql`
+    UPDATE "InventoryProductOnLocation" AS p
+    SET
+      "minimumSun" = CASE WHEN v.set_sun THEN v.sun ELSE p."minimumSun" END,
+      "minimumMon" = CASE WHEN v.set_mon THEN v.mon ELSE p."minimumMon" END,
+      "minimumTue" = CASE WHEN v.set_tue THEN v.tue ELSE p."minimumTue" END,
+      "minimumWed" = CASE WHEN v.set_wed THEN v.wed ELSE p."minimumWed" END,
+      "minimumThu" = CASE WHEN v.set_thu THEN v.thu ELSE p."minimumThu" END,
+      "minimumFri" = CASE WHEN v.set_fri THEN v.fri ELSE p."minimumFri" END,
+      "minimumSat" = CASE WHEN v.set_sat THEN v.sat ELSE p."minimumSat" END
+    FROM (VALUES ${Prisma.join(tuples)}) AS v(
+      product_id,
+      sun, set_sun,
+      mon, set_mon,
+      tue, set_tue,
+      wed, set_wed,
+      thu, set_thu,
+      fri, set_fri,
+      sat, set_sat
+    )
+    WHERE p."inventoryProductId" = v.product_id
+      AND p."locationId" = ${locationId}
+      AND EXISTS (
+        SELECT 1
+        FROM "InventoryLocation" AS loc
+        WHERE loc.id = p."locationId"
+          AND loc."isActive" = true
+      )
+  `;
+}
+
+export type WeekdayMinimumSaveTimings = {
+  updated: number;
+  rows: number;
+  dbOperations: number;
+  prepareMs: number;
+  transactionMs: number;
+  totalMs: number;
+};
+
 export async function bulkPatchWeekdayMinimums(
   locationId: string,
   patchRows: WeekdayMinimumPatchRow[],
-): Promise<{ updated: number }> {
+): Promise<WeekdayMinimumSaveTimings> {
+  const started = performance.now();
   const shelf = await resolveShelf(locationId);
   if (!shelf?.id) {
     throw new Error("LOCATION_NOT_FOUND");
   }
 
-  const productIdsOnShelf = new Set(await orderedProductIdsOnShelf(shelf));
-  let updated = 0;
+  const prepareStart = performance.now();
+  const prepared = prepareWeekdayMinimumUpdates(patchRows);
+  const prepareMs = performance.now() - prepareStart;
+  if (prepared.length === 0) {
+    return {
+      updated: 0,
+      rows: 0,
+      dbOperations: 1,
+      prepareMs,
+      transactionMs: 0,
+      totalMs: prepareMs,
+    };
+  }
 
-  await prismaAny.$transaction(async (tx: typeof prismaAny) => {
-    for (const row of patchRows) {
-      const productId = row.productId?.trim();
-      if (!productId || !productIdsOnShelf.has(productId)) continue;
+  const sql = weekdayMinimumUpdateSql(shelf.id, prepared);
+  const txStart = performance.now();
+  const updated = Number(await prismaAny.$executeRaw(sql));
+  const transactionMs = performance.now() - txStart;
 
-      const data: Record<string, number | null> = {};
-      for (const field of WEEKDAY_MINIMUM_FIELDS) {
-        const parsed = parseWeekdayMinimumInput(row[field]);
-        if (parsed === undefined) continue;
-        data[field] = parsed;
-      }
-      if (Object.keys(data).length === 0) continue;
+  if (updated === 0) {
+    const stillActive = await resolveShelf(shelf.id);
+    if (!stillActive?.id) throw new Error("LOCATION_NOT_FOUND");
+  }
 
-      const existing = await tx.inventoryProductOnLocation.findUnique({
-        where: {
-          inventoryProductId_locationId: {
-            inventoryProductId: productId,
-            locationId: shelf.id,
-          },
-        },
-        select: { id: true },
-      });
-      if (!existing) continue;
-
-      await tx.inventoryProductOnLocation.update({
-        where: { id: existing.id },
-        data,
-      });
-      updated += 1;
-    }
-  });
-
-  return { updated };
+  const totalMs = performance.now() - started;
+  const timings: WeekdayMinimumSaveTimings = {
+    updated,
+    rows: prepared.length,
+    dbOperations: updated === 0 ? 3 : 2,
+    prepareMs,
+    transactionMs,
+    totalMs,
+  };
+  console.info(
+    "[weekday-minimums] save",
+    JSON.stringify({
+      PREPARE_MS: Math.round(prepareMs),
+      TRANSACTION_START: Math.round(txStart),
+      DB_OPERATIONS: timings.dbOperations,
+      TRANSACTION_MS: Math.round(transactionMs),
+      TOTAL_SAVE_MS: Math.round(totalMs),
+      ROWS_UPDATED: updated,
+      ROWS: prepared.length,
+    }),
+  );
+  return timings;
 }

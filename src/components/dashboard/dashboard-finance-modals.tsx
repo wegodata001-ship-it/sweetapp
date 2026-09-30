@@ -103,3 +103,88 @@ export function CustomerDebtModal({
     </div>
   );
 }
+
+type PayableRow = {
+  id: string;
+  entityType: "supplier" | "employee";
+  name: string;
+  charges: number;
+  paid: number;
+  remaining: number;
+};
+
+export function OpenPayablesModal({
+  open,
+  total,
+  onClose,
+}: {
+  open: boolean;
+  total: number;
+  onClose: () => void;
+}) {
+  const { t, dir } = useI18n();
+  const [rows, setRows] = useState<PayableRow[]>([]);
+
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    void fetch("/api/ledger/payables", { credentials: "same-origin" })
+      .then((res) => res.json())
+      .then((body: { ok?: boolean; rows?: PayableRow[] }) => {
+        if (cancelled || !body.ok || !body.rows) return;
+        setRows(body.rows.filter((row) => row.remaining > 0));
+      })
+      .catch(() => {
+        if (!cancelled) setRows([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
+
+  if (!open) return null;
+  const shownTotal = rows.reduce((sum, row) => sum + row.remaining, 0);
+  return (
+    <div className="fixed inset-0 z-[80] flex items-end justify-center bg-slate-950/50 p-3 sm:items-center" role="dialog" dir={dir}>
+      <div className="max-h-[88vh] w-full max-w-3xl overflow-auto rounded-3xl bg-white p-4 text-slate-950">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h2 className="text-xl font-black">{t("dashboard.redesign.oweOthers")}</h2>
+            <p className="mt-1 text-sm font-semibold">
+              {t("dashboard.redesign.oweOthersTotal")}: {formatShekel(rows.length > 0 ? shownTotal : total)}
+            </p>
+          </div>
+          <button type="button" className="font-bold" onClick={onClose} aria-label={t("common.close")}>
+            ×
+          </button>
+        </div>
+        <table className="mt-3 w-full text-sm">
+          <thead>
+            <tr className="text-start text-slate-500">
+              <th className="py-2 text-start">{t("dashboard.redesign.oweOthersName")}</th>
+              <th className="py-2 text-start">{t("dashboard.redesign.oweOthersType")}</th>
+              <th className="py-2 text-start">{t("dashboard.redesign.oweOthersCharges")}</th>
+              <th className="py-2 text-start">{t("dashboard.redesign.oweOthersPaid")}</th>
+              <th className="py-2 text-start">{t("dashboard.redesign.oweOthersRemaining")}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr key={`${row.entityType}-${row.id}`} className="border-t border-slate-100">
+                <td className="py-2">{row.name}</td>
+                <td className="py-2">
+                  {row.entityType === "employee"
+                    ? t("dashboard.redesign.oweOthersEmployee")
+                    : t("dashboard.redesign.oweOthersSupplier")}
+                </td>
+                <td className="py-2">{formatShekel(row.charges)}</td>
+                <td className="py-2">{formatShekel(row.paid)}</td>
+                <td className="py-2 font-black">{formatShekel(row.remaining)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}

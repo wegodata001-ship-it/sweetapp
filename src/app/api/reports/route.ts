@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from "next/server";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireDb } from "@/lib/api-route";
-import { enrichReportWithSignedUrl } from "@/lib/storage/report-access";
 
 export async function GET(req: NextRequest) {
   const block = await requireDb();
@@ -53,7 +52,7 @@ export async function GET(req: NextRequest) {
       },
     });
 
-    const data = await Promise.all(rows.map((row) => enrichReportWithSignedUrl(row)));
+    const data = rows.map((row) => ({ ...row, publicUrl: null, pdfUrl: null }));
 
     return NextResponse.json({ ok: true, data });
   } catch (e) {

@@ -32,6 +32,39 @@ export type LedgerOverviewResponse = {
   rows: LedgerOverviewRow[];
 };
 
+export type LedgerEntityRef = {
+  entityType: EntityType;
+  entityId: string;
+  entityName: string;
+};
+
+export async function fetchRecentLedgerActivity(): Promise<LedgerEntityRef & { lastActivityAt: string }[]> {
+  const res = await fetch("/api/ledger/recent", { credentials: "same-origin", cache: "no-store" });
+  try {
+    const j = (await res.json()) as { ok?: boolean; data?: Array<LedgerEntityRef & { lastActivityAt: string }> };
+    if (!res.ok || !j.ok || !j.data) return [];
+    return j.data;
+  } catch {
+    return [];
+  }
+}
+
+export async function fetchLedgerSuggestions(q: string): Promise<LedgerEntityRef[]> {
+  const query = q.trim();
+  if (!query) return [];
+  const res = await fetch(`/api/ledger/suggest?q=${encodeURIComponent(query)}`, {
+    credentials: "same-origin",
+    cache: "no-store",
+  });
+  try {
+    const j = (await res.json()) as { ok?: boolean; data?: LedgerEntityRef[] };
+    if (!res.ok || !j.ok || !j.data) return [];
+    return j.data;
+  } catch {
+    return [];
+  }
+}
+
 export async function fetchLedgerOverview(params: {
   q?: string;
   entityType?: "all" | EntityType;

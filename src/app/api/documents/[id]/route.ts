@@ -18,6 +18,7 @@ import {
   syncExpenseDocumentLedgerEntry,
 } from "@/lib/finance/expense-ledger-sync";
 import { normalizeExpenseType } from "@/lib/finance/expense-types";
+import { SupplierNameRequiredError, isDatabaseSaveError, resolveExpenseSupplier } from "@/lib/finance/supplier-resolve";
 import { recordSupplierPriceHistoryFromExpense } from "@/lib/procurement/record-expense-prices";
 import { syncFinancialDocumentPaymentTotals } from "@/lib/finance/sync-document-amounts";
 import {
@@ -171,19 +172,25 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
         const itemsWithProducts = await attachProductsToItems(items);
         const expenseLinks =
           ie.kind === "expense" ? resolveExpenseDocumentLinks(ie) : { supplierId: null, employeeId: null };
-        if (
-          ie.kind === "expense" &&
-          normalizeExpenseType(ie.expenseType) === "SUPPLIER_PAYMENTS" &&
-          !expenseLinks.supplierId
-        ) {
-          return NextResponse.json({ ok: false, error: "יש לבחור ספק קיים או ליצור ספק חדש" }, { status: 400 });
-        }
         const docType =
           ie.kind === "expense" && normalizeExpenseType(ie.expenseType) === "WORKER_PAYMENTS"
             ? documentTypeForEmployeePay(normalizeEmployeePayType(ie.employeePayType))
             : ie.documentType;
 
         await prisma.$transaction(async (tx) => {
+          let supplierId = expenseLinks.supplierId;
+          if (ie.kind === "expense") {
+            const resolved = await resolveExpenseSupplier(tx, {
+              expenseType: ie.expenseType,
+              supplierId: ie.supplierId,
+              supplierName: ie.counterpartyName,
+            });
+            if (resolved) {
+              supplierId = resolved.id;
+              ie.supplierId = resolved.id;
+              ie.counterpartyName = resolved.name;
+            }
+          }
           await tx.payment.deleteMany({ where: { documentId: id } });
           await tx.financialDocumentItem.deleteMany({ where: { documentId: id } });
           await tx.financialDocument.update({
@@ -193,7 +200,7 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
               category,
               documentType: docType,
               customerId,
-              supplierId: expenseLinks.supplierId,
+              supplierId,
               employeeId: expenseLinks.employeeId,
               totalAmount: calculatedTotal,
               depositAmount,
@@ -282,6 +289,13 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
     if (session) await logActivity(session.sub, "document_edit");
     return NextResponse.json({ ok: true, data: updated ? prismaDocToFinanceRow(updated) : null });
   } catch (e) {
+    if (e instanceof SupplierNameRequiredError) {
+      return NextResponse.json({ ok: false, error: e.message }, { status: 400 });
+    }
+    if (isDatabaseSaveError(e)) {
+      console.error("document update failed");
+      return NextResponse.json({ ok: false, error: "לא נשמר המסמך" }, { status: 500 });
+    }
     return NextResponse.json(
       { ok: false, error: e instanceof Error ? e.message : "שגיאה" },
       { status: 500 },

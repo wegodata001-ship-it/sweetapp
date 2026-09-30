@@ -83,6 +83,24 @@ export function documentMatchesArchiveCounterparty(
   }
 }
 
+/** Party kind from stored ids. A supplier or employee link wins over a customer link. */
+export function documentArchivePartyKind(
+  row: FinanceDocumentRow,
+): ArchiveCounterpartyKind | null {
+  if (documentSupplierId(row)) return "supplier";
+  if (documentEmployeeId(row)) return "employee";
+  if (documentCustomerId(row)) return "customer";
+  return null;
+}
+
+export function documentMatchesArchiveKind(
+  row: FinanceDocumentRow,
+  kind: ArchiveCounterpartyKindFilter,
+): boolean {
+  if (!kind) return true;
+  return documentArchivePartyKind(row) === kind;
+}
+
 export function documentMatchesExpenseCounterparty(
   row: FinanceDocumentRow,
   kind: "supplier" | "employee",

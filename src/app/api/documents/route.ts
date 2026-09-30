@@ -26,6 +26,7 @@ import {
   syncExpenseDocumentLedgerEntry,
 } from "@/lib/finance/expense-ledger-sync";
 import { normalizeExpenseType } from "@/lib/finance/expense-types";
+import { SupplierNameRequiredError, isDatabaseSaveError, resolveExpenseSupplier } from "@/lib/finance/supplier-resolve";
 import { recordSupplierPriceHistoryFromExpense } from "@/lib/procurement/record-expense-prices";
 import { prisma, prismaAny } from "@/lib/prisma";
 import { requireDb } from "@/lib/api-route";
@@ -35,7 +36,7 @@ import { notifyAbnormalExpenseIfNeeded } from "@/lib/notifications/notifyAbnorma
 import { archiveSourceDocumentForFinancialDoc } from "@/lib/finance/source-documents";
 import { getAccountantRecipientEmail } from "@/lib/finance/accountant-config";
 import { parseNum } from "@/lib/format-shekel";
-import type { Prisma } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 
 export const dynamic = "force-dynamic";
 
@@ -58,6 +59,9 @@ export async function GET(req: NextRequest) {
         where,
         include: {
           customer: { select: { name: true } },
+          supplier: { select: { name: true } },
+          employee: { select: { name: true } },
+          sourceDocument: { select: { id: true, fileName: true, fileType: true, mimeType: true } },
           payments: { select: { amount: true } },
           sentToCpaBy: { select: { id: true, fullName: true } },
         },
@@ -194,26 +198,32 @@ export async function POST(req: NextRequest) {
 
     const itemsWithProducts = await attachProductsToItems(items);
     const expenseLinks = ie.kind === "expense" ? resolveExpenseDocumentLinks(ie) : { supplierId: null, employeeId: null };
-    if (
-      ie.kind === "expense" &&
-      normalizeExpenseType(ie.expenseType) === "SUPPLIER_PAYMENTS" &&
-      !expenseLinks.supplierId
-    ) {
-      return NextResponse.json({ ok: false, error: "יש לבחור ספק קיים או ליצור ספק חדש" }, { status: 400 });
-    }
     const docType =
       ie.kind === "expense" && normalizeExpenseType(ie.expenseType) === "WORKER_PAYMENTS"
         ? documentTypeForEmployeePay(normalizeEmployeePayType(ie.employeePayType))
         : ie.documentType;
 
+    let linkedSupplierId = expenseLinks.supplierId;
     const doc = await prisma.$transaction(async (tx) => {
+      if (ie.kind === "expense") {
+        const resolved = await resolveExpenseSupplier(tx, {
+          expenseType: ie.expenseType,
+          supplierId: ie.supplierId,
+          supplierName: ie.counterpartyName,
+        });
+        if (resolved) {
+          linkedSupplierId = resolved.id;
+          ie.supplierId = resolved.id;
+          ie.counterpartyName = resolved.name;
+        }
+      }
       const created = await tx.financialDocument.create({
       data: {
         title: body.title.trim(),
         category: body.category,
         documentType: docType,
         customerId,
-        supplierId: expenseLinks.supplierId,
+        supplierId: linkedSupplierId,
         employeeId: expenseLinks.employeeId,
         totalAmount: calculatedTotal,
         paidAmount: 0,
@@ -280,7 +290,7 @@ export async function POST(req: NextRequest) {
       void notifyAbnormalExpenseIfNeeded({
         documentId: doc.id,
         totalAmount: calculatedTotal,
-        supplierId: expenseLinks.supplierId,
+        supplierId: linkedSupplierId,
         title: body.title.trim(),
       });
     }
@@ -294,6 +304,13 @@ export async function POST(req: NextRequest) {
     }
     return NextResponse.json({ ok: true, id: doc.id });
   } catch (e) {
+    if (e instanceof SupplierNameRequiredError) {
+      return NextResponse.json({ ok: false, error: e.message }, { status: 400 });
+    }
+    if (isDatabaseSaveError(e)) {
+      console.error("document save failed");
+      return NextResponse.json({ ok: false, error: "לא נשמר המסמך" }, { status: 500 });
+    }
     return NextResponse.json(
       { ok: false, error: e instanceof Error ? e.message : "שגיאה" },
       { status: 500 },

@@ -4,6 +4,9 @@ import type { FinancialDocument as PrismaFinancialDocument } from "@prisma/clien
 
 type PrismaFinancialDocumentWithCustomer = PrismaFinancialDocument & {
   customer?: { name: string } | null;
+  supplier?: { name: string } | null;
+  employee?: { name: string } | null;
+  sourceDocument?: { id: string; fileName: string; fileType: string | null; mimeType: string | null } | null;
   payments?: { amount: number }[];
   sentToCpaBy?: { id: string; fullName: string } | null;
   sentToCpaAt?: Date | null;
@@ -61,6 +64,30 @@ export function prismaDocToFinanceRow(row: PrismaFinancialDocumentWithCustomer):
     created_at: row.createdAt.toISOString(),
     payload,
     supplier_id: row.supplierId ?? null,
+    supplier_name: row.supplier?.name ?? null,
     employee_id: row.employeeId ?? null,
+    employee_name: row.employee?.name ?? null,
+    source_file: sourceFileMeta(row, payload),
+  };
+}
+
+function sourceFileMeta(
+  row: PrismaFinancialDocumentWithCustomer,
+  payload: FinanceDocumentPayload | null,
+): FinanceDocumentRow["source_file"] {
+  if (row.sourceDocument?.id) {
+    return {
+      file_name: row.sourceDocument.fileName,
+      file_type: row.sourceDocument.fileType ?? row.sourceDocument.mimeType ?? null,
+      linked: true,
+    };
+  }
+  const fileName = payload?.receiptFileName?.trim() || "";
+  const storagePath = payload?.receiptStoragePath?.trim() || "";
+  if (!fileName && !storagePath) return null;
+  return {
+    file_name: fileName || storagePath.split("/").pop() || "document",
+    file_type: payload?.receiptMimeType?.trim() || null,
+    linked: false,
   };
 }

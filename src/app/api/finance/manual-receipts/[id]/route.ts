@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getSessionFromCookie } from "@/lib/auth/get-session";
 import { requireDb } from "@/lib/api-route";
 import { prisma } from "@/lib/prisma";
+import { findOrCreateSupplier, isDatabaseSaveError } from "@/lib/finance/supplier-resolve";
 import {
   assertExpenseLink,
   auditSnapshot,
@@ -28,10 +29,24 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   const linkError = await assertExpenseLink(parsed.data.linkedFinancialDocumentId, id);
   if (linkError) return NextResponse.json({ ok: false, error: linkError }, { status: 400 });
 
-  const before = auditSnapshot(existing);
-  const updated = await prisma.manualReceipt.update({ where: { id }, data: parsed.data });
-  await writeAudit(session.sub, "manual_receipt_update", id, before, auditSnapshot(updated));
-  return NextResponse.json({ ok: true, data: serialize(updated) });
+  try {
+    const before = auditSnapshot(existing);
+    const updated = await prisma.$transaction(async (tx) => {
+      await findOrCreateSupplier(tx, parsed.data.supplierName);
+      return tx.manualReceipt.update({ where: { id }, data: parsed.data });
+    });
+    await writeAudit(session.sub, "manual_receipt_update", id, before, auditSnapshot(updated));
+    return NextResponse.json({ ok: true, data: serialize(updated) });
+  } catch (e) {
+    if (isDatabaseSaveError(e)) {
+      console.error("manual receipt update failed");
+      return NextResponse.json({ ok: false, error: "לא נשמר המסמך" }, { status: 500 });
+    }
+    return NextResponse.json(
+      { ok: false, error: e instanceof Error ? e.message : "שגיאה" },
+      { status: 500 },
+    );
+  }
 }
 
 export async function DELETE(_req: NextRequest, { params }: Params) {

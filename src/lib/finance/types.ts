@@ -95,7 +95,14 @@ export type FinanceDocumentRow = {
   created_at: string;
   payload: FinanceDocumentPayload | null;
   supplier_id?: string | null;
+  supplier_name?: string | null;
   employee_id?: string | null;
+  employee_name?: string | null;
+  source_file?: {
+    file_name: string;
+    file_type: string | null;
+    linked: boolean;
+  } | null;
 };
 
 export type AccountantTransferLogRow = {

@@ -81,12 +81,24 @@ export async function PATCH(req: NextRequest) {
 
     await ensureLocationSchemaColumns();
     const result = await bulkPatchWeekdayMinimums(parsed.locationId, parsed.rows);
-    return NextResponse.json({ ok: true, data: result });
+    const res = NextResponse.json({ ok: true, data: { updated: result.updated } });
+    res.headers.set(
+      "Server-Timing",
+      [
+        `prepare;dur=${result.prepareMs.toFixed(1)}`,
+        `transaction;dur=${result.transactionMs.toFixed(1)}`,
+        `total;dur=${result.totalMs.toFixed(1)}`,
+        `rows;desc="${result.rows}"`,
+        `dbops;desc="${result.dbOperations}"`,
+      ].join(", "),
+    );
+    return res;
   } catch (e) {
-    const msg = e instanceof Error ? e.message : "שגיאה";
+    const msg = e instanceof Error ? e.message : "";
     if (msg === "LOCATION_NOT_FOUND") {
-      return NextResponse.json({ ok: false, error: "מיקום לא נמצא" }, { status: 404 });
+      return NextResponse.json({ ok: false, error: "LOCATION_NOT_FOUND" }, { status: 404 });
     }
-    return NextResponse.json({ ok: false, error: msg }, { status: 500 });
+    console.error("[weekday-minimums] save failed", e);
+    return NextResponse.json({ ok: false, error: "SAVE_FAILED" }, { status: 500 });
   }
 }

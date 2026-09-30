@@ -169,7 +169,61 @@ export function parseWeekdayMinimumInput(
 ): number | null | undefined {
   if (raw === undefined) return undefined;
   if (raw === null || raw === "") return null;
-  const n = Number(raw);
+  const n = typeof raw === "number" ? raw : Number(raw);
   if (!Number.isFinite(n) || n < 0) return undefined;
   return n;
+}
+
+export type PreparedWeekdayUpdate = {
+  productId: string;
+  values: Record<WeekdayMinimumField, number | null>;
+  set: Record<WeekdayMinimumField, boolean>;
+};
+
+/**
+ * Rows that actually change, one object per product.
+ * Empty input is null. 0 stays 0. Omitted or invalid fields are not written.
+ * A later duplicate productId merges over the earlier one.
+ */
+export function prepareWeekdayMinimumUpdates(
+  rows: Array<{ productId?: unknown } & Partial<Record<WeekdayMinimumField, unknown>>>,
+): PreparedWeekdayUpdate[] {
+  const byId = new Map<string, PreparedWeekdayUpdate>();
+  for (const row of rows) {
+    const productId = typeof row.productId === "string" ? row.productId.trim() : "";
+    if (!productId) continue;
+
+    const values = {} as Record<WeekdayMinimumField, number | null>;
+    const set = {} as Record<WeekdayMinimumField, boolean>;
+    let any = false;
+    for (const field of WEEKDAY_MINIMUM_FIELDS) {
+      if (!(field in row)) {
+        values[field] = null;
+        set[field] = false;
+        continue;
+      }
+      const parsed = parseWeekdayMinimumInput(row[field]);
+      if (parsed === undefined) {
+        values[field] = null;
+        set[field] = false;
+        continue;
+      }
+      values[field] = parsed;
+      set[field] = true;
+      any = true;
+    }
+    if (!any) continue;
+
+    const prev = byId.get(productId);
+    if (!prev) {
+      byId.set(productId, { productId, values, set });
+      continue;
+    }
+    for (const field of WEEKDAY_MINIMUM_FIELDS) {
+      if (!set[field]) continue;
+      prev.values[field] = values[field];
+      prev.set[field] = true;
+    }
+  }
+  return [...byId.values()];
 }
