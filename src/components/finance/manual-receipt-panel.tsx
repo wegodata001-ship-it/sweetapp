@@ -9,6 +9,12 @@ import {
   type ManualVatMode,
 } from "@/lib/finance/manual-receipt-vat";
 import { normalizeSupplierName } from "@/lib/document-scan/supplier-aliases";
+import {
+  manualReceiptLineAmount,
+  parseManualReceiptLines,
+  quoteManualReceipt,
+  type ManualReceiptLine,
+} from "@/lib/finance/manual-receipt-lines";
 
 type ReceiptRow = {
   id: string;

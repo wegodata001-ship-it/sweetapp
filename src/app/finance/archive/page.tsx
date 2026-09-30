@@ -238,7 +238,6 @@ export default function FinanceArchivePage() {
   };
   const [deleteTarget, setDeleteTarget] = useState<GeneratedReportRow | null>(null);
   const [deleting, setDeleting] = useState(false);
-  const [deleting, setDeleting] = useState(false);
 
   const [dataReady, setDataReady] = useState(false);
   const loadedOnceRef = useRef(false);

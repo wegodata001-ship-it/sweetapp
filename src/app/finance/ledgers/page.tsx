@@ -561,7 +561,10 @@ function LedgersPageInner() {
           </span>
           <button
             type="button"
-            onClick={() => setDetailUrl({ type: applied.entityType, id: applied.entityId })}
+            onClick={() => {
+              if (applied.entityType === "all" || !applied.entityId) return;
+              setDetailUrl({ type: applied.entityType, id: applied.entityId });
+            }}
             className="h-8 rounded-lg border border-cyan-200 bg-cyan-50 px-3 text-xs font-black text-cyan-950 hover:bg-cyan-100"
           >
             {t("ledgers.openEntityLedger")}

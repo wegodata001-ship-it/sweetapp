@@ -38,7 +38,7 @@ export type LedgerEntityRef = {
   entityName: string;
 };
 
-export async function fetchRecentLedgerActivity(): Promise<LedgerEntityRef & { lastActivityAt: string }[]> {
+export async function fetchRecentLedgerActivity(): Promise<(LedgerEntityRef & { lastActivityAt: string })[]> {
   const res = await fetch("/api/ledger/recent", { credentials: "same-origin", cache: "no-store" });
   try {
     const j = (await res.json()) as { ok?: boolean; data?: Array<LedgerEntityRef & { lastActivityAt: string }> };
