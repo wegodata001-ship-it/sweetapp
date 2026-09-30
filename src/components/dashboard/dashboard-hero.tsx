@@ -187,7 +187,12 @@ export function DashboardHero({ hero, updatedAt, loading, onRefresh }: Props) {
         </div>
       </div>
       <CustomerDebtModal open={debtOpen} totalDebt={debtTotal} count={debtCount} onClose={() => setDebtOpen(false)} />
-      <OpenPayablesModal open={payablesOpen} total={payableTotal} onClose={() => setPayablesOpen(false)} />
+      <OpenPayablesModal
+        open={payablesOpen}
+        total={payableTotal}
+        refreshKey={updatedAt}
+        onClose={() => setPayablesOpen(false)}
+      />
       <FinancialSummaryModal open={summaryOpen} onClose={() => setSummaryOpen(false)} />
     </section>
   );

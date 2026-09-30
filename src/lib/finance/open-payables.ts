@@ -4,6 +4,7 @@
  * No date window: an unpaid balance from an earlier month stays included.
  * Customers are not parties here.
  */
+import type { ExpenseObligationDoc } from "@/lib/finance/expense-obligation";
 import {
   statementForEntryEntity,
   type EntrySourceRow,
@@ -28,6 +29,7 @@ export type OpenPayableRow = {
 export function openPayableRows(params: {
   parties: OpenPayableParty[];
   entries: EntrySourceRow[];
+  expenseDocuments?: ExpenseObligationDoc[];
 }): { total: number; count: number; rows: OpenPayableRow[] } {
   const rows: OpenPayableRow[] = [];
   for (const party of params.parties) {
@@ -37,6 +39,7 @@ export function openPayableRows(params: {
       name: party.name,
       openingBalance: party.openingBalance,
       entries: params.entries,
+      expenseDocuments: params.expenseDocuments,
     });
     if (!(statement.debt > 0)) continue;
     rows.push({

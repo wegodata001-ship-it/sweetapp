@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireDb } from "@/lib/api-route";
+import { EXPENSE_OBLIGATION_DOC_SELECT } from "@/lib/finance/expense-obligation";
 import { openPayableRows, type OpenPayableParty } from "@/lib/finance/open-payables";
 import type { EntrySourceRow } from "@/lib/finance/ledger-route-map";
 import { prisma } from "@/lib/prisma";
@@ -52,9 +53,25 @@ export async function GET() {
       })),
     ];
 
+    const docIds = [
+      ...new Set(
+        entries
+          .map((row) => row.financialDocumentId)
+          .filter((id): id is string => Boolean(id)),
+      ),
+    ];
+    const expenseDocuments =
+      docIds.length > 0
+        ? await prisma.financialDocument.findMany({
+            where: { id: { in: docIds } },
+            select: EXPENSE_OBLIGATION_DOC_SELECT,
+          })
+        : [];
+
     const result = openPayableRows({
       parties,
       entries: entries as EntrySourceRow[],
+      expenseDocuments,
     });
 
     return NextResponse.json({ ok: true, ...result });

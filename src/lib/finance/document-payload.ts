@@ -540,6 +540,12 @@ export function paymentLinesTotal(payload: IncomeExpensePayload): number {
   }, 0);
 }
 
+/** True when the user typed a payment amount, including an explicit 0. */
+export function paymentLinesHaveTypedAmount(payload: IncomeExpensePayload): boolean {
+  const rows = payload.payments?.length ? payload.payments : payload.paymentMethods ?? [];
+  return rows.some((row) => row.amount.trim() !== "");
+}
+
   /** שורת notes במסמך — שדות ישנים + הערות תשלום מהכרטיס המשותף */
 export function combineIncomeNotes(ie: IncomeExpensePayload): string | null {
   const chunks: string[] = [];

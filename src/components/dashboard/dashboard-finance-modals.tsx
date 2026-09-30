@@ -116,10 +116,12 @@ type PayableRow = {
 export function OpenPayablesModal({
   open,
   total,
+  refreshKey,
   onClose,
 }: {
   open: boolean;
   total: number;
+  refreshKey?: string | null;
   onClose: () => void;
 }) {
   const { t, dir } = useI18n();
@@ -140,7 +142,7 @@ export function OpenPayablesModal({
     return () => {
       cancelled = true;
     };
-  }, [open]);
+  }, [open, refreshKey]);
 
   if (!open) return null;
   const shownTotal = rows.reduce((sum, row) => sum + row.remaining, 0);

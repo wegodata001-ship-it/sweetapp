@@ -49,6 +49,106 @@ describe("open payables", () => {
     assert.equal(byName.has("שולם"), false);
   });
 
+  it("drops a blank-payment expense that is not remaining to pay", () => {
+    const result = openPayableRows({
+      parties: [{ id: "hani", entityType: "supplier", name: "האני", openingBalance: 0 }],
+      entries: [
+        {
+          id: "h1",
+          supplierId: "hani",
+          financialDocumentId: "doc1",
+          debit: 10000,
+          credit: 0,
+          entryDate: new Date("2026-09-29T12:00:00.000Z"),
+          docType: "חשבונית מס",
+          description: "h1",
+        },
+      ],
+      expenseDocuments: [
+        {
+          id: "doc1",
+          category: "הוצאה",
+          totalAmount: 10000,
+          paidAmount: 0,
+          metadata: {
+            kind: "expense",
+            expenseType: "SUPPLIER_PAYMENTS",
+            payments: [{ id: "p1", instrument: "CASH", amount: "", notes: "" }],
+          },
+        },
+      ],
+    });
+    assert.equal(result.total, 0);
+    assert.equal(result.count, 0);
+  });
+
+  it("includes an explicit unpaid payment of 0", () => {
+    const result = openPayableRows({
+      parties: [{ id: "hani", entityType: "supplier", name: "האני", openingBalance: 0 }],
+      entries: [
+        {
+          id: "h1",
+          supplierId: "hani",
+          financialDocumentId: "doc1",
+          debit: 10000,
+          credit: 0,
+          entryDate: new Date("2026-09-29T12:00:00.000Z"),
+          docType: "חשבונית מס",
+          description: "h1",
+        },
+      ],
+      expenseDocuments: [
+        {
+          id: "doc1",
+          category: "הוצאה",
+          totalAmount: 10000,
+          paidAmount: 0,
+          metadata: {
+            kind: "expense",
+            expenseType: "SUPPLIER_PAYMENTS",
+            payments: [{ id: "p1", instrument: "CASH", amount: "0", notes: "" }],
+          },
+        },
+      ],
+    });
+    assert.equal(result.total, 10000);
+    assert.equal(result.rows[0]?.remaining, 10000);
+  });
+
+  it("keeps remaining after a typed partial payment", () => {
+    const result = openPayableRows({
+      parties: [{ id: "hani", entityType: "supplier", name: "האני", openingBalance: 0 }],
+      entries: [
+        {
+          id: "h1",
+          supplierId: "hani",
+          financialDocumentId: "doc1",
+          debit: 10000,
+          credit: 0,
+          entryDate: new Date("2026-09-29T12:00:00.000Z"),
+          docType: "חשבונית מס",
+          description: "h1",
+        },
+      ],
+      expenseDocuments: [
+        {
+          id: "doc1",
+          category: "הוצאה",
+          totalAmount: 10000,
+          paidAmount: 0,
+          metadata: {
+            kind: "expense",
+            expenseType: "SUPPLIER_PAYMENTS",
+            payments: [{ id: "p1", instrument: "CASH", amount: "7000", notes: "" }],
+          },
+        },
+      ],
+    });
+    assert.equal(result.total, 3000);
+    assert.equal(result.rows[0]?.remaining, 3000);
+    assert.equal(result.rows[0]?.paid, 7000);
+  });
+
   it("keeps an unpaid balance from a previous month", () => {
     const result = openPayableRows({
       parties: [{ id: "old", entityType: "supplier", name: "ישן", openingBalance: 0 }],

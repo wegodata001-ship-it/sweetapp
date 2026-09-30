@@ -7,6 +7,7 @@ import {
   LEDGER_MASTER_SAFETY_CAP,
   type LedgerMasterEntity,
 } from "@/lib/finance/ledger-overview-entities";
+import { EXPENSE_OBLIGATION_DOC_SELECT } from "@/lib/finance/expense-obligation";
 import {
   overviewRowFromEntityStatement,
   statementForCustomer,
@@ -167,6 +168,21 @@ export async function GET(req: NextRequest) {
       documentTitle: p.document?.title ?? null,
     }));
 
+    const expenseDocIds = [
+      ...new Set(
+        [...supLedger, ...empLedger]
+          .map((row) => row.financialDocumentId)
+          .filter((id): id is string => Boolean(id)),
+      ),
+    ];
+    const expenseDocuments =
+      expenseDocIds.length > 0
+        ? await prisma.financialDocument.findMany({
+            where: { id: { in: expenseDocIds } },
+            select: EXPENSE_OBLIGATION_DOC_SELECT,
+          })
+        : [];
+
     const rows: LedgerOverviewRow[] = pageRows.map((entity) => {
       if (entity.entity_type === "customer") {
         return overviewRowFromEntityStatement(
@@ -190,6 +206,7 @@ export async function GET(req: NextRequest) {
           name: entity.name,
           openingBalance: entity.opening_balance,
           entries: entity.entity_type === "supplier" ? supLedger : empLedger,
+          expenseDocuments,
           dateFrom,
           dateTo,
         }),

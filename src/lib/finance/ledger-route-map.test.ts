@@ -169,6 +169,43 @@ describe("8. Date range → brought forward", () => {
 });
 
 describe("9. Supplier", () => {
+  it("does not treat a blank expense payment line as open supplier debt", () => {
+    const statement = statementForEntryEntity({
+      entityType: "supplier",
+      id: "s-hani",
+      name: "האני",
+      openingBalance: 0,
+      entries: [
+        {
+          id: "le1",
+          supplierId: "s-hani",
+          financialDocumentId: "doc1",
+          debit: 10000,
+          credit: 0,
+          entryDate: day("2026-09-29"),
+          docType: "חשבונית מס",
+          description: "חשבונית מס",
+        },
+      ],
+      expenseDocuments: [
+        {
+          id: "doc1",
+          category: "הוצאה",
+          totalAmount: 10000,
+          paidAmount: 0,
+          metadata: {
+            kind: "expense",
+            expenseType: "SUPPLIER_PAYMENTS",
+            payments: [{ id: "p1", instrument: "CASH", amount: "", notes: "" }],
+          },
+        },
+      ],
+    });
+    assert.equal(statement.debt, 0);
+    assert.equal(statement.periodDebit, 0);
+    assert.equal(statement.periodCredit, 0);
+  });
+
   it("uses the same engine", () => {
     const statement = statementForEntryEntity({
       entityType: "supplier",

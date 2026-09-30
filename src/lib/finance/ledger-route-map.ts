@@ -9,6 +9,10 @@ import {
   overviewRowFromStatement,
   type LedgerStatement,
 } from "@/lib/finance/ledger-engine";
+import {
+  applyExpenseObligationToEntries,
+  type ExpenseObligationDoc,
+} from "@/lib/finance/expense-obligation";
 import type { EntityType, LedgerMovementView, LedgerOverviewRow } from "@/lib/finance/types";
 
 export type CustomerSourceDoc = {
@@ -69,12 +73,14 @@ export function statementForEntryEntity(params: {
   name: string;
   openingBalance: number;
   entries: EntrySourceRow[];
+  expenseDocuments?: ExpenseObligationDoc[];
   dateFrom?: string | null;
   dateTo?: string | null;
 }): LedgerStatement {
-  const entries = params.entries.filter((row) =>
+  const scoped = params.entries.filter((row) =>
     params.entityType === "supplier" ? row.supplierId === params.id : row.employeeId === params.id,
   );
+  const entries = applyExpenseObligationToEntries(scoped, params.expenseDocuments ?? []);
   return computeEntryLedger({
     entityType: params.entityType,
     entityId: params.id,

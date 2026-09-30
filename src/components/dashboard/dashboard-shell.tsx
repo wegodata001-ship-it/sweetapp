@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { useLiveRefresh } from "@/hooks/use-live-refresh";
 import { useI18n } from "@/components/i18n-provider";
 import type { DashboardHeroSlice, DashboardSummary } from "@/lib/dashboard/summary";
 import { fetchWithDedupe } from "@/lib/client/fetch-cache";
@@ -142,6 +143,11 @@ export function DashboardShell() {
       cancelled = true;
     };
   }, [load]);
+
+  useLiveRefresh({
+    refresh: () => load({ force: true }),
+    scope: "finance",
+  });
 
   if (!heroReady && !data) {
     return (

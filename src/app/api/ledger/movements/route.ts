@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireDb } from "@/lib/api-route";
 import type { EntityType } from "@/lib/finance/types";
+import { EXPENSE_OBLIGATION_DOC_SELECT } from "@/lib/finance/expense-obligation";
 import {
   movementsPayload,
   statementForCustomer,
@@ -90,12 +91,23 @@ export async function GET(req: NextRequest) {
           supplierId: true,
         },
       });
+      const expenseDocIds = [
+        ...new Set(entries.map((row) => row.financialDocumentId).filter((id): id is string => Boolean(id))),
+      ];
+      const expenseDocuments =
+        expenseDocIds.length > 0
+          ? await prisma.financialDocument.findMany({
+              where: { id: { in: expenseDocIds } },
+              select: EXPENSE_OBLIGATION_DOC_SELECT,
+            })
+          : [];
       const statement = statementForEntryEntity({
         entityType: "supplier",
         id: supplier.id,
         name: supplier.name,
         openingBalance: supplier.openingBalance,
         entries,
+        expenseDocuments,
         dateFrom,
         dateTo,
       });
@@ -117,12 +129,23 @@ export async function GET(req: NextRequest) {
         employeeId: true,
       },
     });
+    const expenseDocIds = [
+      ...new Set(entries.map((row) => row.financialDocumentId).filter((id): id is string => Boolean(id))),
+    ];
+    const expenseDocuments =
+      expenseDocIds.length > 0
+        ? await prisma.financialDocument.findMany({
+            where: { id: { in: expenseDocIds } },
+            select: EXPENSE_OBLIGATION_DOC_SELECT,
+          })
+        : [];
     const statement = statementForEntryEntity({
       entityType: "employee",
       id: employee.id,
       name: employee.name,
       openingBalance: employee.openingBalance,
       entries,
+      expenseDocuments,
       dateFrom,
       dateTo,
     });

@@ -1,5 +1,9 @@
 import type { Prisma, PrismaClient } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { documentTypeForEmployeePay, normalizeEmployeePayType } from "@/lib/finance/employee-pay-types";
+import { parsePayload, paymentLinesHaveTypedAmount } from "@/lib/finance/document-payload";
+import { appliedExpensePaid, expenseOpenRemaining } from "@/lib/finance/expense-obligation";
+import { normalizeExpenseType } from "@/lib/finance/expense-types";
 
 type Db = Prisma.TransactionClient | PrismaClient;
 
@@ -8,9 +12,6 @@ export function supplierLedgerAmounts(totalAmount: number, paidAmount: number): 
   const credit = Math.min(debit, Math.max(0, Number(paidAmount) || 0));
   return { debit, credit };
 }
-import { documentTypeForEmployeePay, normalizeEmployeePayType } from "@/lib/finance/employee-pay-types";
-import { parsePayload } from "@/lib/finance/document-payload";
-import { normalizeExpenseType } from "@/lib/finance/expense-types";
 
 /**
  * יוצר/מעדכן שורת כרטסת אחת למסמך הוצאה (ספק או עובד).
@@ -42,7 +43,14 @@ export async function syncExpenseDocumentLedgerEntry(documentId: string, db: Db 
   const meta = parsePayload(doc.metadata as unknown);
   if (!meta || meta.kind !== "expense") return;
 
-  const amounts = supplierLedgerAmounts(doc.totalAmount, doc.paidAmount);
+  const amounts = supplierLedgerAmounts(
+    doc.totalAmount,
+    appliedExpensePaid({
+      total: doc.totalAmount,
+      storedPaid: doc.paidAmount,
+      payload: meta,
+    }),
+  );
   if (amounts.debit < 1e-6 && amounts.credit < 1e-6) return;
 
   const entryDate = doc.docDate ?? doc.createdAt;
@@ -52,6 +60,14 @@ export async function syncExpenseDocumentLedgerEntry(documentId: string, db: Db 
   const description = note ? `${baseDesc} — ${note}` : baseDesc;
 
   if (expenseType === "SUPPLIER_PAYMENTS" && doc.supplierId) {
+    const remaining = expenseOpenRemaining({
+      total: doc.totalAmount,
+      storedPaid: doc.paidAmount,
+      payload: meta,
+    });
+    if (!paymentLinesHaveTypedAmount(meta) && remaining <= 1e-9) {
+      return;
+    }
     await db.ledgerEntry.create({
       data: {
         financialDocumentId: documentId,
