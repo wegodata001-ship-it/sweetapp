@@ -33,6 +33,7 @@ import { requireDb } from "@/lib/api-route";
 import { getSessionFromCookie } from "@/lib/auth/get-session";
 import { logActivity } from "@/lib/activity-log";
 import { notifyAbnormalExpenseIfNeeded } from "@/lib/notifications/notifyAbnormalExpense";
+import { invalidateDashboardCaches } from "@/lib/dashboard/invalidate";
 import { archiveSourceDocumentForFinancialDoc } from "@/lib/finance/source-documents";
 import { getAccountantRecipientEmail } from "@/lib/finance/accountant-config";
 import { parseNum } from "@/lib/format-shekel";
@@ -150,6 +151,7 @@ export async function POST(req: NextRequest) {
         payload: z,
         uploadedById: session?.sub ?? null,
       });
+      invalidateDashboardCaches();
       return NextResponse.json({ ok: true, id: doc.id });
     }
 
@@ -302,6 +304,7 @@ export async function POST(req: NextRequest) {
         uploadedById: session?.sub ?? null,
       });
     }
+    invalidateDashboardCaches();
     return NextResponse.json({ ok: true, id: doc.id });
   } catch (e) {
     if (e instanceof SupplierNameRequiredError) {

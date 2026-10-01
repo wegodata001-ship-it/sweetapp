@@ -85,26 +85,6 @@ export async function loadWorkStatusBoard(
       lastSeenAt: true,
       activeTaskId: true,
       activeTaskStartedAt: true,
-      activeTask: {
-        select: {
-          id: true,
-          title: true,
-          status: true,
-          color: true,
-          estimatedMinutes: true,
-          startedAt: true,
-          activeWorkMs: true,
-          segmentStartedAt: true,
-          delayReason: true,
-          lateReason: true,
-          targetDueAt: true,
-          description: true,
-          materials: true,
-          taskGroupId: true,
-          employeeId: true,
-          taskGroup: { select: { title: true } },
-        },
-      },
     },
   });
   if (timings) timings.userMs = Math.round(performance.now() - userStarted);
@@ -113,43 +93,78 @@ export async function loadWorkStatusBoard(
   const employeeIds = users
     .map((user) => user.employeeId)
     .filter((id): id is string => Boolean(id));
+  const activeTaskIds = users
+    .map((user) => user.activeTaskId)
+    .filter((id): id is string => Boolean(id));
+
+  const taskStarted = performance.now();
+  const relatedTasks =
+    employeeIds.length === 0 && activeTaskIds.length === 0
+      ? []
+      : await prisma.employeeTask.findMany({
+          where: {
+            OR: [
+              ...(activeTaskIds.length > 0 ? [{ id: { in: activeTaskIds } }] : []),
+              ...(employeeIds.length > 0
+                ? [
+                    {
+                      employeeId: { in: employeeIds },
+                      OR: [{ startedAt: { gte: since } }, { completedAt: { gte: since } }],
+                    },
+                  ]
+                : []),
+              ...(activeTaskIds.length > 0
+                ? [
+                    {
+                      taskGroup: {
+                        tasks: {
+                          some: { id: { in: activeTaskIds }, status: "IN_PROGRESS" as const },
+                        },
+                      },
+                    },
+                  ]
+                : []),
+            ],
+          },
+          orderBy: [{ startedAt: "asc" }, { completedAt: "asc" }, { orderIndex: "asc" }],
+          select: {
+            id: true,
+            employeeId: true,
+            title: true,
+            status: true,
+            color: true,
+            estimatedMinutes: true,
+            startedAt: true,
+            completedAt: true,
+            activeWorkMs: true,
+            segmentStartedAt: true,
+            delayReason: true,
+            lateReason: true,
+            targetDueAt: true,
+            description: true,
+            materials: true,
+            taskGroupId: true,
+            taskGroup: { select: { title: true } },
+          },
+        });
+  if (timings) timings.timelineMs = Math.round(performance.now() - taskStarted);
+
+  const activeById = new Map(relatedTasks.map((task) => [task.id, task]));
   const progressKeys = users.flatMap((user) => {
-    const task = user.activeTask;
+    const task = user.activeTaskId ? activeById.get(user.activeTaskId) : undefined;
     if (!task || task.status !== "IN_PROGRESS" || !task.taskGroupId) return [];
     return [{ taskGroupId: task.taskGroupId, employeeId: task.employeeId }];
   });
 
-  const [timelineTasks, groupTasks] = await Promise.all([
-    (async () => {
-      const started = performance.now();
-      const rows =
-        employeeIds.length === 0
-          ? []
-          : await prisma.employeeTask.findMany({
-              where: {
-                employeeId: { in: employeeIds },
-                OR: [{ startedAt: { gte: since } }, { completedAt: { gte: since } }],
-              },
-              orderBy: [{ startedAt: "asc" }, { completedAt: "asc" }],
-              select: { employeeId: true, title: true, startedAt: true, completedAt: true },
-            });
-      if (timings) timings.timelineMs = Math.round(performance.now() - started);
-      return rows;
-    })(),
-    (async () => {
-      const started = performance.now();
-      const rows =
-        progressKeys.length === 0
-          ? []
-          : await prisma.employeeTask.findMany({
-              where: { OR: progressKeys },
-              orderBy: { orderIndex: "asc" },
-              select: { id: true, taskGroupId: true, employeeId: true },
-            });
-      if (timings) timings.groupMs = Math.round(performance.now() - started);
-      return rows;
-    })(),
-  ]);
+  const groupStarted = performance.now();
+  const groupTasks = relatedTasks.filter((task) =>
+    progressKeys.some(
+      (key) => key.taskGroupId === task.taskGroupId && key.employeeId === task.employeeId,
+    ),
+  );
+  if (timings) timings.groupMs = Math.round(performance.now() - groupStarted);
+
+  const timelineTasks = relatedTasks;
 
   const timelineByEmployee = new Map<string, typeof timelineTasks>();
   for (const task of timelineTasks) {
@@ -180,7 +195,7 @@ export async function loadWorkStatusBoard(
   const rows: WorkStatusBoardRow[] = [];
 
   for (const u of users) {
-    const task = u.activeTask;
+    const task = u.activeTaskId ? activeById.get(u.activeTaskId) : undefined;
     const presence = resolvePresenceState({
       lastSeenAt: u.lastSeenAt,
       activeTaskId: u.activeTaskId,

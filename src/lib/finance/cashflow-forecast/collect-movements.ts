@@ -1,5 +1,3 @@
-import { prisma } from "@/lib/prisma";
-import { OPEN_CHECK_STATUSES } from "@/lib/checks/types";
 import {
   parsePayload,
   type IncomeExpensePayload,
@@ -15,7 +13,9 @@ import { parseDateKey, toDateKey } from "@/lib/finance/cashflow-forecast/date-ut
 import { listManualForecastEntries } from "@/lib/finance/cashflow-forecast/forecast-manual-entries";
 import {
   loadSharedExpenseDocuments,
+  loadSharedForecastOrders,
   loadSharedIncomeDocuments,
+  loadSharedOpenChecks,
 } from "@/lib/finance/shared-forecast-reads";
 import type { ForecastSourceType } from "@/lib/finance/cashflow-forecast/types";
 
@@ -91,31 +91,9 @@ export async function collectForecastMovements(fallbackDate: string): Promise<Fo
   const checkAmountByDoc = new Map<string, number>();
 
   const [checks, incomeDocs, orders, expenseDocs, manualEntries] = await Promise.all([
-    prisma.checkPayment.findMany({
-    where: { status: { in: [...OPEN_CHECK_STATUSES] } },
-    include: {
-      customer: { select: { name: true } },
-      document: { select: { id: true, title: true } },
-    },
-  }),
+    loadSharedOpenChecks(),
     loadSharedIncomeDocuments(),
-    prisma.futureOrder.findMany({
-      where: {
-        isCompleted: false,
-        status: { notIn: ["COMPLETED", "CANCELLED"] },
-        remainingAmount: { gt: 0.01 },
-      },
-      select: {
-        id: true,
-        orderNumber: true,
-        customerName: true,
-        remainingAmount: true,
-        depositAmount: true,
-        depositPaid: true,
-        eventDate: true,
-        orderCategory: true,
-      },
-    }),
+    loadSharedForecastOrders(),
     loadSharedExpenseDocuments(),
     listManualForecastEntries(),
   ]);

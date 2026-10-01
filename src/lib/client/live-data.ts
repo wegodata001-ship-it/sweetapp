@@ -3,15 +3,19 @@
  * GET-only revalidation — never creates payments / expenses / ledger rows.
  */
 
-import { invalidateCache } from "@/lib/client/fetch-cache";
+import { invalidateCache, invalidateCacheKey } from "@/lib/client/fetch-cache";
 
 export const LIVE_REFRESH_EVENT = "wego:live-refresh";
-export const LIVE_REFRESH_INTERVAL_MS = 30_000;
+export const LIVE_REFRESH_INTERVAL_MS = 60_000;
 
 export type LiveRefreshDetail = { scope?: string };
 
 export function signalLiveRefresh(scope = "finance"): void {
   invalidateCache(scope);
+  if (scope === "finance" || scope === "*") {
+    invalidateCacheKey("dashboard-hero");
+    invalidateCacheKey("dashboard-full");
+  }
   if (typeof window === "undefined") return;
   window.dispatchEvent(
     new CustomEvent<LiveRefreshDetail>(LIVE_REFRESH_EVENT, { detail: { scope } }),

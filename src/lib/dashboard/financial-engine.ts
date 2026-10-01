@@ -73,6 +73,7 @@ export type DashboardHeroMetrics = {
   todayIncomeTotal: number;
   todayIncomeByMethod: TodayIncomeByMethod;
   todayCashIncome: number;
+  todayCashExpenses: number;
   todayExpenses: number;
   yesterdayExpenses: number;
   expenseChangeVsYesterdayPct: number | null;
@@ -83,6 +84,11 @@ export type DashboardHeroMetrics = {
   monthCashBalance: number;
   monthExpenses: number;
   monthProfit: number;
+  weekIncome: number;
+  weekIncomeByMethod: TodayIncomeByMethod;
+  weekCashIncome: number;
+  weekCashExpenses: number;
+  weekExpenses: number;
 };
 
 export type FinancialEngineResult = {
@@ -249,12 +255,18 @@ export function runFinancialEngine(
     dailyMap.set(dayKey(d), { income: 0, expenses: 0 });
   }
 
+  const weekBounds = boundsForDashboardRange("week");
   let todayIncome = 0;
   let todayExpenses = 0;
+  let todayCashExpenses = 0;
   let yesterdayExpenses = 0;
   let monthIncome = 0;
+  let weekIncome = 0;
+  let weekExpenses = 0;
+  let weekCashExpenses = 0;
   const todayIncomeByMethod: TodayIncomeByMethod = { cash: 0, card: 0, check: 0, other: 0 };
   const monthIncomeByMethod: TodayIncomeByMethod = { cash: 0, card: 0, check: 0, other: 0 };
+  const weekIncomeByMethod: TodayIncomeByMethod = { cash: 0, card: 0, check: 0, other: 0 };
   let monthCashExpenses = 0;
   let monthExpenses = 0;
   let prevMonthIncome = 0;
@@ -282,10 +294,17 @@ export function runFinancialEngine(
     if (inRange(ed, today0, todayEnd)) {
       todayIncome += row.inflow;
       todayExpenses += row.outflow;
-      if (row.inflow > 0) {
-        const bucket = zPaymentBucket(raw.paymentMethod);
-        todayIncomeByMethod[bucket] += row.inflow;
-      }
+      const todayBucket = zPaymentBucket(raw.paymentMethod);
+      if (row.inflow > 0) todayIncomeByMethod[todayBucket] += row.inflow;
+      if (row.outflow > 0 && todayBucket === "cash") todayCashExpenses += row.outflow;
+    }
+
+    if (inRange(ed, weekBounds.from, weekBounds.to)) {
+      weekIncome += row.inflow;
+      weekExpenses += row.outflow;
+      const weekBucket = zPaymentBucket(raw.paymentMethod);
+      if (row.inflow > 0) weekIncomeByMethod[weekBucket] += row.inflow;
+      if (row.outflow > 0 && weekBucket === "cash") weekCashExpenses += row.outflow;
     }
 
     if (inRange(ed, yesterday0, yesterdayEnd)) {
@@ -390,6 +409,7 @@ export function runFinancialEngine(
       todayIncomeTotal: todayIncome,
       todayIncomeByMethod,
       todayCashIncome: todayIncomeByMethod.cash,
+      todayCashExpenses,
       todayExpenses,
       yesterdayExpenses,
       expenseChangeVsYesterdayPct: pctChange(todayExpenses, yesterdayExpenses),
@@ -400,6 +420,11 @@ export function runFinancialEngine(
       monthCashBalance: monthCashIncome - monthCashExpenses,
       monthExpenses,
       monthProfit,
+      weekIncome,
+      weekIncomeByMethod,
+      weekCashIncome: weekIncomeByMethod.cash,
+      weekCashExpenses,
+      weekExpenses,
     },
     newCustomers: 0,
   };

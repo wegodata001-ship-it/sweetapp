@@ -64,6 +64,8 @@ export async function DELETE(
     }, cancelledAt);
 
     await logActivity(session.sub, "order_payment_cancel");
+    const { invalidateDashboardCaches } = await import("@/lib/dashboard/invalidate");
+    invalidateDashboardCaches();
     return NextResponse.json({ ok: true, data: updated });
   } catch (e) {
     return NextResponse.json(

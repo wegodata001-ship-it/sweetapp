@@ -32,7 +32,7 @@ export async function getAdminNotificationWidgets(): Promise<AdminNotificationWi
   const orderMax = new Date();
   orderMax.setDate(orderMax.getDate() + 2);
 
-  const [shifts, attendances, overdueTasks, pendingChecks, upcomingOrders] = await Promise.all([
+  const [shifts, attendances, counts] = await Promise.all([
     prisma.workShift.findMany({
       where: { workDate, status: "scheduled" },
       include: { user: { select: { isActive: true } } },
@@ -41,23 +41,25 @@ export async function getAdminNotificationWidgets(): Promise<AdminNotificationWi
       where: { workDate },
       select: { userId: true },
     }),
-    prisma.taskGroup.count({
-      where: {
-        dueDate: { lt: today },
-        status: { notIn: ["COMPLETED", "ARCHIVED"] },
-      },
-    }),
-    prisma.checkPayment.count({
-      where: { status: "PENDING", dueDate: { lte: horizon } },
-    }),
-    prisma.futureOrder.count({
-      where: {
-        isCompleted: false,
-        status: { notIn: ["COMPLETED", "CANCELLED"] },
-        eventDate: { gte: today, lte: orderMax },
-      },
-    }),
+    prisma.$queryRaw<
+      Array<{ overdue_tasks: number; pending_checks: number; upcoming_orders: number }>
+    >`
+      SELECT
+        (SELECT count(*)::int FROM "TaskGroup"
+          WHERE "dueDate" < ${today}
+            AND status NOT IN ('COMPLETED', 'ARCHIVED')) AS overdue_tasks,
+        (SELECT count(*)::int FROM "CheckPayment"
+          WHERE status = 'PENDING' AND "dueDate" <= ${horizon}) AS pending_checks,
+        (SELECT count(*)::int FROM "FutureOrder"
+          WHERE "isCompleted" = false
+            AND status NOT IN ('COMPLETED', 'CANCELLED')
+            AND "eventDate" >= ${today}
+            AND "eventDate" <= ${orderMax}) AS upcoming_orders
+    `,
   ]);
+  const overdueTasks = Number(counts[0]?.overdue_tasks ?? 0);
+  const pendingChecks = Number(counts[0]?.pending_checks ?? 0);
+  const upcomingOrders = Number(counts[0]?.upcoming_orders ?? 0);
 
   const attSet = new Set(attendances.map((a) => a.userId));
   let lateEmployees = 0;

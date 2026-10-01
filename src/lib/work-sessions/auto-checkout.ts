@@ -58,8 +58,18 @@ function cutoff(now: Date): Date {
  * shift that was already open when the bound was computed.
  * Calls that pass an explicit `now` do not read or write this.
  */
-let noShiftDueBeforeMs = 0;
-const noUserShiftDueBeforeMs = new Map<string, number>();
+const enforceCache = globalThis as unknown as {
+  noShiftDueBeforeMs?: number;
+  noUserShiftDueBeforeMs?: Map<string, number>;
+  enforceInflight?: Map<string, Promise<AutoCheckoutChange[]>>;
+};
+
+let noShiftDueBeforeMs = enforceCache.noShiftDueBeforeMs ?? 0;
+const noUserShiftDueBeforeMs =
+  enforceCache.noUserShiftDueBeforeMs ?? new Map<string, number>();
+const enforceInflight = enforceCache.enforceInflight ?? new Map<string, Promise<AutoCheckoutChange[]>>();
+enforceCache.noUserShiftDueBeforeMs = noUserShiftDueBeforeMs;
+enforceCache.enforceInflight = enforceInflight;
 
 function shiftDueCached(userId: string | undefined, nowMs: number): boolean {
   if (nowMs < noShiftDueBeforeMs) return true;
@@ -73,7 +83,29 @@ function shiftDueCached(userId: string | undefined, nowMs: number): boolean {
 function rememberNoShiftDue(userId: string | undefined, earliestOpen: Date | null, now: Date) {
   const until = earliestOpen ? earliestOpen.getTime() + MAX_SHIFT_MS : now.getTime() + MAX_SHIFT_MS;
   if (userId) noUserShiftDueBeforeMs.set(userId, until);
-  else noShiftDueBeforeMs = until;
+  else {
+    noShiftDueBeforeMs = until;
+    enforceCache.noShiftDueBeforeMs = until;
+  }
+}
+
+async function earliestOpenClockIn(userId?: string): Promise<Date | null> {
+  const rows = userId
+    ? await prisma.$queryRaw<Array<{ session_min: Date | null; attendance_min: Date | null }>>`
+        SELECT
+          (SELECT MIN("clockIn") FROM "WorkSession" WHERE status = 'ACTIVE' AND "clockOut" IS NULL AND "userId" = ${userId}) AS session_min,
+          (SELECT MIN("clockIn") FROM "Attendance" WHERE "clockOut" IS NULL AND "userId" = ${userId}) AS attendance_min
+      `
+    : await prisma.$queryRaw<Array<{ session_min: Date | null; attendance_min: Date | null }>>`
+        SELECT
+          (SELECT MIN("clockIn") FROM "WorkSession" WHERE status = 'ACTIVE' AND "clockOut" IS NULL) AS session_min,
+          (SELECT MIN("clockIn") FROM "Attendance" WHERE "clockOut" IS NULL) AS attendance_min
+      `;
+  const openAt = [rows[0]?.session_min, rows[0]?.attendance_min]
+    .map(asClockIn)
+    .filter((value: Date | null): value is Date => value != null);
+  if (openAt.length === 0) return null;
+  return new Date(Math.min(...openAt.map((value) => value.getTime())));
 }
 
 async function notifyAutoCheckout(userId: string, employeeName: string, dedupeId: string) {
@@ -347,28 +379,27 @@ export async function enforceMaxShiftLength(options?: {
   userId?: string;
   now?: Date;
 }): Promise<AutoCheckoutChange[]> {
+  const key = `${options?.userId ?? "*"}:${options?.now?.getTime() ?? "live"}`;
+  const pending = enforceInflight.get(key);
+  if (pending) return pending;
+  const job = enforceMaxShiftLengthUncached(options).finally(() => {
+    enforceInflight.delete(key);
+  });
+  enforceInflight.set(key, job);
+  return job;
+}
+
+async function enforceMaxShiftLengthUncached(options?: {
+  userId?: string;
+  now?: Date;
+}): Promise<AutoCheckoutChange[]> {
   const now = options?.now ?? new Date();
   const userFilter = options?.userId ? { userId: options.userId } : {};
   const cacheable = options?.now == null;
   if (cacheable && shiftDueCached(options?.userId, now.getTime())) return [];
 
   if (cacheable) {
-    const [sessionMin, attendanceMin] = await Promise.all([
-      prismaAny.workSession.aggregate({
-        where: { ...userFilter, status: "ACTIVE", clockOut: null },
-        _min: { clockIn: true },
-      }),
-      prisma.attendance.aggregate({
-        where: { ...userFilter, clockOut: null },
-        _min: { clockIn: true },
-      }),
-    ]);
-    const openAt = [sessionMin?._min?.clockIn, attendanceMin?._min?.clockIn]
-      .map(asClockIn)
-      .filter((value: Date | null): value is Date => value != null);
-    const earliest = openAt.length
-      ? new Date(Math.min(...openAt.map((value) => value.getTime())))
-      : null;
+    const earliest = await earliestOpenClockIn(options?.userId);
     if (!earliest || earliest.getTime() > cutoff(now).getTime()) {
       rememberNoShiftDue(options?.userId, earliest, now);
       return [];

@@ -1,13 +1,16 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Banknote, HandCoins, RefreshCw, TrendingDown, TrendingUp, Users, Wallet } from "lucide-react";
 import { CountUp } from "@/components/count-up";
 import { CustomerDebtModal, FinancialSummaryModal, OpenPayablesModal } from "@/components/dashboard/dashboard-finance-modals";
+import { DashboardTimeFilter } from "@/components/dashboard/dashboard-time-filter";
 import { useI18n } from "@/components/i18n-provider";
 import { StaffAlertsBell } from "@/components/staff-alerts-bell";
 import type { DashboardHeroMetrics } from "@/lib/dashboard/financial-engine";
+import { DEFAULT_HERO_RANGE, heroPeriodCacheKey, heroSlice } from "@/lib/dashboard/hero-period";
+import type { DashboardTimeRange } from "@/lib/dashboard/time-range";
 import styles from "./dashboard-hero.module.css";
 
 type Props = {
@@ -60,6 +63,27 @@ function MiniKpi({
 
 export function DashboardHero({ hero, updatedAt, loading, onRefresh }: Props) {
   const { t } = useI18n();
+  const [range, setRange] = useState<DashboardTimeRange>(DEFAULT_HERO_RANGE);
+  const periodKey = heroPeriodCacheKey(range, updatedAt);
+  const slice = useMemo(() => heroSlice(hero, range), [hero, range, periodKey]);
+  const incomeLabel =
+    range === "today"
+      ? t("dashboard.redesign.heroTodayIncome")
+      : range === "week"
+        ? t("dashboard.redesign.heroIncomeWeek")
+        : t("dashboard.redesign.heroIncomeMonth");
+  const cashIncomeLabel =
+    range === "today"
+      ? t("dashboard.redesign.heroCashIncomeToday")
+      : range === "week"
+        ? t("dashboard.redesign.heroCashIncomeWeek")
+        : t("dashboard.redesign.heroCashIncomeMonth");
+  const expensesLabel =
+    range === "today"
+      ? t("dashboard.redesign.heroExpensesToday")
+      : range === "week"
+        ? t("dashboard.redesign.heroExpensesWeek")
+        : t("dashboard.redesign.heroExpensesMonth");
   const [debtTotal, setDebtTotal] = useState(0);
   const [debtCount, setDebtCount] = useState(0);
   const [debtOpen, setDebtOpen] = useState(false);
@@ -111,17 +135,20 @@ export function DashboardHero({ hero, updatedAt, loading, onRefresh }: Props) {
       </div>
 
       <div className={styles.toolbar}>
-        <span className={styles.toolBtn}>
-          {t("dashboard.redesign.lastUpdate")}: {timeLabel}
-        </span>
-        <button type="button" className={styles.toolBtn} onClick={() => setSummaryOpen(true)}>
-          {t("dashboard.redesign.financialSummary")}
-        </button>
-        <button type="button" className={styles.toolBtn} onClick={onRefresh} disabled={loading}>
-          <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} aria-hidden />
-          {t("dashboard.redesign.refresh")}
-        </button>
-        <StaffAlertsBell />
+        <DashboardTimeFilter value={range} onChange={setRange} variant="hero" />
+        <div className={styles.toolbarActions}>
+          <span className={styles.toolBtn}>
+            {t("dashboard.redesign.lastUpdate")}: {timeLabel}
+          </span>
+          <button type="button" className={styles.toolBtn} onClick={() => setSummaryOpen(true)}>
+            {t("dashboard.redesign.financialSummary")}
+          </button>
+          <button type="button" className={styles.toolBtn} onClick={onRefresh} disabled={loading}>
+            <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} aria-hidden />
+            {t("dashboard.redesign.refresh")}
+          </button>
+          <StaffAlertsBell />
+        </div>
       </div>
 
       <div className={styles.body}>
@@ -137,7 +164,7 @@ export function DashboardHero({ hero, updatedAt, loading, onRefresh }: Props) {
                   <p className={styles.mainLabel}>{t("dashboard.redesign.heroCashBalanceSystem")}</p>
                 </div>
                 <p className={styles.mainAmount}>
-                  <CountUp value={hero.monthCashBalance} currency duration={1200} />
+                  <CountUp value={slice.cashBalance} currency duration={1200} />
                 </p>
               </div>
             </div>
@@ -145,14 +172,14 @@ export function DashboardHero({ hero, updatedAt, loading, onRefresh }: Props) {
             <div className={styles.miniGrid}>
               <MiniKpi
                 variant="month"
-                label={t("dashboard.redesign.heroIncomeMonth")}
-                value={hero.monthIncome}
+                label={incomeLabel}
+                value={slice.income}
                 icon={TrendingUp}
               />
               <MiniKpi
                 variant="cash"
-                label={t("dashboard.redesign.heroCashIncomeMonth")}
-                value={hero.monthCashIncome}
+                label={cashIncomeLabel}
+                value={slice.cashIncome}
                 icon={Banknote}
               />
               <MiniKpi
@@ -165,8 +192,8 @@ export function DashboardHero({ hero, updatedAt, loading, onRefresh }: Props) {
               />
               <MiniKpi
                 variant="income"
-                label={t("dashboard.redesign.heroExpensesMonth")}
-                value={hero.monthExpenses}
+                label={expensesLabel}
+                value={slice.expenses}
                 icon={TrendingDown}
               />
               <MiniKpi

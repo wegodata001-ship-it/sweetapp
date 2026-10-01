@@ -135,6 +135,8 @@ export async function POST(req: NextRequest) {
       include: CHECK_INCLUDE,
     })) as CheckRow;
 
+    const { invalidateDashboardCaches } = await import("@/lib/dashboard/invalidate");
+    invalidateDashboardCaches();
     return NextResponse.json({ ok: true, data: serializeCheck(created) });
   } catch (e) {
     return NextResponse.json(

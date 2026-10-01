@@ -42,6 +42,8 @@ export async function POST(_req: NextRequest, ctx: { params: Promise<{ id: strin
 
     if (session) await logActivity(session.sub, "check_clear");
 
+    const { invalidateDashboardCaches } = await import("@/lib/dashboard/invalidate");
+    invalidateDashboardCaches();
     return NextResponse.json({ ok: true, data: serializeCheck(updated) });
   } catch (e) {
     return NextResponse.json(

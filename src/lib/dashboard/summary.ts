@@ -1,12 +1,8 @@
-import { prisma } from "@/lib/prisma";
-import { normalizeExpenseType, type ExpenseType } from "@/lib/finance/expense-types";
-import { getAdminNotificationWidgets } from "@/lib/notifications/admin-widgets";
+import type { ExpenseType } from "@/lib/finance/expense-types";
 import { buildCashflowForecast } from "@/lib/finance/cashflow-forecast/build-forecast";
 import { formatShekel } from "@/lib/format-shekel";
-import { countOpenInvoices } from "@/lib/finance/open-invoices";
-import { loadSharedExpenseDocuments } from "@/lib/finance/shared-forecast-reads";
-import { isSystemCleanMode } from "@/lib/system/clean-mode";
-import { ORDER_CATEGORY_DAILY, ORDER_CATEGORY_WEDDING } from "@/lib/future-orders/helpers";
+import { loadDashboardSnapshot, openInvoiceCountFromDocs } from "@/lib/dashboard/snapshot";
+import { ORDER_CATEGORY_WEDDING } from "@/lib/future-orders/helpers";
 import { isDbConnectionError } from "@/lib/prisma-db-health";
 import {
   aggregateSupplierPayments,
@@ -18,9 +14,13 @@ import {
   type TodayPnl,
   type ZPosMetrics,
 } from "@/lib/dashboard/financial-engine";
-import { boundsForDashboardRange, type RangeKeyed } from "@/lib/dashboard/time-range";
-import { LATEST_COUNT_ORDER_BY } from "@/lib/inventory/count-latest";
-import { ACTIVE_COUNT_LINE_WHERE } from "@/lib/inventory/count-session-status";
+import { type RangeKeyed } from "@/lib/dashboard/time-range";
+export type DashboardSectionAudit = {
+  section: string;
+  timeMs: number;
+  dbQueries: number;
+  rowsRead: number;
+};
 
 export type WeddingSectionStats = {
   weddings: number;
@@ -64,113 +64,6 @@ export type DashboardSummary = {
   };
 };
 
-function monthStart(offset = 0) {
-  const d = new Date();
-  return new Date(d.getFullYear(), d.getMonth() + offset, 1, 0, 0, 0, 0);
-}
-
-type DashboardWindowCounts = {
-  zToday: number;
-  zWeek: number;
-  zMonth: number;
-  weddingToday: WeddingSectionStats;
-  weddingWeek: WeddingSectionStats;
-  weddingMonth: WeddingSectionStats;
-};
-
-/**
- * Same numbers as the previous 12 count queries, in one round trip.
- * docDate is a DATE column. Prisma compares it to the UTC calendar date of the JS bound.
- */
-async function loadDashboardWindowCounts(
-  today0: Date,
-  todayEnd: Date,
-  weekFrom: Date,
-  monthFrom: Date,
-): Promise<DashboardWindowCounts> {
-  const rows = await prisma.$queryRaw<
-    Array<{
-      z_today: number;
-      z_week: number;
-      z_month: number;
-      weddings_today: number;
-      weddings_week: number;
-      weddings_month: number;
-      orders_today: number;
-      orders_week: number;
-      orders_month: number;
-      documented_today: number;
-      documented_week: number;
-      documented_month: number;
-    }>
-  >`
-    SELECT
-      (SELECT count(*)::int FROM "FinancialDocument"
-        WHERE "documentType" = 'דוח Z'
-          AND (("docDate" >= (${today0} AT TIME ZONE 'UTC')::date AND "docDate" <= (${todayEnd} AT TIME ZONE 'UTC')::date)
-            OR ("docDate" IS NULL AND "createdAt" >= ${today0} AND "createdAt" <= ${todayEnd}))) AS z_today,
-      (SELECT count(*)::int FROM "FinancialDocument"
-        WHERE "documentType" = 'דוח Z'
-          AND (("docDate" >= (${weekFrom} AT TIME ZONE 'UTC')::date AND "docDate" <= (${todayEnd} AT TIME ZONE 'UTC')::date)
-            OR ("docDate" IS NULL AND "createdAt" >= ${weekFrom} AND "createdAt" <= ${todayEnd}))) AS z_week,
-      (SELECT count(*)::int FROM "FinancialDocument"
-        WHERE "documentType" = 'דוח Z'
-          AND (("docDate" >= (${monthFrom} AT TIME ZONE 'UTC')::date AND "docDate" <= (${todayEnd} AT TIME ZONE 'UTC')::date)
-            OR ("docDate" IS NULL AND "createdAt" >= ${monthFrom} AND "createdAt" <= ${todayEnd}))) AS z_month,
-      (SELECT count(*)::int FROM "FutureOrder"
-        WHERE "orderCategory" = ${ORDER_CATEGORY_WEDDING}
-          AND "createdAt" >= ${today0} AND "createdAt" <= ${todayEnd}) AS weddings_today,
-      (SELECT count(*)::int FROM "FutureOrder"
-        WHERE "orderCategory" = ${ORDER_CATEGORY_WEDDING}
-          AND "createdAt" >= ${weekFrom} AND "createdAt" <= ${todayEnd}) AS weddings_week,
-      (SELECT count(*)::int FROM "FutureOrder"
-        WHERE "orderCategory" = ${ORDER_CATEGORY_WEDDING}
-          AND "createdAt" >= ${monthFrom} AND "createdAt" <= ${todayEnd}) AS weddings_month,
-      (SELECT count(*)::int FROM "FutureOrder"
-        WHERE "orderCategory" = ${ORDER_CATEGORY_DAILY}
-          AND "createdAt" >= ${today0} AND "createdAt" <= ${todayEnd}) AS orders_today,
-      (SELECT count(*)::int FROM "FutureOrder"
-        WHERE "orderCategory" = ${ORDER_CATEGORY_DAILY}
-          AND "createdAt" >= ${weekFrom} AND "createdAt" <= ${todayEnd}) AS orders_week,
-      (SELECT count(*)::int FROM "FutureOrder"
-        WHERE "orderCategory" = ${ORDER_CATEGORY_DAILY}
-          AND "createdAt" >= ${monthFrom} AND "createdAt" <= ${todayEnd}) AS orders_month,
-      (SELECT count(*)::int FROM "FinancialDocument"
-        WHERE category = 'הכנסה' AND "sentToCpa" = true
-          AND (("docDate" >= (${today0} AT TIME ZONE 'UTC')::date AND "docDate" <= (${todayEnd} AT TIME ZONE 'UTC')::date)
-            OR ("docDate" IS NULL AND "createdAt" >= ${today0} AND "createdAt" <= ${todayEnd}))) AS documented_today,
-      (SELECT count(*)::int FROM "FinancialDocument"
-        WHERE category = 'הכנסה' AND "sentToCpa" = true
-          AND (("docDate" >= (${weekFrom} AT TIME ZONE 'UTC')::date AND "docDate" <= (${todayEnd} AT TIME ZONE 'UTC')::date)
-            OR ("docDate" IS NULL AND "createdAt" >= ${weekFrom} AND "createdAt" <= ${todayEnd}))) AS documented_week,
-      (SELECT count(*)::int FROM "FinancialDocument"
-        WHERE category = 'הכנסה' AND "sentToCpa" = true
-          AND (("docDate" >= (${monthFrom} AT TIME ZONE 'UTC')::date AND "docDate" <= (${todayEnd} AT TIME ZONE 'UTC')::date)
-            OR ("docDate" IS NULL AND "createdAt" >= ${monthFrom} AND "createdAt" <= ${todayEnd}))) AS documented_month
-  `;
-  const row = rows[0];
-  return {
-    zToday: Number(row?.z_today ?? 0),
-    zWeek: Number(row?.z_week ?? 0),
-    zMonth: Number(row?.z_month ?? 0),
-    weddingToday: {
-      weddings: Number(row?.weddings_today ?? 0),
-      orders: Number(row?.orders_today ?? 0),
-      documented: Number(row?.documented_today ?? 0),
-    },
-    weddingWeek: {
-      weddings: Number(row?.weddings_week ?? 0),
-      orders: Number(row?.orders_week ?? 0),
-      documented: Number(row?.documented_week ?? 0),
-    },
-    weddingMonth: {
-      weddings: Number(row?.weddings_month ?? 0),
-      orders: Number(row?.orders_month ?? 0),
-      documented: Number(row?.documented_month ?? 0),
-    },
-  };
-}
-
 function emptySummary(): DashboardSummary {
   const days = 14;
   const dailyChart = Array.from({ length: days }, (_, i) => {
@@ -207,6 +100,7 @@ function emptySummary(): DashboardSummary {
       todayIncomeTotal: 0,
       todayIncomeByMethod: { cash: 0, card: 0, check: 0, other: 0 },
       todayCashIncome: 0,
+      todayCashExpenses: 0,
       todayExpenses: 0,
       yesterdayExpenses: 0,
       expenseChangeVsYesterdayPct: null,
@@ -217,6 +111,11 @@ function emptySummary(): DashboardSummary {
       monthCashBalance: 0,
       monthExpenses: 0,
       monthProfit: 0,
+      weekIncome: 0,
+      weekIncomeByMethod: { cash: 0, card: 0, check: 0, other: 0 },
+      weekCashIncome: 0,
+      weekCashExpenses: 0,
+      weekExpenses: 0,
     },
     tasksChart: { onTime: 0, late: 0, early: 0 },
     supplierPayments: {
@@ -240,80 +139,17 @@ function emptySummary(): DashboardSummary {
   };
 }
 
-/** Same expense-document read the cashflow forecast uses, mapped for supplier totals. */
-async function loadSupplierExpenseDocsForDashboard() {
-  const rows = await loadSharedExpenseDocuments();
-  return rows.map((row) => ({
-    id: row.id,
-    totalAmount: row.totalAmount,
-    depositAmount: row.depositAmount,
-    paidAmount: row.paidAmount,
-    paymentStatus: row.paymentStatus,
-    metadata: row.metadata,
-    docDate: row.docDate,
-    supplierId: row.supplierId,
-    supplierName: row.supplierId ? (row.supplier?.name ?? null) : null,
-  }));
-}
-
 export type DashboardHeroSlice = Pick<
   DashboardSummary,
   "updatedAt" | "dbUnavailable" | "heroMetrics" | "todayPnl" | "monthPnl" | "strip"
 >;
 
-async function loadCashRowsWithExpenseMeta(fetchFrom: Date) {
-  const cashRows = await prisma.cashFlowEntry.findMany({
-    where: { entryDate: { gte: fetchFrom } },
-    select: {
-      entryType: true,
-      amount: true,
-      entryDate: true,
-      paymentMethod: true,
-      source: true,
-      zReportId: true,
-      expenseType: true,
-      documentId: true,
-    },
-  });
-  const docIdsNeedingType = cashRows
-    .filter((r) => !r.expenseType && r.documentId)
-    .map((r) => r.documentId as string);
-  const metaByDocId = new Map<string, ExpenseType>();
-  if (docIdsNeedingType.length > 0) {
-    const uniq = [...new Set(docIdsNeedingType)];
-    const docs = await prisma.financialDocument.findMany({
-      where: { id: { in: uniq } },
-      select: { id: true, metadata: true },
-    });
-    for (const d of docs) {
-      const meta = d.metadata as { expenseType?: unknown } | null;
-      metaByDocId.set(d.id, normalizeExpenseType(meta?.expenseType));
-    }
-  }
-  return { cashRows, metaByDocId };
-}
-
 /** כרטיס עליון — רק תזרים + מנוע כספי (מהיר יותר מ-summary מלא) */
 export async function computeDashboardHeroSlice(locale = "he"): Promise<DashboardHeroSlice> {
   try {
-    const chartFrom = new Date();
-    chartFrom.setDate(chartFrom.getDate() - 35);
-    chartFrom.setHours(0, 0, 0, 0);
-    const fetchFrom = chartFrom;
-
-    const today0 = new Date();
-    today0.setHours(0, 0, 0, 0);
-    const todayEnd = new Date(today0);
-    todayEnd.setHours(23, 59, 59, 999);
-
-    const weekFrom = boundsForDashboardRange("week").from;
-    const monthFrom = boundsForDashboardRange("month").from;
-
-    const [{ cashRows, metaByDocId }, windowCounts] = await Promise.all([
-      loadCashRowsWithExpenseMeta(fetchFrom),
-      loadDashboardWindowCounts(today0, todayEnd, weekFrom, monthFrom),
-    ]);
-    const { zToday, zWeek, zMonth, weddingToday, weddingWeek, weddingMonth } = windowCounts;
+    const snap = await loadDashboardSnapshot();
+    const { zToday, zWeek, zMonth } = snap.window;
+    const { cashRows, metaByDocId } = snap;
 
     const engine = runFinancialEngine(cashRows, metaByDocId, locale, {
       today: zToday,
@@ -356,9 +192,12 @@ export async function computeDashboardHeroSlice(locale = "he"): Promise<Dashboar
   }
 }
 
-export async function computeDashboardSummary(locale = "he"): Promise<DashboardSummary> {
+export async function computeDashboardSummary(
+  locale = "he",
+  options?: { audit?: DashboardSectionAudit[] },
+): Promise<DashboardSummary> {
   try {
-    return await loadSummary(locale);
+    return await loadSummary(locale, options?.audit);
   } catch (e) {
     if (isDbConnectionError(e)) {
       console.error("[dashboard/summary] database unreachable", e);
@@ -368,117 +207,76 @@ export async function computeDashboardSummary(locale = "he"): Promise<DashboardS
   }
 }
 
-async function loadSummary(locale: string): Promise<DashboardSummary> {
-  const chartFrom = new Date();
-  chartFrom.setDate(chartFrom.getDate() - 35);
-  chartFrom.setHours(0, 0, 0, 0);
-  const fetchFrom = chartFrom;
+async function timedSection<T>(
+  audit: DashboardSectionAudit[] | undefined,
+  section: string,
+  dbQueries: number,
+  load: () => Promise<{ value: T; rowsRead: number }>,
+): Promise<T> {
+  const started = performance.now();
+  const { value, rowsRead } = await load();
+  audit?.push({
+    section,
+    timeMs: Math.round(performance.now() - started),
+    dbQueries,
+    rowsRead,
+  });
+  return value;
+}
 
+async function loadSummary(locale: string, audit?: DashboardSectionAudit[]): Promise<DashboardSummary> {
   const today0 = new Date();
   today0.setHours(0, 0, 0, 0);
-  const todayEnd = new Date(today0);
-  todayEnd.setHours(23, 59, 59, 999);
-  const nowStart = monthStart(0);
-  const weddingHorizon = new Date(today0);
-  weddingHorizon.setDate(weddingHorizon.getDate() + 8);
-  const dailyHorizon = new Date(today0);
-  dailyHorizon.setDate(dailyHorizon.getDate() + 4);
-  const weekFrom = boundsForDashboardRange("week").from;
-  const monthFrom = boundsForDashboardRange("month").from;
 
-  const activeOrderWhere = {
-    isCompleted: false,
-    status: { notIn: ["COMPLETED", "CANCELLED"] },
-  };
+  const snap = await timedSection(audit, "SNAPSHOT", 1, async () => {
+    const value = await loadDashboardSnapshot();
+    return {
+      value,
+      rowsRead:
+        value.cashRows.length +
+        value.incomeDocs.length +
+        value.expenseDocs.length +
+        value.alertOrders.length +
+        value.employeeTasksToday.length,
+    };
+  });
+  const cashflowForecast = await timedSection(audit, "OTHER", 0, async () => {
+    const value = await buildCashflowForecast().catch(() => null);
+    return { value, rowsRead: value?.rows.length ?? 0 };
+  });
 
-  const [
-    cashPack,
-    windowCounts,
-    alertOrders,
-    employeeTasksToday,
-    supplierExpenseDocs,
-    newCustomers,
-    openInvoices,
-    shortageProducts,
-    notifyWidgets,
-    cashflowForecast,
-  ] = await Promise.all([
-    loadCashRowsWithExpenseMeta(fetchFrom),
-    loadDashboardWindowCounts(today0, todayEnd, weekFrom, monthFrom),
-    prisma.futureOrder.findMany({
-      where: {
-        ...activeOrderWhere,
-        OR: [
-          {
-            orderCategory: ORDER_CATEGORY_WEDDING,
-            eventDate: { gte: today0, lt: weddingHorizon },
-          },
-          {
-            orderCategory: ORDER_CATEGORY_WEDDING,
-            remainingAmount: { gt: 0.000001 },
-          },
-          {
-            orderCategory: ORDER_CATEGORY_WEDDING,
-            depositAmount: { lte: 0 },
-            depositPaid: false,
-          },
-          {
-            orderCategory: ORDER_CATEGORY_DAILY,
-            eventDate: { gte: today0, lt: dailyHorizon },
-          },
-        ],
-      },
-      select: {
-        id: true,
-        orderNumber: true,
-        customerName: true,
-        orderCategory: true,
-        eventDate: true,
-        depositAmount: true,
-        depositPaid: true,
-        remainingAmount: true,
-        status: true,
-        isCompleted: true,
-      },
-      take: 80,
-    }),
-    prisma.employeeTask.findMany({
-      where: {
-        OR: [
-          { completedAt: { gte: today0, lte: todayEnd } },
-          { status: { in: ["PENDING", "IN_PROGRESS"] }, targetDueAt: { lte: todayEnd } },
-        ],
-      },
-      select: { status: true, targetDueAt: true, completedAt: true },
-    }),
-    loadSupplierExpenseDocsForDashboard(),
-    prisma.customer.count({ where: { createdAt: { gte: nowStart } } }),
-    countOpenInvoices({ log: false }),
-    prisma.inventoryProduct.findMany({
-      where: { counts: { some: { difference: { lt: 0 } } } },
-      select: {
-        name: true,
-        counts: {
-          where: { difference: { lt: 0 }, ...ACTIVE_COUNT_LINE_WHERE },
-          orderBy: LATEST_COUNT_ORDER_BY,
-          take: 1,
-          select: { difference: true },
-        },
-      },
-      take: 40,
-    }),
-    isSystemCleanMode()
-      ? Promise.resolve({ lateEmployees: 0, overdueTasks: 0, pendingChecks: 0, upcomingOrders: 0 })
-      : getAdminNotificationWidgets().catch(() => ({
-          lateEmployees: 0,
-          overdueTasks: 0,
-          pendingChecks: 0,
-          upcomingOrders: 0,
-        })),
-    buildCashflowForecast().catch(() => null),
-  ]);
-  const { zToday, zWeek, zMonth, weddingToday, weddingWeek, weddingMonth } = windowCounts;
-  const { cashRows, metaByDocId } = cashPack;
+  const { zToday, zWeek, zMonth, weddingToday, weddingWeek, weddingMonth } = snap.window;
+  const { cashRows, metaByDocId } = snap;
+  const newCustomers = snap.newCustomers;
+  const notifyWidgets = snap.notifyWidgets;
+  const shortageCount = snap.shortageCount;
+  const alertOrders = snap.alertOrders;
+  const employeeTasksToday = snap.employeeTasksToday;
+  const supplierExpenseDocs = snap.expenseDocs.map((row) => ({
+    id: row.id,
+    totalAmount: row.totalAmount,
+    depositAmount: row.depositAmount,
+    paidAmount: row.paidAmount,
+    paymentStatus: row.paymentStatus,
+    metadata: row.metadata,
+    docDate: row.docDate,
+    supplierId: row.supplierId,
+    supplierName: row.supplierId ? (row.supplier?.name ?? null) : null,
+  }));
+  const openInvoices = openInvoiceCountFromDocs(snap.incomeDocs);
+  if (audit) {
+    audit.push(
+      { section: "AUTH", timeMs: 0, dbQueries: 0, rowsRead: 0 },
+      { section: "CASH", timeMs: 0, dbQueries: 0, rowsRead: snap.cashRows.length },
+      { section: "INCOME", timeMs: 0, dbQueries: 0, rowsRead: snap.incomeDocs.length },
+      { section: "EXPENSES", timeMs: 0, dbQueries: 0, rowsRead: snap.expenseDocs.length },
+      { section: "Z REPORTS", timeMs: 0, dbQueries: 0, rowsRead: 1 },
+      { section: "CUSTOMER DEBTS", timeMs: 0, dbQueries: 0, rowsRead: openInvoices },
+      { section: "SUPPLIER PAYABLES", timeMs: 0, dbQueries: 0, rowsRead: supplierExpenseDocs.length },
+      { section: "ORDERS", timeMs: 0, dbQueries: 0, rowsRead: alertOrders.length },
+      { section: "EMPLOYEE COSTS", timeMs: 0, dbQueries: 0, rowsRead: employeeTasksToday.length },
+    );
+  }
 
   const engine = runFinancialEngine(cashRows, metaByDocId, locale, {
     today: zToday,
@@ -568,17 +366,12 @@ async function loadSummary(locale: string): Promise<DashboardSummary> {
     }
   }
 
-  const shortageRows = shortageProducts.map((item) => ({
-    name: item.name,
-    diff: item.counts[0]?.difference ?? 0,
-  }));
-
-  if (shortageRows.length > 0) {
+  if (shortageCount > 0) {
     push({
       id: "inventory-shortage",
       severity: "critical",
       titleKey: "dashboard.shortageTitle",
-      detail: `${shortageRows.length}`,
+      detail: `${shortageCount}`,
       href: "/ops/inventory",
     });
   }

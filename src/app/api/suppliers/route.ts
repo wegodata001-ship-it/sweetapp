@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { invalidateDashboardCaches } from "@/lib/dashboard/invalidate";
 import { prisma } from "@/lib/prisma";
 import { requireDb } from "@/lib/api-route";
 import { findOrCreateSupplier, isDatabaseSaveError } from "@/lib/finance/supplier-resolve";
@@ -29,6 +30,7 @@ export async function POST(req: NextRequest) {
       return tx.supplier.findUnique({ where: { id: resolved.id } });
     });
     if (!row) return NextResponse.json({ ok: false, error: "חסר שם" }, { status: 400 });
+    invalidateDashboardCaches();
     return NextResponse.json({ ok: true, data: row });
   } catch (e) {
     if (isDatabaseSaveError(e)) {

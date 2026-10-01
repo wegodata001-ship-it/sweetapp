@@ -4,7 +4,7 @@ import { useI18n } from "@/components/i18n-provider";
 import type { DashboardTimeRange } from "@/lib/dashboard/time-range";
 import styles from "./dashboard-time-filter.module.css";
 
-export type DashboardTimeFilterVariant = "wedding" | "z" | "expense";
+export type DashboardTimeFilterVariant = "wedding" | "z" | "expense" | "hero";
 
 type Props = {
   value: DashboardTimeRange;
@@ -23,7 +23,13 @@ const LABEL_KEYS: Record<DashboardTimeRange, string> = {
 export function DashboardTimeFilter({ value, onChange, variant }: Props) {
   const { t } = useI18n();
   const variantClass =
-    variant === "wedding" ? styles.wedding : variant === "z" ? styles.z : styles.expense;
+    variant === "wedding"
+      ? styles.wedding
+      : variant === "z"
+        ? styles.z
+        : variant === "hero"
+          ? styles.hero
+          : styles.expense;
 
   const buttons = (
     <div className={styles.group} role="group" aria-label={t("common.filter")}>

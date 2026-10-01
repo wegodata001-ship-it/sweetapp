@@ -117,7 +117,7 @@ export function EmployeeTasksClient() {
     const h = window.setInterval(() => {
       if (document.visibilityState === "hidden") return;
       void load();
-    }, 30_000);
+    }, 45_000);
     return () => window.clearInterval(h);
   }, [load]);
 

@@ -39,6 +39,11 @@ export async function fetchWithDedupe<T>(
   loader: () => Promise<T>,
   ttlMs: number,
 ): Promise<T> {
+  if (ttlMs <= 0) {
+    store.delete(key);
+    inflight.delete(key);
+    return loader();
+  }
   const hit = getCached<T>(key);
   if (hit !== null) return hit;
 

@@ -65,6 +65,8 @@ export async function POST(_req: NextRequest, ctx: { params: Promise<{ id: strin
       actorFullName,
     });
 
+    const { invalidateDashboardCaches } = await import("@/lib/dashboard/invalidate");
+    invalidateDashboardCaches();
     return NextResponse.json({ ok: true, data: serializeCheck(updated) });
   } catch (e) {
     return NextResponse.json(

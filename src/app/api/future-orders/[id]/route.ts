@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { invalidateDashboardCaches } from "@/lib/dashboard/invalidate";
 import { prisma } from "@/lib/prisma";
 import { requireDb } from "@/lib/api-route";
 import { getSessionFromCookie } from "@/lib/auth/get-session";
@@ -151,6 +152,7 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
     }
 
     await logActivity(session.sub, "future_order_edit");
+    invalidateDashboardCaches();
     return NextResponse.json({ ok: true, data: row });
   } catch (e) {
     return NextResponse.json(
@@ -179,6 +181,7 @@ export async function DELETE(_req: NextRequest, ctx: { params: Promise<{ id: str
     }
     await prisma.futureOrder.delete({ where: { id } });
     await logActivity(session.sub, "future_order_delete");
+    invalidateDashboardCaches();
     return NextResponse.json({ ok: true });
   } catch (e) {
     return NextResponse.json(

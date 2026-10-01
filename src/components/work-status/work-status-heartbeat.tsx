@@ -2,7 +2,7 @@
 
 import { useEffect } from "react";
 
-const HEARTBEAT_MS = 25_000;
+const HEARTBEAT_MS = 45_000;
 
 /** שולח heartbeat לנוכחות LIVE */
 export function WorkStatusHeartbeat({ enabled = true }: { enabled?: boolean }) {

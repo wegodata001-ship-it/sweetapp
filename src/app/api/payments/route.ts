@@ -127,6 +127,8 @@ export async function POST(req: NextRequest) {
     }
 
     if (session) await logActivity(session.sub, "payment");
+    const { invalidateDashboardCaches } = await import("@/lib/dashboard/invalidate");
+    invalidateDashboardCaches();
     return NextResponse.json({ ok: true, data: payment });
   } catch (e) {
     return NextResponse.json(

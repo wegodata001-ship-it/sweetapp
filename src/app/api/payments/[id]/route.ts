@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { invalidateDashboardCaches } from "@/lib/dashboard/invalidate";
 import { prisma } from "@/lib/prisma";
 import { requireDb } from "@/lib/api-route";
 import { syncFinancialDocumentPaymentTotals } from "@/lib/finance/sync-document-amounts";
@@ -65,6 +66,7 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
     }
 
     const updated = await prisma.payment.findUnique({ where: { id } });
+    invalidateDashboardCaches();
     return NextResponse.json({ ok: true, data: updated });
   } catch (e) {
     return NextResponse.json(
@@ -90,6 +92,7 @@ export async function DELETE(_req: NextRequest, ctx: { params: Promise<{ id: str
       await replaceCashFlowForDocument(prev.documentId);
     }
 
+    invalidateDashboardCaches();
     return NextResponse.json({ ok: true });
   } catch (e) {
     return NextResponse.json(

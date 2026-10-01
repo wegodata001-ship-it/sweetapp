@@ -123,18 +123,90 @@ export function parseCashflowQueryFilters(searchParams: URLSearchParams): Cashfl
 }
 
 export async function listCashFlowRows(filters: CashflowListFilters): Promise<CashFlowRow[]> {
-  const rows = await prisma.cashFlowEntry.findMany({
-    orderBy: [{ entryDate: "desc" }, { createdAt: "desc" }],
+  const joined = await prisma.$queryRaw<
+    Array<{
+      id: string;
+      entryType: string;
+      amount: number;
+      description: string | null;
+      relatedDocumentId: string | null;
+      entryDate: Date;
+      isDirect: boolean;
+      createdAt: Date;
+      customerName: string | null;
+      notes: string | null;
+      paymentMethod: string | null;
+      documentId: string | null;
+      customerId: string | null;
+      paymentId: string | null;
+      source: string | null;
+      zReportId: string | null;
+      expenseType: string | null;
+      relatedOrderId: string | null;
+      orderPaymentId: string | null;
+      doc_metadata: unknown;
+      doc_supplier_id: string | null;
+      doc_employee_id: string | null;
+    }>
+  >`
+    SELECT
+      e.id, e."entryType", e.amount, e.description, e."relatedDocumentId",
+      e."entryDate", e."isDirect", e."createdAt", e."customerName", e.notes,
+      e."paymentMethod", e."documentId", e."customerId", e."paymentId",
+      e.source, e."zReportId", e."expenseType", e."relatedOrderId", e."orderPaymentId",
+      d.metadata AS doc_metadata,
+      d."supplierId" AS doc_supplier_id,
+      d."employeeId" AS doc_employee_id
+    FROM "CashFlowEntry" e
+    LEFT JOIN "FinancialDocument" d ON d.id = COALESCE(e."documentId", e."relatedDocumentId")
+    ORDER BY e."entryDate" DESC, e."createdAt" DESC
+  `;
+
+  const entries = joined.map((row) => ({
+    id: row.id,
+    entryType: row.entryType,
+    amount: Number(row.amount),
+    description: row.description,
+    relatedDocumentId: row.relatedDocumentId,
+    entryDate: row.entryDate instanceof Date ? row.entryDate : new Date(String(row.entryDate)),
+    isDirect: Boolean(row.isDirect),
+    createdAt: row.createdAt instanceof Date ? row.createdAt : new Date(String(row.createdAt)),
+    customerName: row.customerName,
+    notes: row.notes,
+    paymentMethod: row.paymentMethod,
+    documentId: row.documentId,
+    customerId: row.customerId,
+    paymentId: row.paymentId,
+    source: row.source,
+    zReportId: row.zReportId,
+    expenseType: row.expenseType,
+    relatedOrderId: row.relatedOrderId,
+    orderPaymentId: row.orderPaymentId,
+  })) as CashFlowEntry[];
+
+  const mapped = entries.map((row, index) => {
+    const base = prismaCashFlowToRow(row);
+    const doc = joined[index];
+    const meta = parsePayload(doc?.doc_metadata as unknown);
+    const expenseFromDoc =
+      !base.expense_type &&
+      rowEntryTypeKey(base.entry_type) === "expense" &&
+      meta?.kind === "expense"
+        ? normalizeExpenseType(meta.expenseType)
+        : null;
+    const supplierId =
+      doc?.doc_supplier_id?.trim() ||
+      (meta?.kind === "expense" && meta.supplierId?.trim() ? meta.supplierId.trim() : null);
+    const employeeId =
+      doc?.doc_employee_id?.trim() ||
+      (meta?.kind === "expense" && meta.employeeId?.trim() ? meta.employeeId.trim() : null);
+    return {
+      ...base,
+      expense_type: base.expense_type || expenseFromDoc,
+      supplier_id: supplierId,
+      employee_id: employeeId,
+    };
   });
-  const mapped = rows.map((row) => prismaCashFlowToRow(row));
-  const [typed, parties] = await Promise.all([
-    enrichCashFlowRowsWithExpenseType(rows, mapped),
-    enrichCashFlowRowsWithCounterparty(rows, mapped),
-  ]);
-  const merged = typed.map((row, index) => ({
-    ...row,
-    supplier_id: parties[index]?.supplier_id ?? row.supplier_id,
-    employee_id: parties[index]?.employee_id ?? row.employee_id,
-  }));
-  return applyCashflowListFilters(merged, filters);
+
+  return applyCashflowListFilters(mapped, filters);
 }

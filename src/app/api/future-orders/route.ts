@@ -211,6 +211,8 @@ export async function POST(req: NextRequest) {
     await syncOrderDepositField(row, session.sub);
 
     await logActivity(session.sub, "future_order_create");
+    const { invalidateDashboardCaches } = await import("@/lib/dashboard/invalidate");
+    invalidateDashboardCaches();
     return NextResponse.json({ ok: true, data: row });
   } catch (e) {
     return NextResponse.json(

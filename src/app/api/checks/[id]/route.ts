@@ -82,6 +82,8 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
       data,
       include: CHECK_INCLUDE,
     })) as CheckRow;
+    const { invalidateDashboardCaches } = await import("@/lib/dashboard/invalidate");
+    invalidateDashboardCaches();
     return NextResponse.json({ ok: true, data: serializeCheck(updated) });
   } catch (e) {
     return NextResponse.json(
@@ -109,6 +111,8 @@ export async function DELETE(_req: NextRequest, ctx: { params: Promise<{ id: str
       );
     }
     await prismaAny.checkPayment.delete({ where: { id } });
+    const { invalidateDashboardCaches } = await import("@/lib/dashboard/invalidate");
+    invalidateDashboardCaches();
     return NextResponse.json({ ok: true });
   } catch (e) {
     return NextResponse.json(

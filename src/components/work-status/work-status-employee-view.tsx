@@ -37,7 +37,7 @@ type MeData = {
   delayed_tasks?: Array<{ id: string; title: string; delayReason: string | null }>;
 };
 
-const POLL_MS = 15_000;
+const POLL_MS = 45_000;
 
 export function WorkStatusEmployeeView() {
   const { t, dir, bcp47 } = useI18n();

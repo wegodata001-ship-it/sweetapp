@@ -47,7 +47,6 @@ export function useLiveRefresh({
     if (!enabled) return;
     if (pausedRef.current) return;
     if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
-    if (inflightRef.current) return;
     inflightRef.current = true;
     setStatus("refreshing");
     void Promise.resolve(refreshRef.current())
@@ -64,6 +63,7 @@ export function useLiveRefresh({
 
   useEffect(() => {
     if (!enabled) return;
+    if (intervalMs <= 0) return;
     const id = window.setInterval(() => {
       if (!isDocumentVisible()) return;
       requestRefresh();

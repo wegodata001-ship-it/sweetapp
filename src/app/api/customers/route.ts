@@ -61,6 +61,8 @@ export async function POST(req: NextRequest) {
       },
       select: { id: true, name: true, phone: true, customerType: true },
     });
+    const { invalidateDashboardCaches } = await import("@/lib/dashboard/invalidate");
+    invalidateDashboardCaches();
     return NextResponse.json({ ok: true, data: row });
   } catch (e) {
     return NextResponse.json(

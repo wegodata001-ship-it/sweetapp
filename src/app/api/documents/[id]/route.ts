@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { invalidateDashboardCaches } from "@/lib/dashboard/invalidate";
 import {
   buildItemsFromIncomeExpense,
   combineIncomeNotes,
@@ -287,6 +288,7 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
       },
     });
     if (session) await logActivity(session.sub, "document_edit");
+    invalidateDashboardCaches();
     return NextResponse.json({ ok: true, data: updated ? prismaDocToFinanceRow(updated) : null });
   } catch (e) {
     if (e instanceof SupplierNameRequiredError) {
@@ -333,6 +335,7 @@ export async function DELETE(_req: NextRequest, ctx: { params: Promise<{ id: str
     await prisma.payment.deleteMany({ where: { documentId: id } });
     await prisma.financialDocument.delete({ where: { id } });
     if (session) await logActivity(session.sub, "document_delete");
+    invalidateDashboardCaches();
     return NextResponse.json({ ok: true });
   } catch (e) {
     return NextResponse.json(

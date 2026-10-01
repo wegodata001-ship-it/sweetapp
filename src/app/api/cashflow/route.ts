@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { invalidateDashboardCaches } from "@/lib/dashboard/invalidate";
 import { prisma } from "@/lib/prisma";
 import { requireDb } from "@/lib/api-route";
 import { prismaCashFlowToRow } from "@/lib/finance/cashflow-map";
@@ -72,6 +73,7 @@ export async function POST(req: NextRequest) {
         expenseType: t === "expense" && body.expenseType?.trim() ? body.expenseType.trim() : null,
       },
     });
+    invalidateDashboardCaches();
     return NextResponse.json({ ok: true, data: prismaCashFlowToRow(row) });
   } catch (e) {
     return NextResponse.json(

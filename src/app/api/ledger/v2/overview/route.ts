@@ -1,13 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
 import { requireDb } from "@/lib/api-route";
 import {
   LEDGER_V2_PAGE_SIZE_DEFAULT,
-  LEDGER_V2_SAFETY_CAP,
   aggregateLedgerV2Totals,
   buildCustomerStatements,
   customerMatchesSearch,
   filterLedgerV2Rows,
+  loadLedgerV2Sources,
   paginateLedgerV2,
   type LedgerV2SideFilter,
 } from "@/lib/finance/ledger-v2";
@@ -32,61 +31,16 @@ export async function GET(req: NextRequest) {
   );
 
   try {
-    const customers = await prisma.customer.findMany({
-      orderBy: { name: "asc" },
-      take: LEDGER_V2_SAFETY_CAP,
-      select: { id: true, name: true, phone: true, openingBalance: true },
-    });
-
+    const bundle = await loadLedgerV2Sources();
     const searched = q
-      ? customers.filter((c) => customerMatchesSearch(c, q))
-      : customers;
-    const ids = searched.map((c) => c.id);
-
-    const [documents, payments] = await Promise.all([
-      ids.length > 0
-        ? prisma.financialDocument.findMany({
-            where: { customerId: { in: ids } },
-            select: {
-              id: true,
-              customerId: true,
-              documentType: true,
-              category: true,
-              title: true,
-              totalAmount: true,
-              remainingAmount: true,
-              paymentStatus: true,
-              docDate: true,
-              createdAt: true,
-            },
-          })
-        : Promise.resolve([]),
-      ids.length > 0
-        ? prisma.payment.findMany({
-            where: { customerId: { in: ids } },
-            select: {
-              id: true,
-              customerId: true,
-              amount: true,
-              createdAt: true,
-              documentId: true,
-              document: { select: { title: true } },
-            },
-          })
-        : Promise.resolve([]),
-    ]);
+      ? bundle.customers.filter((c) => customerMatchesSearch(c, q))
+      : bundle.customers;
+    const idSet = new Set(searched.map((c) => c.id));
 
     const { rows } = buildCustomerStatements({
       customers: searched,
-      documents,
-      payments: payments.map((p) => ({
-        id: p.id,
-        customerId: p.customerId,
-        amount: p.amount,
-        createdAt: p.createdAt,
-        documentId: p.documentId,
-        documentTitle: p.document?.title ?? null,
-      })),
+      documents: bundle.documents.filter((d) => d.customerId && idSet.has(d.customerId)),
+      payments: bundle.payments.filter((p) => idSet.has(p.customerId)),
       dateFrom,
       dateTo,
     });

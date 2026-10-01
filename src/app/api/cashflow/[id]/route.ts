@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { invalidateDashboardCaches } from "@/lib/dashboard/invalidate";
 import { prisma } from "@/lib/prisma";
 import { requireDb } from "@/lib/api-route";
 import { prismaCashFlowToRow } from "@/lib/finance/cashflow-map";
@@ -56,6 +57,7 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
       },
     });
 
+    invalidateDashboardCaches();
     return NextResponse.json({ ok: true, data: prismaCashFlowToRow(updated) });
   } catch (e) {
     return NextResponse.json(
@@ -71,6 +73,7 @@ export async function DELETE(_req: NextRequest, ctx: { params: Promise<{ id: str
   const { id } = await ctx.params;
   try {
     await prisma.cashFlowEntry.delete({ where: { id } });
+    invalidateDashboardCaches();
     return NextResponse.json({ ok: true });
   } catch (e) {
     return NextResponse.json(

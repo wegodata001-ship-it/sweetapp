@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { invalidateDashboardCaches } from "@/lib/dashboard/invalidate";
 import { prisma } from "@/lib/prisma";
 import { requireDb } from "@/lib/api-route";
 
@@ -29,6 +30,7 @@ export async function PATCH(req: NextRequest) {
       create: { id: 1, cashOpeningBalance: body.cashOpeningBalance },
       update: { cashOpeningBalance: body.cashOpeningBalance },
     });
+    invalidateDashboardCaches();
     return NextResponse.json({ ok: true, cashOpeningBalance: row.cashOpeningBalance });
   } catch (e) {
     return NextResponse.json(

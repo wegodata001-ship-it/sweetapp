@@ -25,7 +25,7 @@ export function normalizeDatabaseUrl(raw: string): string {
     if (u.port === "6543" || u.hostname.includes("pooler")) {
       if (!u.searchParams.has("pgbouncer")) u.searchParams.set("pgbouncer", "true");
       if (!u.searchParams.has("connection_limit")) {
-        u.searchParams.set("connection_limit", "10");
+        u.searchParams.set("connection_limit", "1");
       }
     }
     if (!u.searchParams.has("connect_timeout")) {

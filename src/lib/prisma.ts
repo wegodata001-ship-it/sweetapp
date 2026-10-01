@@ -22,13 +22,10 @@ function buildPrismaClient(): PrismaClient {
 }
 
 export const prisma = globalForPrisma.prisma ?? buildPrismaClient();
+globalForPrisma.prisma = prisma;
 
 /** גישה למודלים חדשים לפני `prisma generate` מוצלח (למשל EPERM ב־Windows) */
 export const prismaAny = prisma as any;
-
-if (process.env.NODE_ENV !== "production") {
-  globalForPrisma.prisma = prisma;
-}
 
 export async function prismaReady(): Promise<boolean> {
   return Boolean(process.env.DATABASE_URL?.trim());

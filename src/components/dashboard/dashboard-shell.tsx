@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useLiveRefresh } from "@/hooks/use-live-refresh";
 import { useI18n } from "@/components/i18n-provider";
 import type { DashboardHeroSlice, DashboardSummary } from "@/lib/dashboard/summary";
@@ -38,15 +38,21 @@ export function DashboardShell() {
   const [bodyReady, setBodyReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const abortRef = useRef<AbortController | null>(null);
+  const generationRef = useRef(0);
 
   const load = useCallback(async (opts?: { force?: boolean; isCancelled?: () => boolean }) => {
     const cancelled = () => opts?.isCancelled?.() === true;
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+    const generation = (generationRef.current += 1);
     if (opts?.force) {
       const { invalidateCacheKey } = await import("@/lib/client/fetch-cache");
       invalidateCacheKey(HERO_KEY);
       invalidateCacheKey(FULL_KEY);
     }
-    if (cancelled()) return;
+    if (cancelled() || controller.signal.aborted) return;
     setError(null);
     setRefreshing(true);
 
@@ -55,6 +61,7 @@ export function DashboardShell() {
       async () => {
         const res = await fetch("/api/dashboard/summary?section=hero", {
           credentials: "same-origin",
+          signal: controller.signal,
         });
         const json = (await res.json()) as { ok: boolean; data?: DashboardHeroSlice };
         if (!res.ok || !json.ok || !json.data) return null;
@@ -68,6 +75,7 @@ export function DashboardShell() {
       async () => {
         const res = await fetch("/api/dashboard/summary", {
           credentials: "same-origin",
+          signal: controller.signal,
         });
         const json = (await res.json()) as { ok: boolean; data?: DashboardSummary; error?: string };
         if (!res.ok || !json.ok || !json.data) {
@@ -85,7 +93,7 @@ export function DashboardShell() {
 
     try {
       const hero = await heroPromise;
-      if (cancelled()) return;
+      if (cancelled() || generation !== generationRef.current) return;
       if (hero) {
         setData((prev) =>
           prev
@@ -123,7 +131,7 @@ export function DashboardShell() {
       }
 
       const full = await fullPromise;
-      if (cancelled()) return;
+      if (cancelled() || generation !== generationRef.current) return;
       if (full) {
         setData(full);
         setBodyReady(true);
@@ -147,6 +155,7 @@ export function DashboardShell() {
   useLiveRefresh({
     refresh: () => load({ force: true }),
     scope: "finance",
+    intervalMs: 0,
   });
 
   if (!heroReady && !data) {

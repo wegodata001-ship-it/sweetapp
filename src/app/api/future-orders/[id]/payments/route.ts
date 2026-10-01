@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { invalidateDashboardCaches } from "@/lib/dashboard/invalidate";
 import { prisma, prismaAny } from "@/lib/prisma";
 import { requireDb } from "@/lib/api-route";
 import { getSessionFromCookie } from "@/lib/auth/get-session";
@@ -122,6 +123,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     });
 
     await logActivity(session.sub, "order_payment_create");
+    invalidateDashboardCaches();
     return NextResponse.json({ ok: true, data: payment });
   } catch (e) {
     return NextResponse.json(

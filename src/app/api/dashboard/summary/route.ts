@@ -2,6 +2,7 @@ import { unstable_cache } from "next/cache";
 import { NextRequest, NextResponse } from "next/server";
 import { requireDb } from "@/lib/api-route";
 import { getSessionFromCookie } from "@/lib/auth/get-session";
+import { DASHBOARD_CACHE_TAG } from "@/lib/dashboard/invalidate";
 import {
   computeDashboardSummary,
   computeDashboardHeroSlice,
@@ -13,18 +14,18 @@ import { cookies } from "next/headers";
 
 export const dynamic = "force-dynamic";
 
-const CACHE_HEADERS = { "Cache-Control": "private, max-age=20, stale-while-revalidate=40" };
+const CACHE_HEADERS = { "Cache-Control": "private, no-store" };
 
 const getCachedDashboardSummary = unstable_cache(
   async (locale: string) => computeDashboardSummary(locale),
   ["dashboard-summary"],
-  { revalidate: 20 },
+  { revalidate: 20, tags: [DASHBOARD_CACHE_TAG] },
 );
 
 const getCachedDashboardHero = unstable_cache(
   async (locale: string) => computeDashboardHeroSlice(locale),
   ["dashboard-hero"],
-  { revalidate: 20 },
+  { revalidate: 20, tags: [DASHBOARD_CACHE_TAG] },
 );
 
 export async function GET(req: NextRequest) {

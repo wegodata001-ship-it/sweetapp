@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+import { after, NextRequest, NextResponse } from "next/server";
 import { prismaAny } from "@/lib/prisma";
 import { ensureBootstrapSuperAdmin, markUsersKnownToExist } from "@/lib/auth/bootstrap";
 import { verifyPassword } from "@/lib/auth/password";
@@ -126,53 +126,35 @@ export async function POST(req: NextRequest) {
     }
 
     const joinedStarted = performance.now();
-    let activityMs = 0;
-    let auditMs = 0;
-    let enforceMs = 0;
-    const permissionsPromise = getPermissionStringsForUser(
-      user.id,
-      user.role as "EMPLOYEE" | "ADMIN" | "SUPER_ADMIN",
-    );
+    const activityMs = 0;
+    const auditMs = 0;
+    const enforceMs = 0;
     const clientMeta = requestClientMeta(req.headers);
-    const sessionPromise = (async () => {
-      const sessionStarted = performance.now();
-      const id = await createUserSession(user.id, clientMeta, {
-        role: user.role,
-        allowMultiple: user.role === "ADMIN" || user.role === "SUPER_ADMIN",
-        knownSessionIds: parseActiveSessionIds(user.currentSessionId),
+    const sessionStarted = performance.now();
+    const sessionId = await createUserSession(user.id, clientMeta, {
+      role: user.role,
+      allowMultiple: user.role === "ADMIN" || user.role === "SUPER_ADMIN",
+      knownSessionIds: parseActiveSessionIds(user.currentSessionId),
+    });
+    sessionMs = performance.now() - sessionStarted;
+    const permissions =
+      user.permissionStrings ??
+      (await getPermissionStringsForUser(
+        user.id,
+        user.role as "EMPLOYEE" | "ADMIN" | "SUPER_ADMIN",
+      ));
+    after(() => {
+      void logActivity(user.id, "login");
+      void writeAudit({
+        userId: user.id,
+        identifier: rawIdentifier,
+        action: "login_success",
+        req,
       });
-      sessionMs = performance.now() - sessionStarted;
-      return id;
-    })();
-    const [, sessionId, permissions] = await Promise.all([
-      Promise.all([
-        (async () => {
-          const t = performance.now();
-          await logActivity(user.id, "login");
-          activityMs = performance.now() - t;
-        })(),
-        (async () => {
-          const t = performance.now();
-          await writeAudit({
-            userId: user.id,
-            identifier: rawIdentifier,
-            action: "login_success",
-            req,
-          });
-          auditMs = performance.now() - t;
-        })(),
-        (async () => {
-          const t = performance.now();
-          await enforceMaxShiftLength({ userId: user.id }).catch((error) => {
-            console.error("[login] auto checkout", error);
-          });
-          enforceMs = performance.now() - t;
-        })(),
-      ]),
-      sessionPromise,
-      permissionsPromise,
-    ]);
-    afterMs = Math.max(activityMs, auditMs, enforceMs);
+      void enforceMaxShiftLength({ userId: user.id }).catch((error) => {
+        console.error("[login] auto checkout", error);
+      });
+    });
     const joinedMs = performance.now() - joinedStarted;
 
     const token = await signSessionToken({

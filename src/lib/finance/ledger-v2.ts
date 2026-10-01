@@ -3,6 +3,7 @@
  * All balances come from computeLedgerStatement via ledger-route-map.
  * No orders−payments math. No clamp that hides credit.
  */
+import { prisma } from "@/lib/prisma";
 import { normalizeSupplierName } from "@/lib/document-scan/supplier-aliases";
 import {
   computeLedgerStatement,
@@ -344,4 +345,95 @@ export function statementFromExplicitMovements(
   params: Parameters<typeof computeLedgerStatement>[0],
 ): LedgerStatement {
   return computeLedgerStatement(params);
+}
+
+export type LedgerV2SourceBundle = {
+  customers: LedgerV2CustomerInput[];
+  documents: Array<{
+    id: string;
+    customerId: string | null;
+    documentType: string;
+    category: string;
+    title: string;
+    totalAmount: number;
+    remainingAmount: number;
+    paymentStatus: string;
+    docDate: Date | null;
+    createdAt: Date;
+  }>;
+  payments: Array<{
+    id: string;
+    customerId: string;
+    amount: number;
+    createdAt: Date;
+    documentId: string | null;
+    documentTitle: string | null;
+  }>;
+};
+
+function parseJsonArray<T>(value: unknown): T[] {
+  if (Array.isArray(value)) return value as T[];
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value) as unknown;
+      return Array.isArray(parsed) ? (parsed as T[]) : [];
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
+
+export async function loadLedgerV2Sources(): Promise<LedgerV2SourceBundle> {
+  const rows = await prisma.$queryRaw<
+    Array<{ customers: unknown; documents: unknown; payments: unknown }>
+  >`
+    SELECT
+      (SELECT coalesce(json_agg(x), '[]'::json) FROM (
+        SELECT id, name, phone, "openingBalance"
+        FROM "Customer"
+        ORDER BY name ASC
+        LIMIT ${LEDGER_V2_SAFETY_CAP}
+      ) x) AS customers,
+      (SELECT coalesce(json_agg(x), '[]'::json) FROM (
+        SELECT id, "customerId", "documentType", category, title, "totalAmount",
+          "remainingAmount", "paymentStatus", "docDate", "createdAt"
+        FROM "FinancialDocument"
+        WHERE "customerId" IS NOT NULL
+      ) x) AS documents,
+      (SELECT coalesce(json_agg(x), '[]'::json) FROM (
+        SELECT p.id, p."customerId", p.amount, p."createdAt", p."documentId", d.title AS "documentTitle"
+        FROM "Payment" p
+        LEFT JOIN "FinancialDocument" d ON d.id = p."documentId"
+        WHERE p."customerId" IS NOT NULL
+      ) x) AS payments
+  `;
+  const row = rows[0];
+  const customers = parseJsonArray<Record<string, unknown>>(row?.customers).map((c) => ({
+    id: String(c.id),
+    name: String(c.name ?? ""),
+    phone: c.phone == null ? null : String(c.phone),
+    openingBalance: Number(c.openingBalance ?? 0),
+  }));
+  const documents = parseJsonArray<Record<string, unknown>>(row?.documents).map((d) => ({
+    id: String(d.id),
+    customerId: d.customerId == null ? null : String(d.customerId),
+    documentType: String(d.documentType ?? ""),
+    category: String(d.category ?? ""),
+    title: String(d.title ?? ""),
+    totalAmount: Number(d.totalAmount ?? 0),
+    remainingAmount: Number(d.remainingAmount ?? 0),
+    paymentStatus: String(d.paymentStatus ?? ""),
+    docDate: d.docDate == null ? null : new Date(String(d.docDate)),
+    createdAt: new Date(String(d.createdAt)),
+  }));
+  const payments = parseJsonArray<Record<string, unknown>>(row?.payments).map((p) => ({
+    id: String(p.id),
+    customerId: String(p.customerId),
+    amount: Number(p.amount ?? 0),
+    createdAt: new Date(String(p.createdAt)),
+    documentId: p.documentId == null ? null : String(p.documentId),
+    documentTitle: p.documentTitle == null ? null : String(p.documentTitle),
+  }));
+  return { customers, documents, payments };
 }

@@ -29,6 +29,8 @@ export async function POST(_req: NextRequest, ctx: { params: Promise<{ id: strin
       include: CHECK_INCLUDE,
     })) as CheckRow;
     if (session) await logActivity(session.sub, "check_cancel");
+    const { invalidateDashboardCaches } = await import("@/lib/dashboard/invalidate");
+    invalidateDashboardCaches();
     return NextResponse.json({ ok: true, data: serializeCheck(updated) });
   } catch (e) {
     return NextResponse.json(

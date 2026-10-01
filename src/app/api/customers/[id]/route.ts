@@ -42,6 +42,8 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
         ...(body.openingBalance !== undefined ? { openingBalance: body.openingBalance } : {}),
       },
     });
+    const { invalidateDashboardCaches } = await import("@/lib/dashboard/invalidate");
+    invalidateDashboardCaches();
     return NextResponse.json({ ok: true, data: row });
   } catch (e) {
     return NextResponse.json(
@@ -57,6 +59,8 @@ export async function DELETE(_req: NextRequest, ctx: { params: Promise<{ id: str
   const { id } = await ctx.params;
   try {
     await prisma.customer.delete({ where: { id } });
+    const { invalidateDashboardCaches } = await import("@/lib/dashboard/invalidate");
+    invalidateDashboardCaches();
     return NextResponse.json({ ok: true });
   } catch (e) {
     return NextResponse.json(

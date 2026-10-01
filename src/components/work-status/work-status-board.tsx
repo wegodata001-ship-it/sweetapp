@@ -12,7 +12,7 @@ type BoardPayload = {
   stats: { total: number; online: number; working: number };
 };
 
-const POLL_MS = 15_000;
+const POLL_MS = 45_000;
 
 const PRESENCE_RING: Record<WorkPresenceState, string> = {
   WORKING: "ring-emerald-400/80 shadow-[0_0_20px_rgba(52,211,153,0.45)]",
