@@ -216,7 +216,7 @@ export function ChangePasswordDialog({ open, onClose, forced, onSuccess }: Props
                 className="inline-flex items-center justify-center gap-2 rounded-2xl bg-luxury-gold px-5 py-2.5 text-sm font-black text-luxury-charcoal disabled:opacity-60"
               >
                 {submitting ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : null}
-                {t("auth.savePassword")}
+                {submitting ? t("common.saving") : t("auth.savePassword")}
               </button>
             </div>
           </form>

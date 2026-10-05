@@ -18,7 +18,7 @@ export default function IncomeDocumentPage() {
     const silent = Boolean(opts?.silent) && loadedOnceRef.current;
     if (!silent) setLoading(true);
     try {
-      const res = await fetch("/api/documents", { credentials: "same-origin", cache: "no-store" });
+      const res = await fetch("/api/documents?take=50&category=" + encodeURIComponent("הכנסה"), { credentials: "same-origin", cache: "no-store" });
       if (!res.ok) throw new Error("income documents failed");
       const j = (await res.json()) as { ok?: boolean; data?: FinanceDocumentRow[] };
       if (j.ok === false) throw new Error("income documents failed");

@@ -1611,9 +1611,9 @@ function ShelfCountModalInner({
   // z-200 ומעלה — מעל סרגלי המובייל של האפליקציה (header z-130, bottom nav z-120),
   // שאחרת מכסים את כפתור השמירה ואת סרגל הפעולות.
   return (
-    <div className="fixed inset-0 z-[200] flex items-stretch justify-center bg-slate-950/55 p-0 backdrop-blur-md md:items-center md:p-3 lg:p-4">
+    <div className="fixed inset-0 z-[200] flex items-stretch justify-center bg-slate-950/55 p-0 md:items-center md:p-3 lg:p-4">
       <div
-        className="flex h-[100dvh] w-full max-w-[100vw] flex-col overflow-hidden rounded-none border border-white/10 bg-white/95 shadow-[0_24px_80px_rgba(15,23,42,0.35)] backdrop-blur-xl md:h-[96dvh] md:w-full md:max-w-none md:rounded-[24px] lg:h-[95dvh] lg:w-[95vw] lg:max-w-[95vw]"
+        className="flex h-[100dvh] w-full max-w-[100vw] flex-col overflow-hidden rounded-none border border-white/10 bg-white md:h-[96dvh] md:w-full md:max-w-none md:rounded-[24px] lg:h-[95dvh] lg:w-[95vw] lg:max-w-[95vw]"
         style={
           keyboardInset > 0 ? { height: `calc(100dvh - ${keyboardInset}px)` } : undefined
         }

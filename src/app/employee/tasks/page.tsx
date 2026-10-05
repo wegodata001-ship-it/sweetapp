@@ -1,11 +1,10 @@
-import { requireActiveWorkSession } from "@/lib/work-sessions/access";
 import { EmployeeTasksClient } from "./tasks-client";
 
 /**
- * Legacy "My Tasks" (simple checklist) — kept for backward compatibility but
- * gated behind an active work-session like every other employee surface.
+ * My Tasks shell. Auth is enforced in middleware (JWT, no DB).
+ * Shift + task data come from one /api/work/my-tasks snapshot so this
+ * RSC does not add sequential DB round-trips before first paint.
  */
-export default async function EmployeeTasksPage() {
-  await requireActiveWorkSession();
+export default function EmployeeTasksPage() {
   return <EmployeeTasksClient />;
 }

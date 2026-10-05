@@ -1,5 +1,5 @@
-import type { UserRole } from "@prisma/client";
-import { prismaAny } from "@/lib/prisma";
+import { Prisma, type UserRole } from "@prisma/client";
+import { prisma, prismaAny } from "@/lib/prisma";
 import {
   notificationPriorityColumnExists,
   priorityFromMetadata,
@@ -99,70 +99,59 @@ export async function listMeNotifications(params: {
     return { rows: [], unreadCount: 0, inbox: manager ? "admin" : "employee" };
   }
 
-  const baseWhere = manager
-    ? { recipientUserId: userId, roleTarget: "ADMIN" as const }
-    : {
-        recipientUserId: userId,
-        roleTarget: "EMPLOYEE" as const,
-        type: { in: [...EMPLOYEE_INBOX_TYPES] },
-      };
-
-  const unreadWhere = {
-    ...baseWhere,
-    isRead: false,
-  };
-
   const hasPriority = await notificationPriorityColumnExists();
-  const select = hasPriority
-    ? {
-        id: true,
-        type: true,
-        title: true,
-        message: true,
-        priority: true,
-        color: true,
-        isRead: true,
-        actionUrl: true,
-        createdAt: true,
-        metadata: true,
-      }
-    : {
-        id: true,
-        type: true,
-        title: true,
-        message: true,
-        color: true,
-        isRead: true,
-        actionUrl: true,
-        createdAt: true,
-        metadata: true,
-      };
+  const employeeTypes = [...EMPLOYEE_INBOX_TYPES];
+  const typePred = manager
+    ? Prisma.empty
+    : Prisma.sql`AND type::text IN (${Prisma.join(employeeTypes.map((t) => Prisma.sql`${t}`))})`;
+  const listedReadPred = onlyUnread ? Prisma.sql`AND "isRead" = false` : Prisma.empty;
+  const roleTarget = manager ? "ADMIN" : "EMPLOYEE";
 
-  const [rawRows, unreadCount] = await Promise.all([
-    prismaAny.notification.findMany({
-      where: {
-        ...baseWhere,
-        ...(onlyUnread ? { isRead: false } : {}),
-      },
-      orderBy: { createdAt: "desc" },
-      take,
-      select,
-    }) as Promise<
-      Array<{
+  const bundled = await prisma.$queryRaw<
+    Array<{
+      rows: Array<{
         id: string;
         type: string;
         title: string;
         message: string;
-        priority?: string;
+        priority?: string | null;
         color: string | null;
         isRead: boolean;
         actionUrl: string | null;
-        createdAt: Date;
+        createdAt: string | Date;
         metadata?: unknown;
-      }>
-    >,
-    prismaAny.notification.count({ where: unreadWhere }) as Promise<number>,
-  ]);
+      }> | null;
+      unread_count: number | bigint;
+    }>
+  >`
+    SELECT
+      (
+        SELECT COALESCE(json_agg(to_jsonb(x)), '[]'::json)
+        FROM (
+          SELECT id, type, title, message,
+                 ${hasPriority ? Prisma.sql`priority,` : Prisma.empty}
+                 color, "isRead", "actionUrl", "createdAt", metadata
+          FROM "Notification"
+          WHERE "recipientUserId" = ${userId}
+            AND "roleTarget" = ${roleTarget}::"NotificationRoleTarget"
+            ${typePred}
+            ${listedReadPred}
+          ORDER BY "createdAt" DESC
+          LIMIT ${take}
+        ) x
+      ) AS rows,
+      (
+        SELECT COUNT(*)::int
+        FROM "Notification"
+        WHERE "recipientUserId" = ${userId}
+          AND "roleTarget" = ${roleTarget}::"NotificationRoleTarget"
+          AND "isRead" = false
+          ${typePred}
+      ) AS unread_count
+  `;
+
+  const rawRows = Array.isArray(bundled[0]?.rows) ? bundled[0].rows : [];
+  const unreadCount = Number(bundled[0]?.unread_count ?? 0);
 
   const rows: MeRow[] = rawRows.map((r) => ({
     id: r.id,
@@ -173,7 +162,7 @@ export async function listMeNotifications(params: {
     color: r.color,
     isRead: r.isRead,
     actionUrl: r.actionUrl,
-    createdAt: r.createdAt,
+    createdAt: r.createdAt instanceof Date ? r.createdAt : new Date(r.createdAt),
   }));
 
   logNotificationFetch({

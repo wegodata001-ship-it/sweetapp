@@ -44,7 +44,7 @@ type Props = {
   onComplete?: () => void;
   onDelay?: (reason: string) => void;
   onDelete?: () => void;
-  onSave?: (patch: EmployeeWorkTaskEditPatch) => void;
+  onSave?: (patch: EmployeeWorkTaskEditPatch) => void | boolean | Promise<void | boolean>;
   listLength?: number;
   draggable?: boolean;
   onDragStart?: () => void;
@@ -198,7 +198,10 @@ export function EmployeeWorkTaskCard({
                 {canManage ? (
                   <button
                     type="button"
-                    onClick={() => setEditOpen(true)}
+                    onClick={() => {
+                      if (editOpen) return;
+                      setEditOpen(true);
+                    }}
                     className="grid h-9 w-9 place-items-center rounded-xl border border-slate-200 bg-white text-slate-600 shadow-sm hover:bg-slate-50"
                     aria-label={t("workflows.employeeWork.editTaskAria")}
                     title={t("common.edit")}
@@ -373,9 +376,9 @@ export function EmployeeWorkTaskCard({
           task={task}
           listLength={listLength}
           onCancel={() => setEditOpen(false)}
-          onSave={(patch) => {
-            onSave?.(patch);
-            setEditOpen(false);
+          onSave={async (patch) => {
+            const ok = await onSave?.(patch);
+            if (ok !== false) setEditOpen(false);
           }}
         />
       ) : null}

@@ -119,7 +119,10 @@ export function TaskMiniCard(props: Props) {
                 {canManage ? (
                   <button
                     type="button"
-                    onClick={() => setEditOpen(true)}
+                    onClick={() => {
+                      if (editOpen) return;
+                      setEditOpen(true);
+                    }}
                     className="grid h-9 w-9 shrink-0 place-items-center rounded-xl border border-slate-200 bg-white text-slate-600 shadow-sm hover:bg-slate-50"
                     aria-label={t("workflows.cards.editAria")}
                     title={t("workflows.cards.editAria")}

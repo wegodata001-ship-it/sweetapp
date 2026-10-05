@@ -1,13 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma, prismaAny } from "@/lib/prisma";
+import { prisma } from "@/lib/prisma";
 import { requireDb } from "@/lib/api-route";
 import { getSessionFromCookie } from "@/lib/auth/get-session";
 import { logActivity } from "@/lib/activity-log";
-import { syncFinancialDocumentPaymentTotals } from "@/lib/finance/sync-document-amounts";
 import {
-  replaceCashFlowForDocument,
-  syncCashFlowForPayment,
-} from "@/lib/finance/document-side-effects";
+  PaymentDocumentNotFoundError,
+  PaymentOverLimitError,
+  saveDocumentLinkedPayment,
+  saveStandalonePayment,
+} from "@/lib/finance/save-document-payment";
 
 type CheckDetails = {
   checkNumber?: string;
@@ -68,69 +69,45 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    if (body.documentId) {
-      const doc = await prisma.financialDocument.findUnique({
-        where: { id: body.documentId },
-        select: { totalAmount: true },
-      });
-      const agg = await prisma.payment.aggregate({
-        where: { documentId: body.documentId },
-        _sum: { amount: true },
-      });
-      if (doc && (agg._sum.amount ?? 0) + body.amount > doc.totalAmount + 1e-9) {
-        return NextResponse.json(
-          { ok: false, error: "סכום התשלומים לא יכול לעלות על סה״כ המסמך" },
-          { status: 400 },
-        );
-      }
-    }
-
-    const payment = await prisma.payment.create({
-      data: {
-        customerId: body.customerId,
-        documentId: body.documentId || null,
-        amount: body.amount,
-        paymentMethod: body.paymentMethod?.trim() || null,
-        notes: body.notes?.trim() || null,
-      },
-    });
-
-    if (body.paymentMethod === "CHECK" && body.check) {
-      const c = body.check;
-      try {
-        await prismaAny.checkPayment.create({
-          data: {
-            customerId: body.customerId,
-            paymentId: payment.id,
-            documentId: body.documentId || null,
-            checkNumber: c.checkNumber!.trim(),
-            bankName: c.bankName!.trim(),
-            branch: c.branch?.trim() || null,
-            amount: body.amount,
-            dueDate: new Date(c.dueDate!),
-            notes: c.notes?.trim() || null,
-            status: "PENDING",
+    const check =
+      body.paymentMethod === "CHECK" && body.check
+        ? {
+            checkNumber: body.check.checkNumber!.trim(),
+            bankName: body.check.bankName!.trim(),
+            branch: body.check.branch?.trim() || null,
+            dueDate: new Date(body.check.dueDate!),
+            notes: body.check.notes?.trim() || null,
             createdById: session?.sub ?? null,
-          },
+          }
+        : null;
+
+    const payment = body.documentId
+      ? await saveDocumentLinkedPayment({
+          customerId: body.customerId,
+          documentId: body.documentId,
+          amount: body.amount,
+          paymentMethod: body.paymentMethod,
+          notes: body.notes,
+          check,
+        })
+      : await saveStandalonePayment({
+          customerId: body.customerId,
+          amount: body.amount,
+          paymentMethod: body.paymentMethod,
+          notes: body.notes,
         });
-      } catch {
-        /* לא חוסם תשלום אם רישום צ'ק נכשל — יישאר ב־Payment בלבד */
-      }
-    }
 
-    if (body.documentId) {
-      await syncFinancialDocumentPaymentTotals(body.documentId);
-      await syncCashFlowForPayment(payment.id);
-      await replaceCashFlowForDocument(body.documentId);
-    } else {
-      await syncCashFlowForPayment(payment.id);
-    }
-
-    if (session) await logActivity(session.sub, "payment");
+    if (session) void logActivity(session.sub, "payment");
     const { invalidateDashboardCaches } = await import("@/lib/dashboard/invalidate");
     invalidateDashboardCaches();
     return NextResponse.json({ ok: true, data: payment });
   } catch (e) {
+    if (e instanceof PaymentOverLimitError) {
+      return NextResponse.json({ ok: false, error: e.message }, { status: 400 });
+    }
+    if (e instanceof PaymentDocumentNotFoundError) {
+      return NextResponse.json({ ok: false, error: e.message }, { status: 404 });
+    }
     return NextResponse.json(
       { ok: false, error: e instanceof Error ? e.message : "שגיאה" },
       { status: 500 },

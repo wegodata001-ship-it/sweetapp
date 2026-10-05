@@ -43,18 +43,20 @@ export async function GET(req: NextRequest) {
       ];
     }
 
+    const takeRaw = Number(searchParams.get("take") ?? "50");
+    const take = Number.isFinite(takeRaw) ? Math.min(200, Math.max(1, Math.floor(takeRaw))) : 50;
     const rows = await prisma.generatedReport.findMany({
       where,
       orderBy: { createdAt: "desc" },
-      take: 500,
+      take: take + 1,
       include: {
         createdBy: { select: { id: true, fullName: true, email: true } },
       },
     });
+    const hasMore = rows.length > take;
+    const data = rows.slice(0, take).map((row) => ({ ...row, publicUrl: null, pdfUrl: null }));
 
-    const data = rows.map((row) => ({ ...row, publicUrl: null, pdfUrl: null }));
-
-    return NextResponse.json({ ok: true, data });
+    return NextResponse.json({ ok: true, data, hasMore });
   } catch (e) {
     return NextResponse.json(
       { ok: false, error: e instanceof Error ? e.message : "שגיאה" },

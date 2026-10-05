@@ -39,20 +39,19 @@ import {
   deleteFinanceDocument,
   fetchAccountantTransferLog,
   fetchFinanceDocumentsWithCounts,
+  fetchFinanceDocumentIds,
   sendAccountantDocumentsByEmail,
   setDocumentAccountantSent,
 } from "@/lib/finance/db";
 import { REPORT_TYPES } from "@/lib/pdf/constants";
 import { fetchPdfBlob, storedReportFileUrl } from "@/lib/pdf/fetch-pdf-client";
+import { ARCHIVE_INITIAL_TAKE } from "@/lib/finance/archive-list-query";
 import { DEPOSIT_STATUS_LABELS, DEPOSIT_TYPE_LABELS } from "@/lib/finance/document-payload";
 import type { AccountantTransferLogRow, FinanceDocumentRow } from "@/lib/finance/types";
 import {
-  documentMatchesArchiveCounterparty,
-  documentMatchesArchiveKind,
   parseArchiveCounterpartyKey,
   type ArchiveCounterpartyKindFilter,
 } from "@/lib/finance/counterparty-filter";
-import { isInvoiceDocumentType } from "@/lib/finance/invoice-documents";
 import { ManualReceiptArchive } from "@/components/finance/manual-receipt-archive";
 import {
   buildArchiveSelectionCsv,
@@ -194,7 +193,12 @@ export default function FinanceArchivePage() {
   const [archiveCounterpartyKindFilter, setArchiveCounterpartyKindFilter] =
     useState<ArchiveCounterpartyKindFilter>("");
   const [docQuery, setDocQuery] = useState("");
+  const [debouncedDocQuery, setDebouncedDocQuery] = useState("");
   const [invoicesOnly, setInvoicesOnly] = useState(false);
+  const [hasMoreDocs, setHasMoreDocs] = useState(false);
+  const [docsPage, setDocsPage] = useState(1);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const docsAbortRef = useRef<AbortController | null>(null);
   const [sourcePreview, setSourcePreview] = useState<{
     url: string;
     title: string;
@@ -241,22 +245,49 @@ export default function FinanceArchivePage() {
 
   const [dataReady, setDataReady] = useState(false);
   const loadedOnceRef = useRef(false);
-  const refresh = useCallback(async (opts?: { silent?: boolean }) => {
+  const refresh = useCallback(async (opts?: { silent?: boolean; page?: number; append?: boolean }) => {
+    const page = opts?.page ?? 1;
     const silent = Boolean(opts?.silent) && loadedOnceRef.current;
-    if (!silent) setLoading(true);
+    if (!silent && !opts?.append) setLoading(true);
+    if (opts?.append) setLoadingMore(true);
+    docsAbortRef.current?.abort();
+    const ac = new AbortController();
+    docsAbortRef.current = ac;
     try {
-      const { rows: list, accountantRecipientEmail: recipientEmail } =
-        await fetchFinanceDocumentsWithCounts({});
-      setRows(sortFinanceDocumentsNewestFirst(list));
+      const party = archiveCounterpartyKey ? parseArchiveCounterpartyKey(archiveCounterpartyKey) : null;
+      const { rows: list, hasMore, accountantRecipientEmail: recipientEmail } =
+        await fetchFinanceDocumentsWithCounts({
+          accountant: accountantFilter === "all" ? undefined : accountantFilter,
+          take: ARCHIVE_INITIAL_TAKE,
+          page,
+          q: debouncedDocQuery,
+          kind: archiveCounterpartyKindFilter || party?.kind || undefined,
+          partyId: party?.id,
+          invoices: invoicesOnly,
+          signal: ac.signal,
+        });
+      setRows((prev) =>
+        opts?.append ? sortFinanceDocumentsNewestFirst([...prev, ...list]) : sortFinanceDocumentsNewestFirst(list),
+      );
+      setHasMoreDocs(hasMore);
+      setDocsPage(page);
       setAccountantRecipientEmail(recipientEmail);
       loadedOnceRef.current = true;
       setDataReady(true);
-    } catch {
+    } catch (e) {
+      if (e instanceof DOMException && e.name === "AbortError") return;
       throw new Error("archive refresh failed");
     } finally {
-      if (!silent) setLoading(false);
+      if (!silent && !opts?.append) setLoading(false);
+      if (opts?.append) setLoadingMore(false);
     }
-  }, []);
+  }, [
+    accountantFilter,
+    archiveCounterpartyKey,
+    archiveCounterpartyKindFilter,
+    debouncedDocQuery,
+    invoicesOnly,
+  ]);
 
   const loadReports = useCallback(async () => {
     setReportsLoading(true);
@@ -266,6 +297,7 @@ export default function FinanceArchivePage() {
       if (reportType) params.set("type", reportType);
       if (dateFrom) params.set("dateFrom", dateFrom);
       if (dateTo) params.set("dateTo", dateTo);
+      params.set("take", "50");
       const res = await fetch(`/api/reports?${params}`, { credentials: "same-origin" });
       const j = (await res.json()) as { data?: GeneratedReportRow[] };
       setReports(sortReportsNewestFirst(j.data ?? []));
@@ -273,6 +305,11 @@ export default function FinanceArchivePage() {
       setReportsLoading(false);
     }
   }, [reportQ, reportType, dateFrom, dateTo]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDebouncedDocQuery(docQuery.trim()), 250);
+    return () => window.clearTimeout(timer);
+  }, [docQuery]);
 
   useEffect(() => {
     queueMicrotask(() => void refresh().catch(() => undefined));
@@ -294,22 +331,27 @@ export default function FinanceArchivePage() {
     [archiveCounterpartyKey],
   );
 
-  const matchingDocumentIds = useMemo(() => {
-    if (!archiveCounterpartyKindFilter && !archiveCounterpartyRef) return null;
-    return new Set(
-      rows
-        .filter((row) => {
-          if (!documentMatchesArchiveKind(row, archiveCounterpartyKindFilter)) return false;
-          if (!archiveCounterpartyRef) return true;
-          return documentMatchesArchiveCounterparty(
-            row,
-            archiveCounterpartyRef.kind,
-            archiveCounterpartyRef.id,
-          );
-        })
-        .map((row) => row.id),
-    );
-  }, [rows, archiveCounterpartyKindFilter, archiveCounterpartyRef]);
+  const [matchingDocumentIds, setMatchingDocumentIds] = useState<Set<string> | null>(null);
+
+  useEffect(() => {
+    if (!archiveCounterpartyKindFilter && !archiveCounterpartyRef && !invoicesOnly && !debouncedDocQuery) {
+      setMatchingDocumentIds(null);
+      return;
+    }
+    const ac = new AbortController();
+    void fetchFinanceDocumentIds({
+      kind: archiveCounterpartyKindFilter || archiveCounterpartyRef?.kind || undefined,
+      partyId: archiveCounterpartyRef?.id,
+      invoices: invoicesOnly,
+      q: debouncedDocQuery,
+      signal: ac.signal,
+    })
+      .then((ids) => {
+        if (!ac.signal.aborted) setMatchingDocumentIds(new Set(ids));
+      })
+      .catch(() => undefined);
+    return () => ac.abort();
+  }, [archiveCounterpartyKindFilter, archiveCounterpartyRef, invoicesOnly, debouncedDocQuery]);
 
   const markAccountantBusy = (id: string, busy: boolean) => {
     setAccountantBusyIds((prev) => {
@@ -520,38 +562,7 @@ export default function FinanceArchivePage() {
     }
     return base;
   }, [reports, matchingDocumentIds]);
-  const scopedRows = useMemo(() => {
-    const q = docQuery.trim().toLowerCase();
-    return sortFinanceDocumentsNewestFirst(rows).filter((row) => {
-      if (!documentMatchesArchiveKind(row, archiveCounterpartyKindFilter)) return false;
-      if (
-        archiveCounterpartyRef &&
-        !documentMatchesArchiveCounterparty(
-          row,
-          archiveCounterpartyRef.kind,
-          archiveCounterpartyRef.id,
-        )
-      ) {
-        return false;
-      }
-      if (invoicesOnly && !isInvoiceDocumentType(row.document_type)) return false;
-      if (!q) return true;
-      const blob = [
-        row.title,
-        row.document_type,
-        row.category,
-        row.customer_name,
-        row.supplier_name,
-        row.employee_name,
-        row.payload && "counterpartyName" in row.payload ? row.payload.counterpartyName : "",
-        row.doc_date,
-      ]
-        .filter(Boolean)
-        .join(" ")
-        .toLowerCase();
-      return blob.includes(q);
-    });
-  }, [rows, archiveCounterpartyKindFilter, archiveCounterpartyRef, invoicesOnly, docQuery]);
+  const scopedRows = useMemo(() => sortFinanceDocumentsNewestFirst(rows), [rows]);
 
   const displayCounts = useMemo(
     () => ({
@@ -1534,6 +1545,18 @@ export default function FinanceArchivePage() {
                 </div>
               </>
             )}
+            {hasMoreDocs ? (
+              <div className="mt-4 flex justify-center">
+                <button
+                  type="button"
+                  disabled={loadingMore}
+                  onClick={() => void refresh({ page: docsPage + 1, append: true }).catch(() => undefined)}
+                  className="inline-flex min-h-11 items-center rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-black text-slate-800 hover:bg-slate-50 disabled:opacity-50"
+                >
+                  {loadingMore ? t("common.loadingMore") : t("common.loadMore")}
+                </button>
+              </div>
+            ) : null}
             {invoicesOnly ? <ManualReceiptArchive query={docQuery} /> : null}
           </div>
 

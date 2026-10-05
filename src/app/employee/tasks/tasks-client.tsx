@@ -1,13 +1,15 @@
 "use client";
 
-import { KeyRound, Loader2, Timer } from "lucide-react";
+import { KeyRound, Timer } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { SerializedWorkEmployeeTask } from "@/lib/work-tasks/serialize-work-task";
+import { myTasksFingerprint } from "@/lib/work-tasks/my-tasks-snapshot";
 import { computeCountdownTimer } from "@/lib/tasks/countdown-timer";
 import { TASK_BLOCK_REASONS } from "@/lib/work-tasks/task-timing";
 import { playEmployeeSound } from "@/lib/employee-experience/sounds";
 import { computeEmployeeTaskDayStats } from "@/lib/employee-experience/task-stats";
+import { EMPLOYEE_WORK_SESSION_STARTED_AT_KEY } from "@/lib/employee-experience/storage-keys";
 import { EmployeeTaskCard } from "@/components/tasks/employee-task-card";
 import { EmployeeTasksSession } from "@/components/tasks/employee-tasks-session";
 import { EmployeeDailyProgress } from "@/components/employee/employee-daily-progress";
@@ -23,14 +25,13 @@ import {
 import { EmployeeLiveStatus } from "@/components/employee/employee-live-status";
 import { EmployeeMotivationCard } from "@/components/employee/employee-motivation-card";
 import { EmployeeProfileStrip } from "@/components/employee/employee-profile-strip";
+import { TodayMinutesLive } from "@/components/employee/today-minutes-live";
 import { ChangePasswordDialog } from "@/components/auth/change-password-dialog";
 import { useAuth } from "@/components/auth-provider";
 import { useI18n } from "@/components/i18n-provider";
 import { useToast } from "@/components/toast-provider";
 import { TaskCelebrationOverlay } from "@/components/employee/task-celebration-overlay";
-import { useAutoShiftGuard } from "@/hooks/use-auto-shift-guard";
 import { useEmployeeMiddayToast } from "@/hooks/use-employee-midday-toast";
-import { useEmployeeTodayMinutes } from "@/hooks/use-employee-today-minutes";
 
 type CompleteModalState = {
   task: SerializedWorkEmployeeTask;
@@ -38,6 +39,15 @@ type CompleteModalState = {
   completionNote: string;
   submitting: boolean;
   error: string | null;
+};
+
+type SnapshotPayload = {
+  ok?: boolean;
+  data?: SerializedWorkEmployeeTask[];
+  shift?: { clock_in: string } | null;
+  today?: { completed_minutes: number };
+  auto_closed?: boolean;
+  shift_open?: boolean;
 };
 
 function sortTasksForFocus(tasks: SerializedWorkEmployeeTask[]): SerializedWorkEmployeeTask[] {
@@ -68,9 +78,16 @@ export function EmployeeTasksClient() {
   const [pwOpen, setPwOpen] = useState(false);
   const [celebration, setCelebration] = useState(false);
   const [completedEarly, setCompletedEarly] = useState(false);
+  const [clockIn, setClockIn] = useState<string | null>(null);
+  const [completedMinutes, setCompletedMinutes] = useState(0);
   const actionLock = useRef(false);
+  const tasksRef = useRef(tasks);
+  const printRef = useRef("");
+  const tRef = useRef(t);
+  const redirectedRef = useRef(false);
+  tasksRef.current = tasks;
+  tRef.current = t;
   const forcedPw = user?.mustChangePassword === true;
-  const { todayMinutes } = useEmployeeTodayMinutes(!needAuth && !loading);
 
   const middayLine = useMemo(() => t("employee.experience.middayToast"), [t]);
   useEmployeeMiddayToast({
@@ -79,33 +96,61 @@ export function EmployeeTasksClient() {
     showToast,
     middayMessage: middayLine,
   });
-  useAutoShiftGuard(user?.role === "EMPLOYEE");
 
-  const load = useCallback(async () => {
-    setError(null);
+  const applySnapshot = useCallback((j: SnapshotPayload) => {
+    const next = j.data ?? [];
+    const print = myTasksFingerprint(next);
+    if (print !== printRef.current) {
+      printRef.current = print;
+      setTasks(next);
+    }
+    if (j.today?.completed_minutes != null) {
+      setCompletedMinutes(j.today.completed_minutes);
+    }
+    if (j.shift?.clock_in) {
+      setClockIn(j.shift.clock_in);
+      try {
+        if (!sessionStorage.getItem(EMPLOYEE_WORK_SESSION_STARTED_AT_KEY)) {
+          sessionStorage.setItem(EMPLOYEE_WORK_SESSION_STARTED_AT_KEY, j.shift.clock_in);
+        }
+      } catch {
+        /* */
+      }
+    } else {
+      setClockIn(null);
+    }
+    return j;
+  }, []);
+
+  const load = useCallback(async (opts?: { silent?: boolean }) => {
+    if (!opts?.silent) setError(null);
     try {
-      const res = await fetch(`/api/work/my-tasks?_=${Date.now()}`, {
+      const res = await fetch("/api/work/my-tasks", {
         credentials: "same-origin",
         cache: "no-store",
       });
       if (res.status === 401) {
         setNeedAuth(true);
-        setError(t("employee.tasks.loginRequiredView"));
+        setError(tRef.current("employee.tasks.loginRequiredView"));
         return;
       }
       if (res.status === 403) {
-        setError(t("employee.tasks.noPermission"));
+        setError(tRef.current("employee.tasks.noPermission"));
         return;
       }
-      const j = (await res.json()) as { data?: SerializedWorkEmployeeTask[] };
+      const j = (await res.json()) as SnapshotPayload;
       setNeedAuth(false);
-      setTasks(j.data ?? []);
+      applySnapshot(j);
+      if (j.shift_open === false && !redirectedRef.current) {
+        redirectedRef.current = true;
+        router.push(j.auto_closed ? "/employee/clock?ended=auto" : "/employee/clock");
+      }
     } catch {
-      setError(t("employee.tasks.loadError"));
+      setError(tRef.current("employee.tasks.loadError"));
     } finally {
       setLoading(false);
     }
-  }, [t]);
+  }, [applySnapshot, router]);
 
   useEffect(() => {
     queueMicrotask(() => {
@@ -116,17 +161,17 @@ export function EmployeeTasksClient() {
   useEffect(() => {
     const h = window.setInterval(() => {
       if (document.visibilityState === "hidden") return;
-      void load();
+      void load({ silent: true });
     }, 45_000);
     return () => window.clearInterval(h);
   }, [load]);
 
-  const startWork = async (id: string) => {
+  const startWork = useCallback(async (id: string) => {
     if (actionLock.current) return;
     actionLock.current = true;
     setBusyId(id);
     setError(null);
-    const snapshot = tasks;
+    const snapshot = tasksRef.current;
     const optimisticAt = new Date().toISOString();
     setTasks((current) =>
       current.map((task) =>
@@ -153,33 +198,36 @@ export function EmployeeTasksClient() {
       };
       if (res.ok && j.ok !== false && j.data) {
         const confirmed = j.data;
-        setTasks((current) => current.map((task) => (task.id === id ? { ...task, ...confirmed } : task)));
+        setTasks((current) => {
+          const next = current.map((task) => (task.id === id ? { ...task, ...confirmed } : task));
+          printRef.current = myTasksFingerprint(next);
+          return next;
+        });
         playEmployeeSound("start");
-        showToast({ tone: "success", title: t("employee.experience.taskStartedToast") });
+        showToast({ tone: "success", title: tRef.current("employee.experience.taskStartedToast") });
         return;
       }
       setTasks(snapshot);
       if (j.code === "SHIFT_ENDED") {
-        showToast({ tone: "success", title: t("employee.dashboard.autoShiftEnded") });
+        showToast({ tone: "success", title: tRef.current("employee.dashboard.autoShiftEnded") });
         router.push("/employee/clock");
-        router.refresh();
         return;
       }
-      let msg = j.error?.trim() || t("employee.tasks.errors.startFailed");
+      let msg = j.error?.trim() || tRef.current("employee.tasks.errors.startFailed");
       if (j.code === "NOT_YOUR_TASK" || j.code === "NO_EMPLOYEE_CARD") {
-        msg = t("employee.tasks.errors.ownershipMismatch");
+        msg = tRef.current("employee.tasks.errors.ownershipMismatch");
       }
       setError(msg);
     } catch {
       setTasks(snapshot);
-      setError(t("employee.tasks.errors.startFailed"));
+      setError(tRef.current("employee.tasks.errors.startFailed"));
     } finally {
       actionLock.current = false;
       setBusyId(null);
     }
-  };
+  }, [router, showToast]);
 
-  const openCompleteModal = (task: SerializedWorkEmployeeTask) => {
+  const openCompleteModal = useCallback((task: SerializedWorkEmployeeTask) => {
     setCompleteModal({
       task,
       lateReason: "",
@@ -187,7 +235,7 @@ export function EmployeeTasksClient() {
       submitting: false,
       error: null,
     });
-  };
+  }, []);
 
   const completeWork = async (task: SerializedWorkEmployeeTask, delayReason: string) => {
     const snapBefore =
@@ -231,13 +279,16 @@ export function EmployeeTasksClient() {
         const completed = raw.completedTask ?? raw.data;
         setTasks((current) => {
           const next = current.map((row) =>
-            row.id === task.id && completed ? { ...row, ...completed } : row.id === task.id
-              ? { ...row, status: "COMPLETED", completed_at: new Date().toISOString() }
-              : row,
+            row.id === task.id && completed
+              ? { ...row, ...completed }
+              : row.id === task.id
+                ? { ...row, status: "COMPLETED", completed_at: new Date().toISOString() }
+                : row,
           );
           if (raw.nextTask && !next.some((row) => row.id === raw.nextTask!.id)) {
             next.push(raw.nextTask);
           }
+          printRef.current = myTasksFingerprint(next);
           return next;
         });
         setCompleteModal(null);
@@ -252,7 +303,6 @@ export function EmployeeTasksClient() {
         setCompleteModal(null);
         showToast({ tone: "success", title: t("employee.dashboard.autoShiftEnded") });
         router.push("/employee/clock");
-        router.refresh();
         return false;
       }
       const msg =
@@ -371,14 +421,16 @@ export function EmployeeTasksClient() {
         }
       />
 
-      {!loading ? (
-        <div className="mx-3 space-y-3 sm:mx-4 sm:space-y-4">
-          <EmployeeLiveStatus activeTask={activeTask} />
-          <EmployeeDailyProgress stats={dayStats} />
-          <EmployeeMotivationCard stats={dayStats} />
-          <EmployeeProfileStrip todayMinutes={todayMinutes} stats={dayStats} />
-        </div>
-      ) : null}
+      <div className="mx-3 space-y-3 sm:mx-4 sm:space-y-4">
+        <EmployeeLiveStatus activeTask={activeTask} />
+        <EmployeeDailyProgress stats={dayStats} />
+        <EmployeeMotivationCard stats={dayStats} />
+        <TodayMinutesLive
+          completedMinutes={completedMinutes}
+          clockIn={clockIn}
+          render={(minutes) => <EmployeeProfileStrip todayMinutes={minutes} stats={dayStats} />}
+        />
+      </div>
 
       {!loading && tasks.length > 0 ? (
         <EmployeeTasksSession tasks={tasks} activeTask={activeTask} />
@@ -390,11 +442,12 @@ export function EmployeeTasksClient() {
         </p>
       ) : null}
 
-      {loading ? (
-        <div className="flex flex-col items-center justify-center gap-3 py-20 text-slate-600" role="status" aria-busy="true">
-          <Loader2 className="h-8 w-8 animate-spin text-[#2563eb]" aria-hidden />
-          <p className="text-sm font-semibold">{t("employee.tasks.loadingTasks")}</p>
-        </div>
+      {loading && tasks.length === 0 ? (
+        <ul className="mt-4 space-y-4 px-3 sm:mt-6 sm:px-4" aria-busy="true" aria-label={t("employee.tasks.loadingTasks")}>
+          {[0, 1, 2].map((i) => (
+            <li key={i} className="h-28 animate-pulse rounded-3xl bg-slate-100" />
+          ))}
+        </ul>
       ) : tasks.length === 0 ? (
         <EmployeeEmptyTasks className="mx-3 sm:mx-4" />
       ) : (
@@ -415,8 +468,8 @@ export function EmployeeTasksClient() {
                   busy={busyId === task.id}
                   canStart={canStart}
                   canComplete={canComplete}
-                  onStart={() => void startWork(task.id)}
-                  onComplete={() => openCompleteModal(task)}
+                  onStart={startWork}
+                  onComplete={openCompleteModal}
                   completedByName={user?.fullName ?? null}
                 />
               </li>
@@ -453,7 +506,7 @@ export function EmployeeTasksClient() {
             setCompleteModal((cur) => (cur ? { ...cur, lateReason, error: null } : cur))
           }
           onCompletionNoteChange={(completionNote) =>
-            setCompleteModal((cur) => (cur ? { ...cur, completionNote } : cur))
+            setCompleteModal((cur) => (cur ? { ...cur, completionNote, error: null } : cur))
           }
           onCancel={() => {
             if (!completeModal.submitting) setCompleteModal(null);

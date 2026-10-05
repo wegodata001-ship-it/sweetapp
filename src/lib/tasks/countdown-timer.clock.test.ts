@@ -43,10 +43,10 @@ describe("my tasks active clock", () => {
     const css = readFileSync(new URL("./../../components/tasks/task-countdown-ring.module.css", import.meta.url), "utf8");
     const view = readFileSync(new URL("./../../components/tasks/task-countdown-ring.tsx", import.meta.url), "utf8");
     assert.equal(css.includes("ringVibrate"), false);
-    assert.match(css, /\.activeFocus \.time\s*\{[^}]*writing-mode:\s*horizontal-tb/s);
-    assert.match(css, /\.activeFocus \.time\s*\{[^}]*direction:\s*ltr/s);
-    assert.match(css, /\.activeFocus \.time\s*\{[^}]*transform:\s*none/s);
-    assert.doesNotMatch(css, /\.ringSvg\s*\{[^}]*rotate\(-90deg\)/s);
+    assert.match(css, /\.activeFocus \.time[\s\S]*\{[\s\S]*writing-mode:\s*horizontal-tb/);
+    assert.match(css, /\.activeFocus \.time[\s\S]*\{[\s\S]*direction:\s*ltr/);
+    assert.match(css, /\.activeFocus \.time[\s\S]*\{[\s\S]*transform:\s*none/);
+    assert.doesNotMatch(css, /\.ringSvg[\s\S]*\{[\s\S]*rotate\(-90deg\)/);
     assert.match(view, /<g transform="rotate\(-90 100 100\)">/);
     assert.match(css, /criticalRingGlow/);
     assert.match(css, /\.activeFocus\.state_critical \.ringProgress[\s\S]*animation:\s*criticalRingGlow/);

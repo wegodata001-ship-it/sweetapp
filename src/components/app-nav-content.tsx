@@ -22,7 +22,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { useAuth } from "@/components/auth-provider";
 import { useI18n } from "@/components/i18n-provider";
 import type { PagePermission, PermissionKey } from "@/lib/auth/permissions";
@@ -140,37 +140,46 @@ function NavLink({
   item,
   onNavigate,
   compact,
+  pendingHref,
 }: {
   item: NavItem;
-  onNavigate?: () => void;
+  onNavigate?: (href: string) => void;
   /** מובייל drawer — כפתורים גבוהים יותר */
   compact?: boolean;
+  pendingHref?: string | null;
 }) {
   const pathname = usePathname();
   const { t } = useI18n();
   const label = t(item.labelKey);
   const prefixes = item.activePrefixes?.length ? item.activePrefixes : [item.href];
-  const active =
+  const pathActive =
     item.href === "/"
       ? pathname === "/"
       : prefixes.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
+  const pendingActive = pendingHref
+    ? item.href === "/"
+      ? pendingHref === "/"
+      : prefixes.some((prefix) => pendingHref === prefix || pendingHref.startsWith(`${prefix}/`))
+    : false;
+  const active = pendingHref ? pendingActive : pathActive;
   const Icon = item.icon;
 
   return (
     <Link
       href={item.href}
       title={label}
-      onClick={onNavigate}
-      className={`group/sidebar-item relative flex min-h-10 items-center justify-center gap-2.5 rounded-xl px-2 py-1 text-sm font-bold transition duration-300 ease-out lg:justify-start lg:px-2.5 ${
+      prefetch={false}
+      onClick={() => onNavigate?.(item.href)}
+      className={`group/sidebar-item relative flex min-h-10 items-center justify-center gap-2.5 rounded-xl px-2 py-1 text-sm font-bold transition duration-150 ease-out lg:justify-start lg:px-2.5 ${
         compact ? "min-h-11 w-full justify-start px-3 py-2" : ""
       } ${
         active
           ? "border-r-[3px] border-[#c9a227] bg-[linear-gradient(90deg,rgba(201,162,39,.22),transparent)] text-white shadow-[0_0_24px_rgba(201,162,39,0.2)]"
-          : "text-slate-300 hover:translate-x-[-3px] hover:bg-white/[0.07] hover:text-white hover:shadow-[0_0_12px_rgba(201,162,39,0.08)]"
+          : "text-slate-300 hover:bg-white/[0.07] hover:text-white active:scale-[0.99]"
       }`}
     >
       <span
-        className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border transition duration-300 ease-out group-hover/sidebar-item:scale-[1.08] ${
+        className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border transition duration-150 ease-out ${
           active
             ? "border-[#c9a227]/55 bg-[linear-gradient(135deg,#c9a227,#e8d48a)] text-[#081224] shadow-[0_0_20px_rgba(201,162,39,0.5)]"
             : "border-white/10 bg-white/[0.04] text-slate-400 group-hover/sidebar-item:border-[#c9a227]/45 group-hover/sidebar-item:text-[#c9a227] group-hover/sidebar-item:shadow-[0_0_14px_rgba(201,162,39,0.18)]"
@@ -201,6 +210,14 @@ export type AppNavContentProps = {
 
 export function AppNavContent({ onNavigate, variant = "sidebar" }: AppNavContentProps) {
   const pathname = usePathname();
+  const [pendingHref, setPendingHref] = useState<string | null>(null);
+  useEffect(() => {
+    setPendingHref(null);
+  }, [pathname]);
+  const markPending = (href: string) => {
+    setPendingHref(href);
+    onNavigate?.();
+  };
   const { t } = useI18n();
   const { user, loading } = useAuth();
   const permSet = user ? new Set(user.permissions) : new Set<string>();
@@ -276,7 +293,7 @@ export function AppNavContent({ onNavigate, variant = "sidebar" }: AppNavContent
             <SectionTitle>{t("nav.sectionEmployee")}</SectionTitle>
             <div className="space-y-1">
               {employeePortalVisible.map((item) => (
-                <NavLink key={item.href} item={item} onNavigate={onNavigate} compact={compact} />
+                <NavLink key={item.href} item={item} onNavigate={markPending} pendingHref={pendingHref} compact={compact} />
               ))}
             </div>
           </div>
@@ -287,7 +304,7 @@ export function AppNavContent({ onNavigate, variant = "sidebar" }: AppNavContent
             <SectionTitle>{t("nav.sectionFinance")}</SectionTitle>
             <div className="space-y-1">
               {financeVisible.map((item) => (
-                <NavLink key={item.href} item={item} onNavigate={onNavigate} compact={compact} />
+                <NavLink key={item.href} item={item} onNavigate={markPending} pendingHref={pendingHref} compact={compact} />
               ))}
             </div>
           </div>
@@ -298,7 +315,7 @@ export function AppNavContent({ onNavigate, variant = "sidebar" }: AppNavContent
             <SectionTitle>{t("nav.sectionManagement")}</SectionTitle>
             <div className="space-y-1">
               {managementVisible.map((item) => (
-                <NavLink key={item.href} item={item} onNavigate={onNavigate} compact={compact} />
+                <NavLink key={item.href} item={item} onNavigate={markPending} pendingHref={pendingHref} compact={compact} />
               ))}
             </div>
           </div>
@@ -311,13 +328,15 @@ export function AppNavContent({ onNavigate, variant = "sidebar" }: AppNavContent
               <Link
                 href="/employee/tasks"
                 title={t("nav.myTasks")}
-                onClick={onNavigate}
-                className={`group/sidebar-item relative flex min-h-[54px] items-center justify-center gap-3 rounded-2xl px-2 py-2 text-[15px] font-bold transition duration-300 ease-out ${
+                prefetch={false}
+                onClick={() => markPending("/employee/tasks")}
+                className={`group/sidebar-item relative flex min-h-[54px] items-center justify-center gap-3 rounded-2xl px-2 py-2 text-[15px] font-bold transition duration-150 ease-out ${
                   compact ? "w-full justify-start px-4 py-3" : "lg:justify-start lg:px-3"
                 } ${
-                  pathname === "/employee/tasks" || pathname.startsWith("/employee/tasks/")
+                  (pendingHref ?? pathname) === "/employee/tasks" ||
+                  (pendingHref ?? pathname).startsWith("/employee/tasks/")
                     ? "border-r-[3px] border-[#c9a227] bg-[linear-gradient(90deg,rgba(201,162,39,.12),transparent)] text-white shadow-sm"
-                    : "text-slate-300 hover:translate-x-[-3px] hover:bg-white/[0.06] hover:text-white"
+                    : "text-slate-300 hover:bg-white/[0.06] hover:text-white"
                 }`}
               >
                 <span
@@ -352,7 +371,8 @@ export function AppNavContent({ onNavigate, variant = "sidebar" }: AppNavContent
               permission: "financial_registration",
               icon: LayoutDashboard,
             }}
-            onNavigate={onNavigate}
+            onNavigate={markPending}
+            pendingHref={pendingHref}
             compact={compact}
           />
           {showMyTasksNav ? (
@@ -364,7 +384,8 @@ export function AppNavContent({ onNavigate, variant = "sidebar" }: AppNavContent
                 icon: CheckSquare,
                 showForAllAuthenticated: true,
               }}
-              onNavigate={onNavigate}
+              onNavigate={markPending}
+              pendingHref={pendingHref}
               compact={compact}
             />
           ) : null}
@@ -376,7 +397,7 @@ export function AppNavContent({ onNavigate, variant = "sidebar" }: AppNavContent
           <SectionTitle>{t("nav.sectionFinance")}</SectionTitle>
           <div className="space-y-0.5">
             {financeVisible.map((item) => (
-              <NavLink key={item.href} item={item} onNavigate={onNavigate} compact={compact} />
+              <NavLink key={item.href} item={item} onNavigate={markPending} pendingHref={pendingHref} compact={compact} />
             ))}
           </div>
         </div>
@@ -387,10 +408,10 @@ export function AppNavContent({ onNavigate, variant = "sidebar" }: AppNavContent
           <SectionTitle>{t("nav.sectionManagement")}</SectionTitle>
           <div className="space-y-0.5">
             {managementVisible.map((item) => (
-              <NavLink key={item.href} item={item} onNavigate={onNavigate} compact={compact} />
+              <NavLink key={item.href} item={item} onNavigate={markPending} pendingHref={pendingHref} compact={compact} />
             ))}
             {adminVisible.map((item) => (
-              <NavLink key={item.href} item={item} onNavigate={onNavigate} compact={compact} />
+              <NavLink key={item.href} item={item} onNavigate={markPending} pendingHref={pendingHref} compact={compact} />
             ))}
           </div>
         </div>

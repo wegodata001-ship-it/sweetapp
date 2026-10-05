@@ -31,6 +31,7 @@ type Props = {
   group: SerializedEmployeeTaskGroup;
   canManage: boolean;
   busy?: boolean;
+  savingTaskId?: string | null;
   defaultOpen?: boolean;
   lockMap: Map<string, TaskLockState>;
   onGroupDragStart?: () => void;
@@ -57,7 +58,7 @@ type Props = {
       targetDueAt: string;
       color: string | null;
     },
-  ) => void;
+  ) => void | boolean | Promise<void | boolean>;
   onDeleteTask: (taskId: string) => void;
   onReorderTask: (orderedIds: string[]) => void;
   onStartTask?: (taskId: string) => void;
@@ -69,6 +70,7 @@ export function EmployeeWorkGroupCard({
   group,
   canManage,
   busy,
+  savingTaskId,
   defaultOpen = false,
   lockMap,
   onGroupDragStart,
@@ -299,7 +301,7 @@ export function EmployeeWorkGroupCard({
                   key={task.id}
                   task={task}
                   canManage={canManage}
-                  busy={busy}
+                  busy={busy || savingTaskId === task.id}
                   listLength={group.tasks.length}
                   nested
                   lock={lockMap.get(task.id)}
@@ -308,17 +310,19 @@ export function EmployeeWorkGroupCard({
                   onDragOver={(e) => e.preventDefault()}
                   onDrop={() => reorderDrop(task.id)}
                   onSave={async ({ orderNumber, ...patch }) => {
-                    await onSaveTask(task.id, { ...patch, color: patch.color ?? task.color });
+                    const ok = await onSaveTask(task.id, { ...patch, color: patch.color ?? task.color });
+                    if (ok === false) return false;
                     const currentOrder = task.order_index + 1;
-                    if (orderNumber === currentOrder) return;
+                    if (orderNumber === currentOrder) return true;
                     const ids = [...group.tasks]
                       .sort((a, b) => a.order_index - b.order_index)
                       .map((x) => x.id);
                     const from = ids.indexOf(task.id);
-                    if (from < 0) return;
+                    if (from < 0) return true;
                     ids.splice(from, 1);
                     ids.splice(Math.max(0, Math.min(ids.length, orderNumber - 1)), 0, task.id);
                     onReorderTask(ids);
+                    return true;
                   }}
                   onDelete={() => onDeleteTask(task.id)}
                   onStart={

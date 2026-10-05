@@ -176,7 +176,7 @@ export function ClockInScreen() {
             ) : (
               <PlayCircle className="h-8 w-8" aria-hidden />
             )}
-            {t("employee.clockScreen.startBtn")}
+            {submitting ? t("common.starting") : t("employee.clockScreen.startBtn")}
           </button>
           <p className="mt-3 text-center text-xs font-semibold text-slate-400">
             {t("employee.clockScreen.startFooter")}

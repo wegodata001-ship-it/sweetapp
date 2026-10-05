@@ -5,7 +5,7 @@ import { canManageAllTasks } from "@/lib/tasks/task-access";
 import { strictUserId } from "@/lib/auth/strict-user-isolation";
 import { serializeWorkEmployeeTask } from "@/lib/work-tasks/serialize-work-task";
 import { completeEmployeeTaskFast, readTaskActionSession } from "@/lib/work-tasks/fast-task-actions";
-import { assertEmployeeShiftOpen } from "@/lib/work-sessions/access";
+import { enforceMaxShiftLength } from "@/lib/work-sessions/auto-checkout";
 import { notifyTaskCompleted } from "@/lib/notifications/task-flow";
 
 export const dynamic = "force-dynamic";
@@ -22,13 +22,11 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   }
 
   const { id } = await ctx.params;
-  const shift = await assertEmployeeShiftOpen(session);
-  if (!shift.ok) {
-    return NextResponse.json(
-      { ok: false, error: "יום העבודה הסתיים אוטומטית לאחר 12 שעות.", code: "SHIFT_ENDED" },
-      { status: 403 },
-    );
+  const enforceStarted = performance.now();
+  if (session.role === "EMPLOYEE") {
+    await enforceMaxShiftLength({ userId: strictUserId(session) });
   }
+  const enforceMs = Math.round(performance.now() - enforceStarted);
   const body = (await req.json().catch(() => ({}))) as { late_reason?: string | null; delay_reason?: string | null };
   const lateReason = (body.late_reason ?? body.delay_reason ?? "").toString();
 
@@ -71,7 +69,10 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
       nextTask,
       notificationSent: result.action === "COMPLETE",
     });
-    response.headers.set("Server-Timing", `auth;dur=${authMs}, db;dur=${result.dbMs}, notify;dur=0`);
+    response.headers.set(
+      "Server-Timing",
+      `auth;dur=${authMs}, enforce;dur=${enforceMs}, db;dur=${result.dbMs}, notify;dur=0`,
+    );
     return response;
   } catch (e) {
     console.error("[POST /api/work/tasks/:id/complete]", e);

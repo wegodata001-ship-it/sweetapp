@@ -22,7 +22,7 @@ export function EmployeeTasksSession({ tasks, activeTask }: EmployeeTasksSession
 
   return (
     <section
-      className="sticky top-0 z-20 -mx-3 border-b border-blue-200/60 bg-gradient-to-br from-[#2563eb]/10 via-white to-sky-50/90 px-3 py-4 shadow-[0_8px_32px_-12px_rgba(37,99,235,0.35)] backdrop-blur-md sm:-mx-4 sm:px-4 sm:py-5"
+      className="sticky top-0 z-20 -mx-3 border-b border-blue-200/60 bg-white px-3 py-4 shadow-sm sm:-mx-4 sm:px-4 sm:py-5"
       aria-label={t("employee.tasks.sessionLabel")}
     >
       <div className="rounded-2xl border border-blue-200/80 bg-white/90 p-4 shadow-sm sm:p-5">
@@ -50,7 +50,7 @@ export function EmployeeTasksSession({ tasks, activeTask }: EmployeeTasksSession
           </div>
           <div className="h-2.5 w-full overflow-hidden rounded-full bg-slate-100">
             <div
-              className="h-full rounded-full bg-gradient-to-r from-[#2563eb] to-sky-400 transition-[width] duration-500"
+              className="h-full rounded-full bg-gradient-to-r from-[#2563eb] to-sky-400 transition-[width] duration-150"
               style={{ width: `${pct}%` }}
             />
           </div>

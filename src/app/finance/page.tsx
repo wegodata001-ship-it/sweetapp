@@ -44,7 +44,7 @@ export default function FinancePortalPage() {
     try {
       const [sRes, dRes] = await Promise.all([
         fetch("/api/finance/stats", { credentials: "same-origin", cache: "no-store" }),
-        fetch("/api/documents", { credentials: "same-origin", cache: "no-store" }),
+        fetch("/api/documents?take=20&category=" + encodeURIComponent("הכנסה"), { credentials: "same-origin", cache: "no-store" }),
       ]);
       const sj = (await sRes.json()) as { ok?: boolean; data?: Stats };
       if (sj.ok && sj.data) {

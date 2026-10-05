@@ -1,3 +1,4 @@
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import type { VatMode } from "@/lib/finance/document-payload";
 
@@ -113,20 +114,66 @@ export async function searchProductPickerCatalog(params: {
     };
   }
 
-  const [supplierProducts, products] = await Promise.all([
-    prisma.supplierProduct.findMany({
-      where: nameFilter ? { productName: nameFilter } : undefined,
-      orderBy: { productName: "asc" },
-      take: fetchN,
-      select: spSelect,
-    }),
-    prisma.product.findMany({
-      where: nameFilter ? { name: nameFilter } : undefined,
-      orderBy: { name: "asc" },
-      take: fetchN,
-      select: productSelect,
-    }),
-  ]);
+  const namePredSp = nameFilter
+    ? Prisma.sql`WHERE sp."productName" ILIKE ${`%${q}%`}`
+    : Prisma.empty;
+  const namePredP = nameFilter ? Prisma.sql`WHERE p.name ILIKE ${`%${q}%`}` : Prisma.empty;
+  const raw = await prisma.$queryRaw<
+    Array<{
+      src: "sp" | "p";
+      id: string;
+      name: string;
+      last_price: number | null;
+      unit: string | null;
+      supplier_id: string | null;
+      supplier_name: string | null;
+      supplier_product_id: string | null;
+      product_id: string | null;
+    }>
+  >`
+    (
+      SELECT
+        'sp'::text AS src,
+        sp.id,
+        sp."productName" AS name,
+        COALESCE(NULLIF(ph.price, 0), sp."regularPrice") AS last_price,
+        sp.unit,
+        sp."supplierId" AS supplier_id,
+        s.name AS supplier_name,
+        sp.id AS supplier_product_id,
+        NULL::text AS product_id
+      FROM "SupplierProduct" sp
+      INNER JOIN "Supplier" s ON s.id = sp."supplierId"
+      LEFT JOIN LATERAL (
+        SELECT h.price
+        FROM "SupplierProductPriceHistory" h
+        WHERE h."supplierProductId" = sp.id
+        ORDER BY h."recordedAt" DESC
+        LIMIT 1
+      ) ph ON true
+      ${namePredSp}
+      ORDER BY sp."productName" ASC
+      LIMIT ${fetchN}
+    )
+    UNION ALL
+    (
+      SELECT
+        'p'::text AS src,
+        p.id,
+        p.name,
+        0::double precision AS last_price,
+        NULL::text AS unit,
+        p."supplierId" AS supplier_id,
+        s.name AS supplier_name,
+        NULL::text AS supplier_product_id,
+        p.id AS product_id
+      FROM "Product" p
+      LEFT JOIN "Supplier" s ON s.id = p."supplierId"
+      ${namePredP}
+      ORDER BY p.name ASC
+      LIMIT ${fetchN}
+    )
+  `;
 
   const byNorm = new Map<string, ProductPickerRow>();
   const merged: ProductPickerRow[] = [];
@@ -138,8 +185,29 @@ export async function searchProductPickerCatalog(params: {
     merged.push(row);
   };
 
-  for (const sp of supplierProducts) push(rowFromSupplierProduct(sp));
-  for (const p of products) push(rowFromProduct(p));
+  for (const row of raw) {
+    if (row.src === "sp") {
+      const price = Number(row.last_price ?? 0);
+      push({
+        key: `sp:${row.id}`,
+        name: row.name,
+        lastPrice: price,
+        unit: row.unit,
+        supplierId: row.supplier_id,
+        supplierName: row.supplier_name,
+        supplierProductId: row.supplier_product_id,
+        productId: null,
+        vatMode: "includes_vat",
+      });
+    } else {
+      push(rowFromProduct({
+        id: row.id,
+        name: row.name,
+        supplierId: row.supplier_id,
+        supplier: row.supplier_name ? { name: row.supplier_name } : null,
+      }));
+    }
+  }
 
   merged.sort((a, b) => a.name.localeCompare(b.name, "he"));
   const page = merged.slice(skip, skip + take + 1);

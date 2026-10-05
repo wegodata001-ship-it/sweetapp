@@ -64,6 +64,7 @@ export function EmployeeWorkHub({
   const [day, setDay] = useState<SerializedEmployeeWorkDay | null>(null);
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [savingTaskId, setSavingTaskId] = useState<string | null>(null);
   const [groupOpen, setGroupOpen] = useState(false);
   const [addTaskOpen, setAddTaskOpen] = useState(false);
   const [newTitle, setNewTitle] = useState("");
@@ -81,6 +82,12 @@ export function EmployeeWorkHub({
   } | null>(null);
   const dayFetchRef = useRef<AbortController | null>(null);
   const loadDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const loadGenRef = useRef(0);
+  const saveLockRef = useRef(false);
+  const tRef = useRef(t);
+  const toastRef = useRef(showToast);
+  tRef.current = t;
+  toastRef.current = showToast;
 
   const loadEmployees = useCallback(async () => {
     const res = await fetch("/api/employees?forWorkOrder=1", { credentials: "same-origin" });
@@ -103,6 +110,7 @@ export function EmployeeWorkHub({
         if (cached) setDay(cached);
       }
 
+      const gen = ++loadGenRef.current;
       dayFetchRef.current?.abort();
       const ac = new AbortController();
       dayFetchRef.current = ac;
@@ -122,7 +130,7 @@ export function EmployeeWorkHub({
           error?: string;
         };
         if (!j.ok) {
-          showToast({ tone: "error", title: j.error ?? t("common.error") });
+          toastRef.current({ tone: "error", title: j.error ?? tRef.current("common.error") });
           if (!getCached(cacheKey)) setDay(null);
           return;
         }
@@ -134,10 +142,10 @@ export function EmployeeWorkHub({
         if (e instanceof DOMException && e.name === "AbortError") return;
         throw e;
       } finally {
-        if (!ac.signal.aborted) setLoading(false);
+        if (gen === loadGenRef.current) setLoading(false);
       }
     },
-    [selectedEmployeeId, workDate, canManage, showToast, t],
+    [selectedEmployeeId, workDate, canManage],
   );
 
   useEffect(() => {
@@ -304,9 +312,11 @@ export function EmployeeWorkHub({
       targetDueAt: string;
       color: string | null;
     },
-  ) => {
-    if (!day) return;
+  ): Promise<boolean> => {
+    if (!day || saveLockRef.current) return false;
     const prev = day;
+    saveLockRef.current = true;
+    setSavingTaskId(taskId);
     setDay(
       patchTaskInDay(day, taskId, {
         title: patch.title,
@@ -335,11 +345,19 @@ export function EmployeeWorkHub({
       if (!j.ok) {
         setDay(prev);
         showToast({ tone: "error", title: t("common.error") });
-      } else if (j.task) {
+        return false;
+      }
+      if (j.task) {
         setDay((d) => (d ? patchTaskInDay(d, taskId, j.task!) : d));
       }
+      return true;
     } catch {
       setDay(prev);
+      showToast({ tone: "error", title: t("common.error") });
+      return false;
+    } finally {
+      saveLockRef.current = false;
+      setSavingTaskId(null);
     }
   };
 
@@ -849,7 +867,7 @@ export function EmployeeWorkHub({
             <p className="mt-8 text-center text-sm font-bold text-slate-500">
               {t("workflows.employeeWork.selectEmployee")}
             </p>
-          ) : loading ? (
+          ) : !day && loading ? (
             <div className="flex justify-center py-12">
               <Loader2 className="h-8 w-8 animate-spin text-violet-600" />
             </div>
@@ -865,6 +883,7 @@ export function EmployeeWorkHub({
                     group={group}
                     canManage={canManage}
                     busy={busy}
+                    savingTaskId={savingTaskId}
                     defaultOpen={canManage ? false : hasNext}
                     lockMap={lockMap}
                     draggableGroup={canManage}
@@ -875,7 +894,7 @@ export function EmployeeWorkHub({
                     onDeleteGroup={() => void deleteGroup(group.id)}
                     onDuplicateGroup={() => void duplicateGroup(group.id)}
                     onAddTask={(p) => void addTaskToGroup(group.id, p)}
-                    onSaveTask={(id, patch) => void saveTask(id, patch)}
+                    onSaveTask={(id, patch) => saveTask(id, patch)}
                     onDeleteTask={(id) => void deleteTask(id)}
                     onReorderTask={(ids) => void reorderTasks(ids, group.id)}
                     onStartTask={(id) => void employeeStartComplete(id, "start")}
@@ -896,7 +915,7 @@ export function EmployeeWorkHub({
                         key={task.id}
                         task={task}
                         canManage={canManage}
-                        busy={busy}
+                        busy={busy || savingTaskId === task.id}
                         listLength={sortedLoose.length}
                         lock={lockMap.get(task.id)}
                         draggable={canManage}
@@ -904,15 +923,17 @@ export function EmployeeWorkHub({
                         onDragOver={(e) => e.preventDefault()}
                         onDrop={() => void reorderLooseDrop(task.id)}
                         onSave={async ({ orderNumber, ...patch }) => {
-                          await saveTask(task.id, patch);
+                          const ok = await saveTask(task.id, patch);
+                          if (!ok) return false;
                           const currentOrder = task.order_index + 1;
-                          if (orderNumber === currentOrder) return;
+                          if (orderNumber === currentOrder) return true;
                           const ids = sortedLoose.map((x) => x.id);
                           const from = ids.indexOf(task.id);
-                          if (from < 0) return;
+                          if (from < 0) return true;
                           ids.splice(from, 1);
                           ids.splice(Math.max(0, Math.min(ids.length, orderNumber - 1)), 0, task.id);
                           await reorderTasks(ids, null);
+                          return true;
                         }}
                         onDelete={() => void deleteTask(task.id)}
                         onStart={

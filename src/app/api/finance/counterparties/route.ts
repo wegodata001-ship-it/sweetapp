@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { requireDb } from "@/lib/api-route";
 
@@ -8,11 +9,36 @@ export type ArchiveCounterpartyOption = {
   name: string;
 };
 
-export function archiveCounterpartyKey(kind: ArchiveCounterpartyOption["kind"], id: string): string {
-  return `${kind}:${id}`;
-}
-
 const VALID_KINDS = new Set(["customer", "supplier", "employee"]);
+
+function counterpartiesUnionSql(
+  kindFilter: ArchiveCounterpartyOption["kind"] | null,
+  q: string,
+): Prisma.Sql {
+  const take = q ? 20 : 400;
+  const namePred = q ? Prisma.sql`AND name ILIKE ${`%${q}%`}` : Prisma.empty;
+  const parts: Prisma.Sql[] = [];
+  if (!kindFilter || kindFilter === "customer") {
+    parts.push(Prisma.sql`
+      (SELECT 'customer'::text AS kind, id, name FROM "Customer" WHERE TRUE ${namePred}
+       ORDER BY name ASC LIMIT ${take})
+    `);
+  }
+  if (!kindFilter || kindFilter === "supplier") {
+    parts.push(Prisma.sql`
+      (SELECT 'supplier'::text AS kind, id, name FROM "Supplier" WHERE TRUE ${namePred}
+       ORDER BY name ASC LIMIT ${take})
+    `);
+  }
+  if (!kindFilter || kindFilter === "employee") {
+    parts.push(Prisma.sql`
+      (SELECT 'employee'::text AS kind, id, name FROM "Employee"
+       WHERE "isActive" = true ${namePred}
+       ORDER BY name ASC LIMIT ${take})
+    `);
+  }
+  return Prisma.sql`${Prisma.join(parts, " UNION ALL ")}`;
+}
 
 /** GET /api/finance/counterparties?q=&kind= — רשימה מאוחדת לסינון ארכיון */
 export async function GET(req: NextRequest) {
@@ -22,41 +48,10 @@ export async function GET(req: NextRequest) {
   const q = req.nextUrl.searchParams.get("q")?.trim() ?? "";
   const rawKind = req.nextUrl.searchParams.get("kind")?.trim() ?? "";
   const kindFilter = VALID_KINDS.has(rawKind) ? (rawKind as ArchiveCounterpartyOption["kind"]) : null;
-  const nameFilter = q ? { name: { contains: q, mode: "insensitive" as const } } : undefined;
 
   try {
-    const [customers, suppliers, employees] = await Promise.all([
-      !kindFilter || kindFilter === "customer"
-        ? prisma.customer.findMany({
-            where: nameFilter,
-            select: { id: true, name: true },
-            orderBy: { name: "asc" },
-            take: q ? 20 : 400,
-          })
-        : Promise.resolve([]),
-      !kindFilter || kindFilter === "supplier"
-        ? prisma.supplier.findMany({
-            where: nameFilter,
-            select: { id: true, name: true },
-            orderBy: { name: "asc" },
-            take: q ? 20 : 400,
-          })
-        : Promise.resolve([]),
-      !kindFilter || kindFilter === "employee"
-        ? prisma.employee.findMany({
-            where: { isActive: true, ...(nameFilter ? nameFilter : {}) },
-            select: { id: true, name: true },
-            orderBy: { name: "asc" },
-            take: q ? 20 : 400,
-          })
-        : Promise.resolve([]),
-    ]);
-
-    const data: ArchiveCounterpartyOption[] = [
-      ...customers.map((c) => ({ kind: "customer" as const, id: c.id, name: c.name })),
-      ...suppliers.map((s) => ({ kind: "supplier" as const, id: s.id, name: s.name })),
-      ...employees.map((e) => ({ kind: "employee" as const, id: e.id, name: e.name })),
-    ].sort((a, b) => a.name.localeCompare(b.name, "he"));
+    const rows = await prisma.$queryRaw<ArchiveCounterpartyOption[]>`${counterpartiesUnionSql(kindFilter, q)}`;
+    const data = [...rows].sort((a, b) => a.name.localeCompare(b.name, "he"));
 
     return NextResponse.json({ ok: true, data });
   } catch (e) {

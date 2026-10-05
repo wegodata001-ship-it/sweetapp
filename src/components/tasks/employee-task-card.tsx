@@ -8,6 +8,7 @@ import {
   Play,
   Square,
 } from "lucide-react";
+import { memo } from "react";
 import type { SerializedWorkEmployeeTask } from "@/lib/work-tasks/serialize-work-task";
 import { useI18n } from "@/components/i18n-provider";
 import { TaskCountdownRing } from "@/components/tasks/task-countdown-ring";
@@ -26,12 +27,12 @@ export type EmployeeTaskCardProps = {
   busy: boolean;
   canStart: boolean;
   canComplete: boolean;
-  onStart: () => void;
-  onComplete: () => void;
+  onStart: (id: string) => void;
+  onComplete: (task: SerializedWorkEmployeeTask) => void;
   completedByName?: string | null;
 };
 
-export function EmployeeTaskCard({
+function EmployeeTaskCardInner({
   task,
   isActive,
   isCollapsed,
@@ -75,7 +76,7 @@ export function EmployeeTaskCard({
     : null;
 
   const shellClass = [
-    "relative overflow-hidden rounded-3xl border transition-all duration-300 motion-safe:transition-[transform,opacity,box-shadow]",
+    "relative overflow-hidden rounded-3xl border transition-all duration-150 motion-safe:transition-[transform,opacity,box-shadow]",
     isActive
       ? `etask-card-active border-slate-800/10 bg-gradient-to-br from-[#071826] via-[#0d2137] to-[#0f172a] p-4 shadow-[0_24px_56px_-16px_rgba(7,24,38,0.65)] sm:p-6 ${isLate ? "wf-pulse-late" : ""}`
       : isDone
@@ -216,21 +217,21 @@ export function EmployeeTaskCard({
               <button
                 type="button"
                 disabled={!canComplete || busy}
-                onClick={onComplete}
+                onClick={() => onComplete(task)}
                 className="inline-flex min-h-[56px] w-full items-center justify-center gap-2 rounded-2xl bg-[#16a34a] px-5 py-3.5 text-base font-black text-white shadow-lg shadow-emerald-900/25 transition hover:bg-emerald-600 hover:shadow-xl disabled:opacity-40"
               >
                 {busy ? <Loader2 className="h-5 w-5 animate-spin" aria-hidden /> : <Square className="h-5 w-5" aria-hidden />}
-                {t("employee.tasks.completeTaskBtn")}
+                {busy ? t("common.completing") : t("employee.tasks.completeTaskBtn")}
               </button>
             ) : (
               <button
                 type="button"
                 disabled={!canStart || busy}
-                onClick={onStart}
+                onClick={() => onStart(task.id)}
                 className="inline-flex min-h-[56px] w-full items-center justify-center gap-2 rounded-2xl bg-[#2563eb] px-5 py-3.5 text-base font-black text-white shadow-lg shadow-blue-900/20 transition hover:bg-blue-700 hover:shadow-xl disabled:opacity-40"
               >
                 {busy ? <Loader2 className="h-5 w-5 animate-spin" aria-hidden /> : <Play className="h-5 w-5" aria-hidden />}
-                {t("employee.tasks.startTaskBtn")}
+                {busy ? t("common.starting") : t("employee.tasks.startTaskBtn")}
               </button>
             )}
           </div>
@@ -239,3 +240,5 @@ export function EmployeeTaskCard({
     </article>
   );
 }
+
+export const EmployeeTaskCard = memo(EmployeeTaskCardInner);

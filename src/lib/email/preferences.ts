@@ -13,6 +13,13 @@ export type EmailPreferenceSnapshot = {
   emailNotificationsEnabled: boolean;
 };
 
+const PREFS_TTL_MS = 30_000;
+const prefsCache = new Map<string, { at: number; value: EmailPreferenceSnapshot }>();
+
+export function invalidateUserEmailPreferences(userId: string): void {
+  prefsCache.delete(userId);
+}
+
 const DEFAULTS: EmailPreferenceSnapshot = {
   emailMode: "important",
   emailQuietHours: true,
@@ -25,6 +32,8 @@ const DEFAULTS: EmailPreferenceSnapshot = {
 };
 
 export async function getUserEmailPreferences(userId: string): Promise<EmailPreferenceSnapshot> {
+  const cached = prefsCache.get(userId);
+  if (cached && Date.now() - cached.at < PREFS_TTL_MS) return cached.value;
   try {
     const u = await prisma.user.findUnique({
       where: { id: userId },
@@ -41,7 +50,7 @@ export async function getUserEmailPreferences(userId: string): Promise<EmailPref
     });
     if (!u) return DEFAULTS;
     const mode = (u.emailMode ?? "important") as EmailMode;
-    return {
+    const snapshot: EmailPreferenceSnapshot = {
       emailMode: ["important", "critical_only", "daily_digest", "muted"].includes(mode)
         ? mode
         : "important",
@@ -53,6 +62,8 @@ export async function getUserEmailPreferences(userId: string): Promise<EmailPref
       inAppNotificationsEnabled: u.inAppNotificationsEnabled ?? true,
       emailNotificationsEnabled: u.emailNotificationsEnabled ?? true,
     };
+    prefsCache.set(userId, { at: Date.now(), value: snapshot });
+    return snapshot;
   } catch {
     return DEFAULTS;
   }

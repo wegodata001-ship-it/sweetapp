@@ -270,7 +270,7 @@ export function WorkStatusEmployeeView() {
             className="mt-2 flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 text-sm font-black text-white"
           >
             {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-5 w-5" />}
-            {t("workflows.page.steps.complete")}
+            {busy ? t("common.completing") : t("workflows.page.steps.complete")}
           </button>
         </article>
         {(data.delayed_tasks ?? []).map((row) => (
@@ -290,13 +290,13 @@ export function WorkStatusEmployeeView() {
               <h2 className="mt-1 text-lg font-black">{row.title}</h2>
               <p className="mt-1 text-sm font-bold">{t("taskTiming.reasonLabel")}: {row.delayReason ? t(`taskTiming.reason.${row.delayReason}`) : "—"}</p>
               <button type="button" disabled={busy} onClick={() => void startTask(row.id)} className="mt-3 h-12 w-full rounded-xl bg-blue-600 text-sm font-black text-white">
-                {t("taskTiming.resume")}
+                {busy ? t("common.starting") : t("taskTiming.resume")}
               </button>
             </article>
           ))}
           {data.next_task ? (
             <button type="button" disabled={busy} onClick={() => void startTask(data.next_task!.id)} className="flex h-12 w-full items-center justify-center rounded-xl bg-slate-900 text-sm font-black text-white">
-              {t("workflows.page.steps.start")}: {data.next_task.title}
+              {busy ? t("common.starting") : `${t("workflows.page.steps.start")}: ${data.next_task.title}`}
             </button>
           ) : null}
         </div>
@@ -311,7 +311,7 @@ export function WorkStatusEmployeeView() {
             className="mt-4 flex h-12 w-full items-center justify-center gap-2 rounded-xl bg-blue-600 text-sm font-black text-white"
           >
             <Play className="h-5 w-5" />
-            {t("workflows.page.steps.start")}
+            {busy ? t("common.starting") : t("workflows.page.steps.start")}
           </button>
         </article>
       ) : (

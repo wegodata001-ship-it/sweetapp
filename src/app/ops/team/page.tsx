@@ -3,7 +3,7 @@
 import { useSearchParams } from "next/navigation";
 import { Suspense } from "react";
 import AdminWorkflowsPage from "@/app/admin/workflows/page";
-import AdminStaffPage from "@/app/admin/staff/page";
+import { AdminStaffPage } from "@/components/ops/admin-staff-page";
 import { WorkStatusBoard } from "@/components/work-status/work-status-board";
 import { useAuth } from "@/components/auth-provider";
 import { useI18n } from "@/components/i18n-provider";

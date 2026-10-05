@@ -113,7 +113,14 @@ export function I18nProvider({
         .then((r) => (r.ok ? r.json() : null))
         .then((data) => {
           if (!cancelled && data && typeof data === "object" && "nav" in data) {
-            setDevMessages(data as Messages);
+            setDevMessages((prev) => {
+              try {
+                if (prev && JSON.stringify(prev) === JSON.stringify(data)) return prev;
+              } catch {
+                /* keep incoming */
+              }
+              return data as Messages;
+            });
           }
         })
         .catch(() => {

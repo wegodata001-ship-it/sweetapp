@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+import { after, NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireDb } from "@/lib/api-route";
 import { getSessionFromCookie } from "@/lib/auth/get-session";
@@ -104,10 +104,10 @@ export async function GET(req: NextRequest) {
       return response;
     }
 
-    const backfillStarted = performance.now();
-    await backfillOrderCategoriesOnce(prisma);
-    await backfillOrderDepositsOnce();
-    const backfillMs = performance.now() - backfillStarted;
+    after(() => {
+      void backfillOrderCategoriesOnce(prisma);
+      void backfillOrderDepositsOnce();
+    });
 
     const queryStarted = performance.now();
     const rows = await prisma.futureOrder.findMany({
@@ -118,7 +118,7 @@ export async function GET(req: NextRequest) {
     const response = NextResponse.json({ ok: true, data: rows });
     response.headers.set(
       "Server-Timing",
-      `backfill;dur=${Math.round(backfillMs)}, query;dur=${Math.round(queryMs)}, total;dur=${Math.round(performance.now() - handlerStarted)}`,
+      `query;dur=${Math.round(queryMs)}, total;dur=${Math.round(performance.now() - handlerStarted)}`,
     );
     return response;
   } catch (e) {

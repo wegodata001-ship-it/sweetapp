@@ -1,21 +1,15 @@
 import { NextResponse } from "next/server";
-import { prisma } from "@/lib/prisma";
 import { requireDb } from "@/lib/api-route";
 import { getSessionFromCookie } from "@/lib/auth/get-session";
-import {
-  filterEmployeeTasksForUser,
-  logStrictScope,
-  strictUserId,
-} from "@/lib/auth/strict-user-isolation";
-import { warnDuplicateEmployeeIds } from "@/lib/work-tasks/duplicate-employee-check";
-import { serializeWorkEmployeeTask } from "@/lib/work-tasks/serialize-work-task";
-import { enforceMaxShiftLength } from "@/lib/work-sessions/auto-checkout";
+import { logStrictScope, strictUserId } from "@/lib/auth/strict-user-isolation";
+import { loadMyTasksSnapshot } from "@/lib/work-tasks/my-tasks-snapshot";
 
 export const dynamic = "force-dynamic";
 
 /**
  * GET /api/work/my-tasks
- * עובד — WHERE assignedToUserId = session.sub בלבד
+ * One snapshot for the employee tasks screen: open tasks + today's completed,
+ * active shift, and today minutes. No user/employee joins. No 500-row history.
  */
 export async function GET() {
   const started = performance.now();
@@ -32,33 +26,25 @@ export async function GET() {
   const uid = strictUserId(session);
 
   try {
-    const enforceStarted = performance.now();
-    await enforceMaxShiftLength({ userId: uid });
-    const enforceMs = performance.now() - enforceStarted;
-    void warnDuplicateEmployeeIds();
-    const queryStarted = performance.now();
-    const rowsRaw = await prisma.employeeTask.findMany({
-      where: { assignedToUserId: uid },
-      orderBy: [{ orderIndex: "asc" }, { createdAt: "asc" }],
-      take: 500,
-    });
-
-    const queryMs = performance.now() - queryStarted;
-    const rows = filterEmployeeTasksForUser(rowsRaw, uid);
+    const snap = await loadMyTasksSnapshot({ userId: uid, role: session.role });
 
     logStrictScope("[GET /api/work/my-tasks]", session, {
-      returnedTasks: rows.length,
-      returnedTaskIds: rows.map((t) => t.id),
-      returnedAssignees: rows.map((t) => t.assignedToUserId),
+      returnedTasks: snap.tasks.length,
+      returnedTaskIds: snap.tasks.map((t) => t.id),
+      returnedAssignees: snap.tasks.map(() => uid),
     });
 
     const response = NextResponse.json({
       ok: true,
-      data: rows.map(serializeWorkEmployeeTask),
+      data: snap.tasks,
+      shift: snap.shift,
+      today: snap.today,
+      auto_closed: snap.auto_closed,
+      shift_open: snap.shift_open,
     });
     response.headers.set(
       "Server-Timing",
-      `auth;dur=${Math.round(authMs)}, enforce;dur=${Math.round(enforceMs)}, query;dur=${Math.round(queryMs)}, total;dur=${Math.round(performance.now() - started)}`,
+      `auth;dur=${Math.round(authMs)}, enforce;dur=${Math.round(snap.enforceMs)}, query;dur=${Math.round(snap.dbMs)}, total;dur=${Math.round(performance.now() - started)}`,
     );
     return response;
   } catch (e) {

@@ -157,7 +157,7 @@ export default function ChangePasswordPage() {
             className="flex min-h-[54px] w-full items-center justify-center gap-2 rounded-2xl bg-luxury-gold px-5 text-base font-black text-luxury-charcoal shadow-sm disabled:opacity-60"
           >
             {submitting ? <Loader2 className="h-5 w-5 animate-spin" aria-hidden /> : null}
-            {t("auth.saveNewPassword")}
+            {submitting ? t("common.saving") : t("auth.saveNewPassword")}
           </button>
         </form>
       </div>

@@ -5,7 +5,7 @@ import { canManageAllTasks } from "@/lib/tasks/task-access";
 import { strictUserId } from "@/lib/auth/strict-user-isolation";
 import { serializeWorkEmployeeTask } from "@/lib/work-tasks/serialize-work-task";
 import { readTaskActionSession, startEmployeeTaskFast } from "@/lib/work-tasks/fast-task-actions";
-import { assertEmployeeShiftOpen } from "@/lib/work-sessions/access";
+import { enforceMaxShiftLength } from "@/lib/work-sessions/auto-checkout";
 
 export const dynamic = "force-dynamic";
 
@@ -22,13 +22,11 @@ export async function POST(_req: NextRequest, ctx: { params: Promise<{ id: strin
 
   const { id } = await ctx.params;
   const userId = strictUserId(session);
-  const shift = await assertEmployeeShiftOpen(session);
-  if (!shift.ok) {
-    return NextResponse.json(
-      { ok: false, error: "יום העבודה הסתיים אוטומטית לאחר 12 שעות.", code: "SHIFT_ENDED" },
-      { status: 403 },
-    );
+  const enforceStarted = performance.now();
+  if (session.role === "EMPLOYEE") {
+    await enforceMaxShiftLength({ userId });
   }
+  const enforceMs = Math.round(performance.now() - enforceStarted);
 
   try {
     const result = await startEmployeeTaskFast(prisma, {
@@ -52,7 +50,10 @@ export async function POST(_req: NextRequest, ctx: { params: Promise<{ id: strin
       task,
       startedAt: task.started_at,
     });
-    response.headers.set("Server-Timing", `auth;dur=${authMs}, db;dur=${result.dbMs}`);
+    response.headers.set(
+      "Server-Timing",
+      `auth;dur=${authMs}, enforce;dur=${enforceMs}, db;dur=${result.dbMs}`,
+    );
     return response;
   } catch (e) {
     console.error("[POST /api/work/tasks/:id/start]", e);

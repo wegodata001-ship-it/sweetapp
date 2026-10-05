@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { fetchJsonCached, invalidateCacheKey, setCached } from "@/lib/client/fetch-cache";
+import { shouldFetchTaskDetail } from "@/lib/work-tasks/task-edit-stability";
 import { useAuth } from "@/components/auth-provider";
 import { useI18n } from "@/components/i18n-provider";
 import { CompleteTaskModal } from "@/components/tasks/complete-task-modal";
@@ -88,6 +89,12 @@ export function CardsWorkflowHub({
   const [tplDetails, setTplDetails] = useState<Record<string, WorkflowTemplateDetailDto>>({});
   const [runDetails, setRunDetails] = useState<Record<string, WorkflowRunDetailDto>>({});
   const [detailLoading, setDetailLoading] = useState<string | null>(null);
+  const [detailError, setDetailError] = useState<string | null>(null);
+  const tplDetailsRef = useRef<Record<string, WorkflowTemplateDetailDto>>({});
+  const runDetailsRef = useRef<Record<string, WorkflowRunDetailDto>>({});
+  const detailInFlightRef = useRef<string | null>(null);
+  tplDetailsRef.current = tplDetails;
+  runDetailsRef.current = runDetails;
   const [busyItemId, setBusyItemId] = useState<string | null>(null);
   const [busyGroup, setBusyGroup] = useState(false);
 
@@ -211,33 +218,75 @@ export function CardsWorkflowHub({
     [canManage],
   );
 
-  const loadTemplateDetail = useCallback(async (id: string) => {
-    setDetailLoading(`tpl:${id}`);
+  const loadTemplateDetail = useCallback(async (id: string, opts?: { force?: boolean }) => {
+    const key = `tpl:${id}`;
+    if (
+      !opts?.force &&
+      !shouldFetchTaskDetail({
+        id,
+        hasData: !!tplDetailsRef.current[id],
+        inFlightId: detailInFlightRef.current === key ? id : null,
+      })
+    ) {
+      return;
+    }
+    detailInFlightRef.current = key;
+    setDetailLoading(key);
+    setDetailError(null);
     try {
       const res = await fetch(`/api/workflows/templates/${encodeURIComponent(id)}`, {
         credentials: "same-origin",
       });
       const json = (await res.json().catch(() => null)) as
         | { ok: true; data: WorkflowTemplateDetailDto }
+        | { ok: false }
         | null;
-      if (json?.ok) setTplDetails((prev) => ({ ...prev, [id]: json.data }));
+      if (json && "ok" in json && json.ok && json.data) {
+        setTplDetails((prev) => ({ ...prev, [id]: json.data }));
+      } else {
+        setDetailError(key);
+      }
+    } catch {
+      setDetailError(key);
     } finally {
-      setDetailLoading(null);
+      if (detailInFlightRef.current === key) detailInFlightRef.current = null;
+      setDetailLoading((cur) => (cur === key ? null : cur));
     }
   }, []);
 
-  const loadRunDetail = useCallback(async (id: string) => {
-    setDetailLoading(`run:${id}`);
+  const loadRunDetail = useCallback(async (id: string, opts?: { force?: boolean }) => {
+    const key = `run:${id}`;
+    if (
+      !opts?.force &&
+      !shouldFetchTaskDetail({
+        id,
+        hasData: !!runDetailsRef.current[id],
+        inFlightId: detailInFlightRef.current === key ? id : null,
+      })
+    ) {
+      return;
+    }
+    detailInFlightRef.current = key;
+    setDetailLoading(key);
+    setDetailError(null);
     try {
       const res = await fetch(`/api/workflows/runs/${encodeURIComponent(id)}`, {
         credentials: "same-origin",
       });
       const json = (await res.json().catch(() => null)) as
         | { ok: true; data: WorkflowRunDetailDto }
+        | { ok: false }
         | null;
-      if (json?.ok) setRunDetails((prev) => ({ ...prev, [id]: json.data }));
+      if (json && "ok" in json && json.ok && json.data) {
+        setRunDetails((prev) => ({ ...prev, [id]: json.data }));
+      } else {
+        setDetailError(key);
+      }
+    } catch {
+      setDetailError(key);
     } finally {
-      setDetailLoading(null);
+      if (detailInFlightRef.current === key) detailInFlightRef.current = null;
+      setDetailLoading((cur) => (cur === key ? null : cur));
     }
   }, []);
 
@@ -262,13 +311,13 @@ export function CardsWorkflowHub({
   useEffect(() => {
     const parsed = parseKey(expanded);
     if (!parsed) return;
-    if (parsed.kind === "tpl" && !tplDetails[parsed.id]) {
+    if (parsed.kind === "tpl") {
       queueMicrotask(() => void loadTemplateDetail(parsed.id));
     }
-    if (parsed.kind === "run" && !runDetails[parsed.id]) {
+    if (parsed.kind === "run") {
       queueMicrotask(() => void loadRunDetail(parsed.id));
     }
-  }, [expanded, tplDetails, runDetails, loadTemplateDetail, loadRunDetail]);
+  }, [expanded, loadTemplateDetail, loadRunDetail]);
 
   const toggleExpand = (key: ExpandedKey) => {
     setExpanded((prev) => (prev === key ? null : key));
@@ -506,7 +555,8 @@ export function CardsWorkflowHub({
         prev.map((tpl) => (tpl.id === templateId ? summaryFromDetail(itemJson.data) : tpl)),
       );
       showToast({ tone: "success", title: t("workflows.templates.toastSaved") });
-      void refreshAll({ force: true });
+      invalidateCacheKey("wf-hub:templates");
+      invalidateCacheKey("wf-hub:tasks");
       return true;
     } catch {
       if (prevDetail) setTplDetails((prev) => ({ ...prev, [templateId]: prevDetail }));
@@ -654,7 +704,6 @@ export function CardsWorkflowHub({
     if (action === "edit") {
       setEditTplId(tplId);
       setExpanded(cardKey("tpl", tplId));
-      void loadTemplateDetail(tplId);
       return;
     }
     if (action === "duplicate") {
@@ -937,7 +986,7 @@ export function CardsWorkflowHub({
                 }
                 expanded={isExp}
                 onToggleExpand={() => toggleExpand(key)}
-                loading={isExp && !detail && detailLoading === key}
+                loading={isExp && !detail && detailLoading === key && detailError !== key}
                 footer={
                   detail ? (
                     <>
@@ -1033,7 +1082,7 @@ export function CardsWorkflowHub({
                     statusLabel={t("workflows.cards.templateBadge")}
                     expanded={isExp}
                     onToggleExpand={() => toggleExpand(key)}
-                    loading={isExp && !detail && detailLoading === key}
+                    loading={isExp && !detail && detailLoading === key && detailError !== key}
                     actionsMenu={
                       <TaskGroupCardMenu
                         busy={menuBusyTplId === tpl.id}
@@ -1089,6 +1138,29 @@ export function CardsWorkflowHub({
                       </>
                     }
                   >
+                    {isExp && !detail && detailError === key ? (
+                      <li className="rounded-xl bg-white/90 p-3 text-center">
+                        <p className="text-xs font-black text-slate-800">
+                          {t("workflows.cards.loadTaskFailed")}
+                        </p>
+                        <div className="mt-2 flex gap-2">
+                          <button
+                            type="button"
+                            onClick={() => void loadTemplateDetail(tpl.id, { force: true })}
+                            className="flex-1 rounded-lg bg-slate-900 py-2 text-[10px] font-black text-white"
+                          >
+                            {t("common.retry")}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setExpanded(null)}
+                            className="flex-1 rounded-lg border border-slate-200 py-2 text-[10px] font-black text-slate-700"
+                          >
+                            {t("common.close")}
+                          </button>
+                        </div>
+                      </li>
+                    ) : null}
                     {editTplId === tpl.id && detail ? (
                       <li>
                         <TemplateGroupEditInline

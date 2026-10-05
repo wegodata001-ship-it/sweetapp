@@ -99,7 +99,7 @@ export function TemplateTaskEditModal({
             className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-slate-900 px-4 text-sm font-black text-white disabled:opacity-50"
           >
             {busy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : null}
-            {t("workflows.cards.saveChanges")}
+            {busy ? t("common.saving") : t("workflows.cards.saveChanges")}
           </button>
         </div>
       </div>

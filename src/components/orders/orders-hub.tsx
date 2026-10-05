@@ -503,11 +503,20 @@ export function OrdersHub({ module, canManage }: OrdersHubProps) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payloadFromForm(createForm)),
       });
-      const j = (await res.json()) as { ok?: boolean; error?: string };
+      const j = (await res.json()) as { ok?: boolean; error?: string; data?: FutureOrderRow };
       if (!res.ok || !j.ok) throw new Error(j.error ?? "err");
+      if (j.data) {
+        setRows((prev) => {
+          const next = [j.data as FutureOrderRow, ...prev.filter((r) => r.id !== j.data!.id)];
+          return next.sort(
+            (a, b) =>
+              new Date(a.eventDate).getTime() - new Date(b.eventDate).getTime() ||
+              b.orderNumber - a.orderNumber,
+          );
+        });
+      }
       setCreateOpen(false);
       setCreateForm(emptyForm());
-      await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : tL("errorSave"));
     } finally {
@@ -526,11 +535,13 @@ export function OrdersHub({ module, canManage }: OrdersHubProps) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payloadFromForm(editForm)),
       });
-      const j = (await res.json()) as { ok?: boolean; error?: string };
+      const j = (await res.json()) as { ok?: boolean; error?: string; data?: FutureOrderRow };
       if (!res.ok || !j.ok) throw new Error(j.error ?? "err");
+      if (j.data) {
+        setRows((prev) => prev.map((row) => (row.id === id ? { ...row, ...j.data } : row)));
+      }
       setExpandedId(null);
       setExpandMode(null);
-      await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : tL("errorUpdate"));
     } finally {
@@ -548,11 +559,11 @@ export function OrdersHub({ module, canManage }: OrdersHubProps) {
       });
       const j = (await res.json()) as { ok?: boolean; error?: string };
       if (!res.ok || !j.ok) throw new Error(j.error ?? "err");
+      setRows((prev) => prev.filter((row) => row.id !== id));
       if (expandedId === id) {
         setExpandedId(null);
         setExpandMode(null);
       }
-      await load();
     } catch {
       setError(tL("errorDelete"));
     } finally {

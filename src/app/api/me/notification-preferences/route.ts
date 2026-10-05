@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSessionFromCookie } from "@/lib/auth/get-session";
 import { prisma } from "@/lib/prisma";
-import { getUserEmailPreferences, type EmailMode } from "@/lib/email/preferences";
+import {
+  getUserEmailPreferences,
+  invalidateUserEmailPreferences,
+  type EmailMode,
+} from "@/lib/email/preferences";
 import { requireDb } from "@/lib/api-route";
 
 export const dynamic = "force-dynamic";
@@ -74,6 +78,7 @@ export async function PATCH(req: NextRequest) {
         emailNotificationsEnabled: true,
       },
     });
+    invalidateUserEmailPreferences(session.sub);
     return NextResponse.json({ ok: true, data: updated });
   } catch (e) {
     console.error("[PATCH /api/me/notification-preferences]", e);

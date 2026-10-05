@@ -367,31 +367,85 @@ export async function fetchFinanceDocuments(): Promise<FinanceDocumentRow[]> {
 /**
  * משיכת מסמכים עם סינון לפי סטטוס רואה חשבון + ספירות סיכום.
  */
+export type FinanceDocumentsPage = FinanceDocumentsResponse & {
+  hasMore: boolean;
+  page: number;
+};
+
 export async function fetchFinanceDocumentsWithCounts(params: {
   accountant?: "all" | "sent" | "not_sent";
-}): Promise<FinanceDocumentsResponse> {
+  take?: number;
+  page?: number;
+  q?: string;
+  kind?: string;
+  partyId?: string;
+  invoices?: boolean;
+  signal?: AbortSignal;
+}): Promise<FinanceDocumentsPage> {
   const q = new URLSearchParams();
   if (params.accountant && params.accountant !== "all") q.set("accountant", params.accountant);
-  const res = await fetch(`/api/documents?${q}`, { credentials: "same-origin", cache: "no-store" });
+  q.set("take", String(params.take ?? 30));
+  q.set("page", String(params.page ?? 1));
+  if (params.q?.trim()) q.set("q", params.q.trim());
+  if (params.kind) q.set("kind", params.kind);
+  if (params.partyId) q.set("partyId", params.partyId);
+  if (params.invoices) q.set("invoices", "1");
+  const res = await fetch(`/api/documents?${q}`, {
+    credentials: "same-origin",
+    cache: "no-store",
+    signal: params.signal,
+  });
   try {
     const j = (await res.json()) as {
       ok?: boolean;
       data?: FinanceDocumentRow[];
+      hasMore?: boolean;
+      page?: number;
       counts?: { total: number; sent: number; notSent: number };
       accountantRecipientEmail?: string | null;
     };
     if (!j.ok) {
       throw new Error("finance documents failed");
     }
+    const rows = j.data ?? [];
     return {
-      rows: j.data ?? [],
-      counts: j.counts ?? { total: 0, sent: 0, notSent: 0 },
+      rows,
+      hasMore: Boolean(j.hasMore),
+      page: j.page ?? params.page ?? 1,
+      counts: j.counts ?? {
+        total: rows.length,
+        sent: rows.filter((r) => r.sent_to_cpa).length,
+        notSent: rows.filter((r) => !r.sent_to_cpa).length,
+      },
       accountantRecipientEmail: j.accountantRecipientEmail ?? null,
     };
   } catch (e) {
     if (e instanceof Error) throw e;
     throw new Error("finance documents failed");
   }
+}
+
+export async function fetchFinanceDocumentIds(params: {
+  kind?: string;
+  partyId?: string;
+  invoices?: boolean;
+  q?: string;
+  signal?: AbortSignal;
+}): Promise<string[]> {
+  const q = new URLSearchParams();
+  q.set("idsOnly", "1");
+  if (params.kind) q.set("kind", params.kind);
+  if (params.partyId) q.set("partyId", params.partyId);
+  if (params.invoices) q.set("invoices", "1");
+  if (params.q?.trim()) q.set("q", params.q.trim());
+  const res = await fetch(`/api/documents?${q}`, {
+    credentials: "same-origin",
+    cache: "no-store",
+    signal: params.signal,
+  });
+  const j = (await res.json()) as { ok?: boolean; data?: Array<{ id: string }> };
+  if (!j.ok) return [];
+  return (j.data ?? []).map((row) => row.id);
 }
 
 export async function fetchFinanceDocumentById(id: string): Promise<FinanceDocumentRow | null> {

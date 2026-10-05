@@ -1,10 +1,11 @@
 "use client";
 
 import { Loader2 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useI18n } from "@/components/i18n-provider";
 import { TaskColorPicker } from "@/components/employee-work/task-color-picker";
 import type { SerializedEmployeeTask } from "@/lib/work-tasks/serialize-employee-work";
+import { formatTaskDueInput, shouldInitTaskEditForm } from "@/lib/work-tasks/task-edit-stability";
 
 export type EmployeeWorkTaskEditPatch = {
   title: string;
@@ -22,8 +23,20 @@ type Props = {
   task: SerializedEmployeeTask;
   listLength: number;
   onCancel: () => void;
-  onSave: (patch: EmployeeWorkTaskEditPatch) => void;
+  onSave: (patch: EmployeeWorkTaskEditPatch) => void | boolean | Promise<void | boolean>;
 };
+
+function snapshotForm(task: SerializedEmployeeTask) {
+  return {
+    title: task.title,
+    description: task.description ?? "",
+    materials: task.materials ?? "",
+    minutes: String(task.estimated_minutes),
+    due: formatTaskDueInput(task.target_due_at),
+    color: task.color,
+    orderNumber: String(task.order_index + 1),
+  };
+}
 
 export function EmployeeWorkTaskEditModal({
   open,
@@ -34,35 +47,43 @@ export function EmployeeWorkTaskEditModal({
   onSave,
 }: Props) {
   const { t, dir } = useI18n();
+  const initIdRef = useRef<string | null>(null);
+  const taskRef = useRef(task);
+  taskRef.current = task;
   const [title, setTitle] = useState(task.title);
   const [description, setDescription] = useState(task.description ?? "");
   const [materials, setMaterials] = useState(task.materials ?? "");
   const [minutes, setMinutes] = useState(String(task.estimated_minutes));
-  const [due, setDue] = useState(
-    task.target_due_at ? new Date(task.target_due_at).toISOString().slice(11, 16) : "",
-  );
+  const [due, setDue] = useState(formatTaskDueInput(task.target_due_at));
   const [color, setColor] = useState<string | null>(task.color);
   const [orderNumber, setOrderNumber] = useState(String(task.order_index + 1));
 
   useEffect(() => {
-    if (!open) return;
-    setTitle(task.title);
-    setDescription(task.description ?? "");
-    setMaterials(task.materials ?? "");
-    setMinutes(String(task.estimated_minutes));
-    setDue(task.target_due_at ? new Date(task.target_due_at).toISOString().slice(11, 16) : "");
-    setColor(task.color);
-    setOrderNumber(String(task.order_index + 1));
-  }, [open, task]);
+    if (!open) {
+      initIdRef.current = null;
+      return;
+    }
+    if (!shouldInitTaskEditForm(open, task.id, initIdRef.current)) return;
+    initIdRef.current = task.id;
+    const snap = snapshotForm(taskRef.current);
+    setTitle(snap.title);
+    setDescription(snap.description);
+    setMaterials(snap.materials);
+    setMinutes(snap.minutes);
+    setDue(snap.due);
+    setColor(snap.color);
+    setOrderNumber(snap.orderNumber);
+  }, [open, task.id]);
 
   if (!open) return null;
 
   const save = () => {
+    if (busy) return;
     const nextOrder = Math.min(
       Math.max(1, parseInt(orderNumber, 10) || task.order_index + 1),
       Math.max(1, listLength),
     );
-    onSave({
+    void onSave({
       title: title.trim() || task.title,
       description,
       materials,
@@ -175,7 +196,7 @@ export function EmployeeWorkTaskEditModal({
             className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-slate-900 px-4 text-sm font-black text-white disabled:opacity-50"
           >
             {busy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : null}
-            {t("workflows.employeeWork.saveChanges")}
+            {busy ? t("common.saving") : t("workflows.employeeWork.saveChanges")}
           </button>
         </div>
       </div>

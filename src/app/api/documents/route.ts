@@ -10,25 +10,20 @@ import {
   type IncomeExpensePayload,
   type ZReportPayload,
 } from "@/lib/finance/document-payload";
-import { prismaDocToFinanceRow } from "@/lib/finance/map-document";
-import { syncFinancialDocumentPaymentTotals } from "@/lib/finance/sync-document-amounts";
-import {
-  attachProductsToItems,
-  normalizedPaymentLines,
-  replaceCashFlowForDocument,
-  saveProductHistoryFromItems,
-  syncCheckPaymentsForDocument,
-} from "@/lib/finance/document-side-effects";
+import { ARCHIVE_INITIAL_TAKE, loadArchiveDocumentPage } from "@/lib/finance/archive-list-query";
+import { saveProductHistoryFromItems, syncCheckPaymentsForDocument } from "@/lib/finance/document-side-effects";
 import { documentTypeForEmployeePay, normalizeEmployeePayType } from "@/lib/finance/employee-pay-types";
-import {
-  resolveExpenseDocumentLinks,
-  syncExpenseDocumentLedgerEntry,
-} from "@/lib/finance/expense-ledger-sync";
+import { resolveExpenseDocumentLinks } from "@/lib/finance/expense-ledger-sync";
 import { normalizeExpenseType } from "@/lib/finance/expense-types";
-import { SupplierNameRequiredError, isDatabaseSaveError, resolveExpenseSupplier } from "@/lib/finance/supplier-resolve";
+import { SupplierNameRequiredError, isDatabaseSaveError } from "@/lib/finance/supplier-resolve";
+import {
+  persistIncomeExpenseDocument,
+  persistZDocumentCreate,
+  resolveSupplierForPersist,
+} from "@/lib/finance/persist-document-create";
 import { recordSupplierPriceHistoryFromExpense } from "@/lib/procurement/record-expense-prices";
-import { documentNotesForStorage, resolveWrittenDocDate } from "@/lib/finance/document-business-date";
-import { prisma, prismaAny } from "@/lib/prisma";
+import { resolveWrittenDocDate } from "@/lib/finance/document-business-date";
+import { prisma } from "@/lib/prisma";
 import { requireDb } from "@/lib/api-route";
 import { getSessionFromCookie } from "@/lib/auth/get-session";
 import { logActivity } from "@/lib/activity-log";
@@ -36,13 +31,54 @@ import { notifyAbnormalExpenseIfNeeded } from "@/lib/notifications/notifyAbnorma
 import { invalidateDashboardCaches } from "@/lib/dashboard/invalidate";
 import { archiveSourceDocumentForFinancialDoc } from "@/lib/finance/source-documents";
 import { getAccountantRecipientEmail } from "@/lib/finance/accountant-config";
-import { parseNum } from "@/lib/format-shekel";
 import { Prisma } from "@prisma/client";
 
 export const dynamic = "force-dynamic";
 
-function asJson(value: unknown): Prisma.InputJsonValue {
-  return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
+function documentsListWhere(searchParams: URLSearchParams): Prisma.FinancialDocumentWhereInput {
+  const and: Prisma.FinancialDocumentWhereInput[] = [];
+  const accountant = searchParams.get("accountant");
+  if (accountant === "sent") and.push({ sentToCpa: true });
+  else if (accountant === "not_sent") and.push({ sentToCpa: false });
+
+  const category = searchParams.get("category")?.trim() ?? "";
+  if (category) and.push({ category });
+
+  if (searchParams.get("invoices") === "1") {
+    and.push({
+      OR: [
+        { documentType: "חשבונית" },
+        { documentType: { startsWith: "חשבונית " } },
+        { documentType: { startsWith: "חשבונית/" } },
+      ],
+    });
+  }
+
+  const kind = searchParams.get("kind")?.trim() ?? "";
+  const partyId = searchParams.get("partyId")?.trim() ?? "";
+  if (kind === "customer") {
+    and.push(partyId ? { customerId: partyId } : { customerId: { not: null }, supplierId: null, employeeId: null });
+  } else if (kind === "supplier") {
+    and.push(partyId ? { supplierId: partyId } : { supplierId: { not: null } });
+  } else if (kind === "employee") {
+    and.push(partyId ? { employeeId: partyId } : { employeeId: { not: null }, supplierId: null });
+  }
+
+  const q = searchParams.get("q")?.trim() ?? "";
+  if (q) {
+    and.push({
+      OR: [
+        { title: { contains: q, mode: "insensitive" } },
+        { documentType: { contains: q, mode: "insensitive" } },
+        { category: { contains: q, mode: "insensitive" } },
+        { customer: { is: { name: { contains: q, mode: "insensitive" } } } },
+        { supplier: { is: { name: { contains: q, mode: "insensitive" } } } },
+        { employee: { is: { name: { contains: q, mode: "insensitive" } } } },
+      ],
+    });
+  }
+
+  return and.length ? { AND: and } : {};
 }
 
 export async function GET(req: NextRequest) {
@@ -50,36 +86,45 @@ export async function GET(req: NextRequest) {
   if (block) return block;
   try {
     const { searchParams } = req.nextUrl;
-    const accountant = searchParams.get("accountant"); // all | sent | not_sent
-    const where: Record<string, unknown> = {};
-    if (accountant === "sent") where.sentToCpa = true;
-    else if (accountant === "not_sent") where.sentToCpa = false;
+    const where = documentsListWhere(searchParams);
+    const takeRaw = Number(searchParams.get("take") ?? String(ARCHIVE_INITIAL_TAKE));
+    const pageRaw = Number(searchParams.get("page") ?? "1");
+    const take = Number.isFinite(takeRaw)
+      ? Math.min(100, Math.max(1, Math.floor(takeRaw)))
+      : ARCHIVE_INITIAL_TAKE;
+    const page = Number.isFinite(pageRaw) ? Math.max(1, Math.floor(pageRaw)) : 1;
+    const skip = (page - 1) * take;
+    const idsOnly = searchParams.get("idsOnly") === "1";
 
-    const [rows, totalCount, notSentCount] = await Promise.all([
-      prismaAny.financialDocument.findMany({
+    if (idsOnly) {
+      const ids = await prisma.financialDocument.findMany({
         where,
-        include: {
-          customer: { select: { name: true } },
-          supplier: { select: { name: true } },
-          employee: { select: { name: true } },
-          sourceDocument: { select: { id: true, fileName: true, fileType: true, mimeType: true } },
-          payments: { select: { amount: true } },
-          sentToCpaBy: { select: { id: true, fullName: true } },
-        },
+        select: { id: true },
         orderBy: { createdAt: "desc" },
-      }),
-      prismaAny.financialDocument.count(),
-      prismaAny.financialDocument.count({ where: { sentToCpa: false } }),
-    ]);
-    const data = rows.map((r: Parameters<typeof prismaDocToFinanceRow>[0]) => prismaDocToFinanceRow(r));
-    const sentCount = totalCount - notSentCount;
+      });
+      return NextResponse.json({
+        ok: true,
+        data: ids,
+        hasMore: false,
+        accountantRecipientEmail: getAccountantRecipientEmail(),
+      });
+    }
 
-    return NextResponse.json({
-      ok: true,
-      data,
-      counts: { total: totalCount, sent: sentCount, notSent: notSentCount },
-      accountantRecipientEmail: getAccountantRecipientEmail(),
-    });
+    const queryStarted = performance.now();
+    const { rows: data, hasMore } = await loadArchiveDocumentPage(searchParams, take, skip);
+    const queryMs = Math.round(performance.now() - queryStarted);
+
+    return NextResponse.json(
+      {
+        ok: true,
+        data,
+        hasMore,
+        page,
+        take,
+        accountantRecipientEmail: getAccountantRecipientEmail(),
+      },
+      { headers: { "Server-Timing": `db;dur=${queryMs}` } },
+    );
   } catch (e) {
     return NextResponse.json(
       { ok: false, error: e instanceof Error ? e.message : "שגיאה" },
@@ -90,15 +135,6 @@ export async function GET(req: NextRequest) {
 
 function zTotal(z: ZReportPayload): number {
   return z.cashTaxable + z.cashExempt + z.creditTaxable + z.creditExempt + z.transfers;
-}
-
-async function ensureCustomerByName(name: string): Promise<string | null> {
-  const n = name.trim();
-  if (!n) return null;
-  const found = await prisma.customer.findFirst({ where: { name: n } });
-  if (found) return found.id;
-  const c = await prisma.customer.create({ data: { name: n } });
-  return c.id;
 }
 
 export async function POST(req: NextRequest) {
@@ -124,27 +160,14 @@ export async function POST(req: NextRequest) {
 
     if (meta.kind === "zreport") {
       const z = meta;
-      const total = zTotal(z);
-      const doc = await prisma.financialDocument.create({
-        data: {
-          title: body.title.trim(),
-          category: body.category,
-          documentType: "דוח Z",
-          customerId: null,
-          totalAmount: total,
-          paidAmount: total,
-          remainingAmount: 0,
-          paymentStatus: total <= 0 ? "unpaid" : "paid",
-          notes: null,
-          metadata: asJson(meta),
-          docDate: resolveWrittenDocDate(z.zDate, body.docDate),
-          pdfStoragePath: null,
-          sentToCpa: false,
-        },
+      const doc = await persistZDocumentCreate({
+        title: body.title.trim(),
+        category: body.category,
+        total: zTotal(z),
+        z,
+        docDate: resolveWrittenDocDate(z.zDate, body.docDate),
       });
-
-      await replaceCashFlowForDocument(doc.id);
-      if (session) await logActivity(session.sub, "document_create");
+      if (session) void logActivity(session.sub, "document_create");
       await archiveSourceDocumentForFinancialDoc({
         financialDocumentId: doc.id,
         documentType: "z_report",
@@ -170,19 +193,6 @@ export async function POST(req: NextRequest) {
     const depositAmount = incomeExpenseDepositAmount(ie);
     const calculatedTotal = productTotal + depositAmount;
 
-    let customerId =
-      ie.kind === "income" ? await ensureCustomerByName(ie.counterpartyName) : null;
-
-    // If income with CHECK payment lines but no counterparty, fall back to a
-    // placeholder customer so the check can still be tracked.
-    const hasCheckLine =
-      ie.kind === "income" &&
-      (ie.payments ?? []).some((p) => p.instrument === "CHECK");
-    if (ie.kind === "income" && !customerId && hasCheckLine) {
-      customerId = await ensureCustomerByName("ללא לקוח");
-    }
-
-    const isIncomeRegister = ie.kind === "income" && body.category === "הכנסה";
     const isIncomeExpenseDocument = ie.kind === "income" || ie.kind === "expense";
     const paidRaw = paymentLinesTotal(ie);
 
@@ -198,101 +208,61 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    const itemsWithProducts = await attachProductsToItems(items);
     const expenseLinks = ie.kind === "expense" ? resolveExpenseDocumentLinks(ie) : { supplierId: null, employeeId: null };
     const docType =
       ie.kind === "expense" && normalizeExpenseType(ie.expenseType) === "WORKER_PAYMENTS"
         ? documentTypeForEmployeePay(normalizeEmployeePayType(ie.employeePayType))
         : ie.documentType;
 
-    let linkedSupplierId = expenseLinks.supplierId;
-    const doc = await prisma.$transaction(async (tx) => {
-      if (ie.kind === "expense") {
-        const resolved = await resolveExpenseSupplier(tx, {
-          expenseType: ie.expenseType,
-          supplierId: ie.supplierId,
-          supplierName: ie.counterpartyName,
-        });
-        if (resolved) {
-          linkedSupplierId = resolved.id;
-          ie.supplierId = resolved.id;
-          ie.counterpartyName = resolved.name;
-        }
+    let supplierId = expenseLinks.supplierId;
+    let supplierName = ie.kind === "expense" ? ie.counterpartyName : null;
+    let createSupplier = false;
+    if (ie.kind === "expense") {
+      const resolved = await resolveSupplierForPersist({
+        expenseType: ie.expenseType,
+        supplierId: ie.supplierId,
+        supplierName: ie.counterpartyName,
+      });
+      if (resolved) {
+        supplierId = resolved.id;
+        supplierName = resolved.name;
+        createSupplier = resolved.create;
+        ie.supplierId = resolved.id;
+        ie.counterpartyName = resolved.name;
       }
-      const created = await tx.financialDocument.create({
-      data: {
-        title: body.title.trim(),
-        category: body.category,
-        documentType: docType,
-        customerId,
-        supplierId: linkedSupplierId,
-        employeeId: expenseLinks.employeeId,
-        totalAmount: calculatedTotal,
-        paidAmount: 0,
-        remainingAmount: calculatedTotal,
-        paymentStatus: "unpaid",
-        notes: documentNotesForStorage(ie.documentNotes),
-        metadata: asJson(meta),
-        docDate: resolveWrittenDocDate(ie.docDate, body.docDate),
-        pdfStoragePath: null,
-        sentToCpa: false,
-        items: {
-          create: itemsWithProducts.length
-            ? itemsWithProducts
-            : [
-                {
-                  itemName: "סיכום",
-                  productName: "סיכום",
-                  quantity: 1,
-                  unitPrice: productTotal,
-                  vatType: null,
-                  total: productTotal,
-                },
-              ],
-        },
-        depositAmount,
-        depositType: depositAmount > 0 ? ie.depositType?.trim() || null : null,
-        depositNote: depositAmount > 0 ? ie.depositNote?.trim() || null : null,
-        depositStatus: depositAmount > 0 ? ie.depositStatus || "open" : "open",
-      },
-    });
-
-      if (isIncomeRegister) {
-        const payments = normalizedPaymentLines(ie);
-        if (payments.length > 0 && customerId) {
-          await tx.payment.createMany({
-            data: payments.map((payment) => ({
-              customerId,
-              documentId: created.id,
-              amount: parseNum(payment.amount),
-              paymentMethod: payment.instrument.trim() || null,
-              notes: payment.notes.trim() || null,
-            })),
-          });
-        }
-      }
-
-      await syncFinancialDocumentPaymentTotals(created.id, tx);
-      await replaceCashFlowForDocument(created.id, tx);
-      if (body.category === "הוצאה" && ie.kind === "expense") {
-        await syncExpenseDocumentLedgerEntry(created.id, tx);
-      }
-      return created;
-    });
-
-    const sideEffects: Promise<unknown>[] = [saveProductHistoryFromItems(items)];
-    if (body.category === "הוצאה" && ie.kind === "expense") {
-      sideEffects.push(recordSupplierPriceHistoryFromExpense(ie));
     }
-    await Promise.all(sideEffects);
 
-    await syncCheckPaymentsForDocument(doc.id);
+    const doc = await persistIncomeExpenseDocument({
+      title: body.title.trim(),
+      category: body.category,
+      documentType: docType,
+      ie,
+      items,
+      productTotal,
+      depositAmount,
+      calculatedTotal,
+      docDate: resolveWrittenDocDate(ie.docDate, body.docDate),
+      customerName: ie.kind === "income" ? ie.counterpartyName.trim() || null : null,
+      supplierId,
+      supplierName,
+      createSupplier,
+      employeeId: expenseLinks.employeeId,
+    });
+
+    void saveProductHistoryFromItems(items);
+    if (body.category === "הוצאה" && ie.kind === "expense") {
+      void recordSupplierPriceHistoryFromExpense(ie);
+    }
+    const hasCheckLine = (ie.payments ?? []).some((p) => p.instrument === "CHECK" && p.check);
+    if (hasCheckLine) {
+      await syncCheckPaymentsForDocument(doc.id);
+    }
     if (session) void logActivity(session.sub, "document_create");
     if (body.category === "הוצאה" && ie.kind === "expense") {
       void notifyAbnormalExpenseIfNeeded({
         documentId: doc.id,
         totalAmount: calculatedTotal,
-        supplierId: linkedSupplierId,
+        supplierId: doc.supplierId,
         title: body.title.trim(),
       });
     }

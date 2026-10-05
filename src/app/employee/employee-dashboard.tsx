@@ -219,6 +219,7 @@ export function EmployeeDashboard() {
       } catch {
         /* */
       }
+      setData((current) => (current ? { ...current, session: null } : current));
       router.push("/employee/clock");
       router.refresh();
     } finally {
@@ -252,7 +253,7 @@ export function EmployeeDashboard() {
             ) : (
               <LogOut className="h-4 w-4" aria-hidden />
             )}
-            {t("employee.dashboard.clockOutBtn")}
+            {clockingOut ? t("common.completing") : t("employee.dashboard.clockOutBtn")}
           </button>
         }
       />

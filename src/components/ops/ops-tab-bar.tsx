@@ -13,10 +13,10 @@ export function OpsTabBar({ tabs, active }: { tabs: OpsTab[]; active: string }) 
           <Link
             key={tab.id}
             href={tab.href}
-            className={`inline-flex min-h-11 items-center gap-2 rounded-xl border px-4 py-2 text-sm font-black ${
+            className={`inline-flex min-h-11 items-center gap-2 rounded-xl border px-4 py-2 text-sm font-black transition duration-150 ${
               on
                 ? "border-[#c9a227] bg-[#081224] text-white"
-                : "border-slate-200 bg-white text-slate-800 hover:bg-slate-50"
+                : "border-slate-200 bg-white text-slate-800 hover:bg-slate-50 active:scale-[0.99]"
             }`}
           >
             {tab.label}

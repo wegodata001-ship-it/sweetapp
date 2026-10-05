@@ -113,6 +113,13 @@ function fail(action: string): FastTaskFailure | null {
       return { ok: false, status: 400, code: "NOT_ACTIVE", error: "אפשר לעכב רק משימה פעילה" };
     case "UNAUTH":
       return { ok: false, status: 401, code: "UNAUTH", error: "נדרשת התחברות" };
+    case "SHIFT_ENDED":
+      return {
+        ok: false,
+        status: 403,
+        code: "SHIFT_ENDED",
+        error: "יום העבודה הסתיים אוטומטית לאחר 12 שעות.",
+      };
     case "NEED_REASON":
       return {
         ok: false,
@@ -187,6 +194,10 @@ export async function startEmployeeTaskFast(
               )
           ) THEN 'UNAUTH'
           WHEN ${input.manager} = false AND t."assignedToUserId" IS DISTINCT FROM ${input.userId} THEN 'NOT_YOURS'
+          WHEN ${input.manager} = false AND NOT EXISTS (
+            SELECT 1 FROM "WorkSession" w
+            WHERE w."userId" = ${input.userId} AND w.status = 'ACTIVE'
+          ) THEN 'SHIFT_ENDED'
           WHEN t.status = 'COMPLETED' THEN 'ALREADY_DONE'
           WHEN t.status = 'IN_PROGRESS' AND t."startedAt" IS NOT NULL THEN 'ALREADY'
           WHEN ${input.manager} = false AND EXISTS (
@@ -278,6 +289,10 @@ export async function completeEmployeeTaskFast(
               )
           ) THEN 'UNAUTH'
           WHEN ${input.manager} = false AND t."assignedToUserId" IS DISTINCT FROM ${input.userId} THEN 'NOT_YOURS'
+          WHEN ${input.manager} = false AND NOT EXISTS (
+            SELECT 1 FROM "WorkSession" w
+            WHERE w."userId" = ${input.userId} AND w.status = 'ACTIVE'
+          ) THEN 'SHIFT_ENDED'
           WHEN t.status = 'COMPLETED' THEN 'ALREADY'
           WHEN t.status <> 'IN_PROGRESS' OR t."startedAt" IS NULL THEN 'NOT_STARTED'
           WHEN t."estimatedMinutes" > 0
@@ -463,6 +478,10 @@ export async function delayEmployeeTaskFast(
               )
           ) THEN 'UNAUTH'
           WHEN ${input.manager} = false AND t."assignedToUserId" IS DISTINCT FROM ${input.userId} THEN 'NOT_YOURS'
+          WHEN ${input.manager} = false AND NOT EXISTS (
+            SELECT 1 FROM "WorkSession" w
+            WHERE w."userId" = ${input.userId} AND w.status = 'ACTIVE'
+          ) THEN 'SHIFT_ENDED'
           WHEN t.status = 'DELAYED' THEN 'ALREADY'
           WHEN t.status <> 'IN_PROGRESS' THEN 'NOT_ACTIVE'
           ELSE 'DELAY'
