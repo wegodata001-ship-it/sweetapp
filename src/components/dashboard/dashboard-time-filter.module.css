@@ -1,4 +1,5 @@
 .wrap {
+  position: relative;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -146,4 +147,121 @@
   box-shadow:
     0 0 20px rgba(212, 175, 55, 0.35),
     inset 0 1px 0 rgba(255, 255, 255, 0.18);
+}
+
+.plus:not(.active) {
+  min-width: 32px;
+  padding-inline: 0.55rem;
+  color: #f6e27a;
+  border-color: rgba(212, 175, 55, 0.45);
+  background: rgba(212, 175, 55, 0.12);
+}
+
+.popover {
+  position: absolute;
+  top: calc(100% + 8px);
+  inset-inline-start: 0;
+  z-index: 40;
+  width: min(320px, calc(100vw - 24px));
+  max-width: calc(100vw - 24px);
+  padding: 0.75rem;
+  border-radius: 14px;
+  border: 1px solid rgba(212, 175, 55, 0.28);
+  background: #10233a;
+  box-shadow: 0 12px 32px rgba(8, 15, 28, 0.45);
+  color: #e2e8f0;
+}
+
+.popoverTitle {
+  margin: 0 0 0.6rem;
+  font-size: 0.75rem;
+  font-weight: 800;
+  color: #f6e27a;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin-bottom: 0.55rem;
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: rgba(226, 232, 240, 0.82);
+}
+
+.field input {
+  width: 100%;
+  min-height: 34px;
+  padding: 0.3rem 0.5rem;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.06);
+  color: #f8fafc;
+  font-size: 0.8rem;
+}
+
+.field input:focus {
+  outline: 2px solid rgba(212, 175, 55, 0.45);
+  outline-offset: 1px;
+}
+
+.error {
+  margin: 0 0 0.5rem;
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: #fecaca;
+}
+
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.4rem;
+}
+
+.ghost,
+.apply {
+  min-height: 32px;
+  padding: 0.3rem 0.75rem;
+  border-radius: 10px;
+  font-size: 0.7rem;
+  font-weight: 800;
+}
+
+.ghost {
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: transparent;
+  color: rgba(226, 232, 240, 0.85);
+}
+
+.apply {
+  border: 1px solid rgba(251, 191, 36, 0.5);
+  background: linear-gradient(135deg, rgba(212, 175, 55, 0.85), rgba(249, 115, 22, 0.7));
+  color: #1c1917;
+}
+
+@media (max-width: 430px) {
+  .hero .group,
+  .wedding .group,
+  .z .group,
+  .expense .group {
+    width: 100%;
+  }
+
+  .hero .btn,
+  .wedding .btn,
+  .z .btn,
+  .expense .btn {
+    flex: 1 1 calc(50% - 0.25rem);
+    white-space: normal;
+    text-align: center;
+  }
+
+  .plus {
+    flex: 1 1 100%;
+  }
+
+  .popover {
+    inset-inline: 0;
+    width: auto;
+  }
 }

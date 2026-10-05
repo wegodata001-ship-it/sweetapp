@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import {
   Building2,
   Hammer,
@@ -12,8 +12,7 @@ import {
 import { useI18n } from "@/components/i18n-provider";
 import { formatShekel } from "@/lib/format-shekel";
 import type { ExpenseCategoryMetrics } from "@/lib/dashboard/financial-engine";
-import type { DashboardTimeRange } from "@/lib/dashboard/time-range";
-import { DashboardTimeFilter } from "@/components/dashboard/dashboard-time-filter";
+import type { DashboardPeriod } from "@/lib/dashboard/dashboard-period";
 import { smoothLinePath } from "@/components/dashboard/chart-utils";
 import fade from "@/components/dashboard/section-fade.module.css";
 import premium from "@/components/dashboard/dashboard-premium.module.css";
@@ -37,29 +36,31 @@ const LABEL_KEYS: Record<ExpenseCategoryMetrics["type"], string> = {
   INVESTMENTS: "dashboard.redesign.expenseDev",
 };
 
-const PERIOD_LABEL_KEYS: Record<DashboardTimeRange, string> = {
-  today: "dashboard.redesign.today",
-  week: "dashboard.redesign.week",
-  month: "dashboard.redesign.filter.month",
-};
-
-function amountForRange(card: ExpenseCategoryMetrics, range: DashboardTimeRange): number {
-  if (range === "today") return card.today;
-  if (range === "week") return card.week;
+function amountForRange(card: ExpenseCategoryMetrics, period: DashboardPeriod): number {
+  if (period === "today") return card.today;
+  if (period === "week") return card.week;
+  if (period === "custom") return card.custom;
   return card.month;
 }
 
-export function ExpenseCategoryCards({ cards }: { cards: ExpenseCategoryMetrics[] }) {
+export function ExpenseCategoryCards({
+  cards,
+  period,
+  periodLabel,
+}: {
+  cards: ExpenseCategoryMetrics[];
+  period: DashboardPeriod;
+  periodLabel: string;
+}) {
   const { t } = useI18n();
-  const [range, setRange] = useState<DashboardTimeRange>("month");
 
   const displayCards = useMemo(
     () =>
       cards.map((card) => ({
         ...card,
-        periodAmount: amountForRange(card, range),
+        periodAmount: amountForRange(card, period),
       })),
-    [cards, range],
+    [cards, period],
   );
 
   return (
@@ -68,10 +69,10 @@ export function ExpenseCategoryCards({ cards }: { cards: ExpenseCategoryMetrics[
         <h2 className="font-arabic-brand text-[13px] font-black text-slate-800">
           {t("dashboard.redesign.sectionExpenses")}
         </h2>
-        <DashboardTimeFilter value={range} onChange={setRange} variant="expense" />
+        <p className="mt-0.5 text-[10px] font-bold text-slate-500">{periodLabel}</p>
       </div>
       <div
-        key={range}
+        key={period}
         className={`grid flex-1 grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5 lg:grid-rows-1 ${fade.fade}`}
       >
         {displayCards.map((card) => {
@@ -98,7 +99,7 @@ export function ExpenseCategoryCards({ cards }: { cards: ExpenseCategoryMetrics[
                 {t(LABEL_KEYS[card.type])}
               </p>
               <p className="mt-1 text-[11px] font-semibold text-slate-500">
-                {t(PERIOD_LABEL_KEYS[range])}:{" "}
+                {periodLabel}:{" "}
                 <span className="text-sm font-black text-slate-900">{formatShekel(card.periodAmount)}</span>
               </p>
               <svg viewBox="0 0 64 22" className="mt-auto h-5 w-full opacity-75" aria-hidden>

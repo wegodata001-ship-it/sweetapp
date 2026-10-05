@@ -3,6 +3,7 @@ import {
   normalizeEmployeePayType,
   type EmployeePayType,
 } from "@/lib/finance/employee-pay-types";
+import { documentNotesForStorage } from "@/lib/finance/document-business-date";
 import { DEFAULT_EXPENSE_TYPE, normalizeExpenseType, type ExpenseType } from "@/lib/finance/expense-types";
 
 export type { ExpenseType };
@@ -128,6 +129,8 @@ export type IncomeExpensePayload = {
   expenseType?: ExpenseType;
   counterpartyName: string;
   docDate: string;
+  /** הערות מסמך — FinancialDocument.notes */
+  documentNotes: string;
   documentType: string;
   paymentMethod: string;
   /** סכום ששולם במסגרת מסמך זה (שדה ישן לתאימות) */
@@ -203,6 +206,7 @@ export function cloneIncomePayloadForNewDocument(source: IncomeExpensePayload, d
     clientMode: source.clientMode,
     counterpartyName: source.counterpartyName,
     docDate,
+    documentNotes: "",
     documentType: source.documentType,
     lines: source.lines.map((line) => ({
       id: newLineId(),
@@ -223,6 +227,7 @@ export function emptyIncomeExpensePayload(kind: "income" | "expense"): IncomeExp
     ...(kind === "expense" ? { expenseType: DEFAULT_EXPENSE_TYPE } : {}),
     counterpartyName: "",
     docDate: "",
+    documentNotes: "",
     documentType: DOCUMENT_TYPE_OPTIONS[0],
     paymentMethod: "",
     paymentPaidAmount: "",
@@ -445,6 +450,7 @@ export function parsePayload(raw: unknown): FinanceDocumentPayload | null {
       ...(kind === "expense" ? { expenseType: normalizeExpenseType(o.expenseType) } : {}),
       counterpartyName: String(o.counterpartyName ?? ""),
       docDate: String(o.docDate ?? ""),
+      documentNotes: documentNotesForStorage(String(o.documentNotes ?? "")) ?? "",
       documentType: docTypeRaw || DOCUMENT_TYPE_OPTIONS[0],
       paymentMethod: String(o.paymentMethod ?? ""),
       paymentPaidAmount: String(o.paymentPaidAmount ?? ""),

@@ -287,7 +287,7 @@ export async function replaceCashFlowForDocument(
             paymentId: p.id,
             documentId,
             relatedDocumentId: documentId,
-            entryDate: p.createdAt,
+            entryDate,
             isDirect: false,
           });
         }
@@ -306,7 +306,7 @@ export async function replaceCashFlowForDocument(
             paymentId: p.id,
             documentId,
             relatedDocumentId: documentId,
-            entryDate: p.createdAt,
+            entryDate,
             isDirect: false,
           });
         }

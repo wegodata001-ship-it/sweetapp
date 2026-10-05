@@ -27,5 +27,7 @@ export function boundsForDashboardRange(
     return { from, to: todayEnd };
   }
 
-  return { from: monthStart(0, anchor), to: todayEnd };
+  const from = monthStart(0, anchor);
+  const to = new Date(anchor.getFullYear(), anchor.getMonth() + 1, 0, 23, 59, 59, 999);
+  return { from, to };
 }

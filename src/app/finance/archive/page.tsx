@@ -1394,6 +1394,12 @@ export default function FinanceArchivePage() {
                         <p className="text-xs text-slate-500">
                           {row.category} · {row.doc_date ?? "—"}
                         </p>
+                        {row.notes?.trim() ? (
+                          <p className="whitespace-pre-wrap text-xs text-slate-600">
+                            <span className="font-bold text-slate-500">{t("archive.documentNotes")}: </span>
+                            {row.notes.trim()}
+                          </p>
+                        ) : null}
                         {row.sent_to_cpa ? (
                           <p className="flex items-center gap-1 text-[11px] font-semibold text-emerald-800">
                             <Clock4 className="h-3 w-3" aria-hidden />
@@ -1830,7 +1836,15 @@ function InvoiceArchiveList({
                     />
                   </td>
                   <td className="px-3 py-3 align-top text-slate-700">{row.doc_date ?? "—"}</td>
-                  <td className="px-3 py-3 align-top font-semibold text-slate-900">{row.title}</td>
+                  <td className="px-3 py-3 align-top font-semibold text-slate-900">
+                    <span>{row.title}</span>
+                    {row.notes?.trim() ? (
+                      <p className="mt-1 whitespace-pre-wrap text-xs font-normal text-slate-500">
+                        <span className="font-semibold">{t("archive.documentNotes")}: </span>
+                        {row.notes.trim()}
+                      </p>
+                    ) : null}
+                  </td>
                   <td className="px-3 py-3 align-top text-slate-700">{row.document_type || "—"}</td>
                   <td className="px-3 py-3 align-top text-slate-700">{archivePartyName(row)}</td>
                   <td className="px-3 py-3 align-top font-bold tabular-nums text-slate-900">

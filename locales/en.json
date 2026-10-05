@@ -465,6 +465,9 @@
       "heroIncomeWeek": "Income this week",
       "heroCashIncomeWeek": "Cash income this week",
       "heroExpensesWeek": "Expenses this week",
+      "heroIncomeCustom": "Income in period",
+      "heroCashIncomeCustom": "Cash income in period",
+      "heroExpensesCustom": "Expenses in period",
       "heroProfitLossMonth": "Profit / loss this month",
       "oweOthers": "How much I owe others",
       "oweOthersName": "Name",
@@ -565,7 +568,13 @@
         "week": "This week",
         "7d": "7 days",
         "30d": "30 days",
-        "month": "This month"
+        "month": "This month",
+        "custom": "Custom range",
+        "fromDate": "From date",
+        "toDate": "To date",
+        "apply": "Show",
+        "invalidDate": "Invalid date",
+        "orderError": "Start date must be before end date"
       },
       "chartTasks": "Daily task performance",
       "tasksOnTime": "On time",
@@ -1454,10 +1463,15 @@
       "intro": "Record expenses by payment category — suppliers, daily, workers, external, and investments.",
       "heading": "Expense registration"
     },
+    "document": {
+      "notes": "Document notes (optional)",
+      "notesPlaceholder": "Add a general note for the document..."
+    },
     "event": {
       "title": "Event details",
       "trayQty": "Trays / utensils quantity",
-      "returnDate": "Return date"
+      "returnDate": "Return date",
+      "notes": "Notes"
     },
     "lines": {
       "title": "Line items",
@@ -1521,6 +1535,7 @@
     "filterCustomer": "Customer",
     "filterSupplier": "Supplier",
     "filterSearchPlaceholder": "Document number, name, or free text…",
+    "documentNotes": "Document notes",
     "thNumber": "Doc #",
     "thDate": "Date",
     "thCustomer": "Customer / supplier",

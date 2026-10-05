@@ -465,6 +465,9 @@
       "heroIncomeWeek": "إيرادات الأسبوع",
       "heroCashIncomeWeek": "إيرادات نقدية للأسبوع",
       "heroExpensesWeek": "مصروفات الأسبوع",
+      "heroIncomeCustom": "إيرادات الفترة",
+      "heroCashIncomeCustom": "إيرادات نقدية للفترة",
+      "heroExpensesCustom": "مصروفات الفترة",
       "heroProfitLossMonth": "ربح / خسارة الشهر",
       "oweOthers": "كم عليّ للآخرين",
       "oweOthersName": "الاسم",
@@ -565,7 +568,13 @@
         "week": "هذا الأسبوع",
         "7d": "7 أيام",
         "30d": "30 يوم",
-        "month": "هذا الشهر"
+        "month": "هذا الشهر",
+        "custom": "فترة مخصصة",
+        "fromDate": "من تاريخ",
+        "toDate": "إلى تاريخ",
+        "apply": "عرض",
+        "invalidDate": "تاريخ غير صالح",
+        "orderError": "تاريخ البداية يجب أن يكون قبل تاريخ النهاية"
       },
       "chartTasks": "أداء المهام اليومية",
       "tasksOnTime": "في الوقت",
@@ -1454,10 +1463,15 @@
       "intro": "تسجيل المصروفات حسب نوع الدفع — موردين، يومي، عمال، خارجي واستثمارات.",
       "heading": "تسجيل المصروفات"
     },
+    "document": {
+      "notes": "ملاحظات المستند (اختياري)",
+      "notesPlaceholder": "أضف ملاحظة عامة للمستند..."
+    },
     "event": {
       "title": "تفاصيل طلب الأعراس",
       "trayQty": "عدد الأطباق / الأدوات",
-      "returnDate": "تاريخ الإرجاع"
+      "returnDate": "تاريخ الإرجاع",
+      "notes": "ملاحظات"
     },
     "lines": {
       "title": "أسطر الأصناف",
@@ -1521,6 +1535,7 @@
     "filterCustomer": "العميل",
     "filterSupplier": "المورد",
     "filterSearchPlaceholder": "رقم المستند، الاسم، أو نص حر…",
+    "documentNotes": "ملاحظات المستند",
     "thNumber": "رقم المستند",
     "thDate": "التاريخ",
     "thCustomer": "العميل / المورد",

@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
   buildItemsFromIncomeExpense,
-  combineIncomeNotes,
   incomeExpenseDepositAmount,
   incomeExpenseGrandTotal,
   isWorkerExpensePayload,
@@ -28,6 +27,7 @@ import {
 import { normalizeExpenseType } from "@/lib/finance/expense-types";
 import { SupplierNameRequiredError, isDatabaseSaveError, resolveExpenseSupplier } from "@/lib/finance/supplier-resolve";
 import { recordSupplierPriceHistoryFromExpense } from "@/lib/procurement/record-expense-prices";
+import { documentNotesForStorage, resolveWrittenDocDate } from "@/lib/finance/document-business-date";
 import { prisma, prismaAny } from "@/lib/prisma";
 import { requireDb } from "@/lib/api-route";
 import { getSessionFromCookie } from "@/lib/auth/get-session";
@@ -137,7 +137,7 @@ export async function POST(req: NextRequest) {
           paymentStatus: total <= 0 ? "unpaid" : "paid",
           notes: null,
           metadata: asJson(meta),
-          docDate: z.zDate ? new Date(z.zDate) : body.docDate ? new Date(body.docDate) : null,
+          docDate: resolveWrittenDocDate(z.zDate, body.docDate),
           pdfStoragePath: null,
           sentToCpa: false,
         },
@@ -231,9 +231,9 @@ export async function POST(req: NextRequest) {
         paidAmount: 0,
         remainingAmount: calculatedTotal,
         paymentStatus: "unpaid",
-        notes: combineIncomeNotes(ie),
+        notes: documentNotesForStorage(ie.documentNotes),
         metadata: asJson(meta),
-        docDate: ie.docDate ? new Date(ie.docDate) : body.docDate ? new Date(body.docDate) : null,
+        docDate: resolveWrittenDocDate(ie.docDate, body.docDate),
         pdfStoragePath: null,
         sentToCpa: false,
         items: {

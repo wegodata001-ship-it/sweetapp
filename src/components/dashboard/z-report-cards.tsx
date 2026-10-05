@@ -1,12 +1,12 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { Banknote, CreditCard, FileCheck, Layers, Receipt } from "lucide-react";
 import { CountUp } from "@/components/count-up";
 import { useI18n } from "@/components/i18n-provider";
-import { DashboardTimeFilter } from "@/components/dashboard/dashboard-time-filter";
 import type { ZPosMetrics } from "@/lib/dashboard/financial-engine";
-import type { DashboardTimeRange, RangeKeyed } from "@/lib/dashboard/time-range";
+import type { DashboardPeriod } from "@/lib/dashboard/dashboard-period";
+import type { RangeKeyed } from "@/lib/dashboard/time-range";
 import fade from "@/components/dashboard/section-fade.module.css";
 import styles from "./z-report-cards.module.css";
 
@@ -34,18 +34,30 @@ const TONE_CLASS: Record<(typeof ITEMS)[number]["tone"], string> = {
   other: styles.other,
 };
 
-export function ZReportCards({ dataByRange }: { dataByRange: RangeKeyed<ZPosMetrics> }) {
+export function ZReportCards({
+  dataByRange,
+  custom,
+  period,
+  periodLabel,
+}: {
+  dataByRange: RangeKeyed<ZPosMetrics>;
+  custom: ZPosMetrics;
+  period: DashboardPeriod;
+  periodLabel: string;
+}) {
   const { t } = useI18n();
-  const [range, setRange] = useState<DashboardTimeRange>("month");
-  const data = useMemo(() => dataByRange[range], [dataByRange, range]);
+  const data = useMemo(
+    () => (period === "custom" ? custom : dataByRange[period]),
+    [custom, dataByRange, period],
+  );
 
   return (
     <div className={styles.section}>
       <div className={styles.head}>
         <h2 className={`${styles.title} font-arabic-brand`}>{t("dashboard.redesign.sectionZ")}</h2>
-        <DashboardTimeFilter value={range} onChange={setRange} variant="z" />
+        <p className={styles.period}>{periodLabel}</p>
       </div>
-      <div key={range} className={`${styles.grid} ${fade.fade}`}>
+      <div key={period} className={`${styles.grid} ${fade.fade}`}>
         {ITEMS.map((item) => {
           const Icon = item.icon;
           const value = data[item.field];

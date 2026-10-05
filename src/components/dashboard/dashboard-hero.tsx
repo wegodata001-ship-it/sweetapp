@@ -8,13 +8,16 @@ import { CustomerDebtModal, FinancialSummaryModal, OpenPayablesModal } from "@/c
 import { DashboardTimeFilter } from "@/components/dashboard/dashboard-time-filter";
 import { useI18n } from "@/components/i18n-provider";
 import { StaffAlertsBell } from "@/components/staff-alerts-bell";
-import type { DashboardHeroMetrics } from "@/lib/dashboard/financial-engine";
-import { DEFAULT_HERO_RANGE, heroPeriodCacheKey, heroSlice } from "@/lib/dashboard/hero-period";
-import type { DashboardTimeRange } from "@/lib/dashboard/time-range";
+import type { CustomPeriodMetrics, DashboardHeroMetrics } from "@/lib/dashboard/financial-engine";
+import type { DashboardPeriodSelection } from "@/lib/dashboard/dashboard-period";
+import { heroPeriodCacheKey, heroSlice } from "@/lib/dashboard/hero-period";
 import styles from "./dashboard-hero.module.css";
 
 type Props = {
   hero: DashboardHeroMetrics;
+  customPeriod: CustomPeriodMetrics | null;
+  selection: DashboardPeriodSelection;
+  onSelectionChange: (selection: DashboardPeriodSelection) => void;
   updatedAt: string | null;
   loading: boolean;
   onRefresh: () => void;
@@ -61,29 +64,45 @@ function MiniKpi({
   );
 }
 
-export function DashboardHero({ hero, updatedAt, loading, onRefresh }: Props) {
+export function DashboardHero({
+  hero,
+  customPeriod,
+  selection,
+  onSelectionChange,
+  updatedAt,
+  loading,
+  onRefresh,
+}: Props) {
   const { t } = useI18n();
-  const [range, setRange] = useState<DashboardTimeRange>(DEFAULT_HERO_RANGE);
-  const periodKey = heroPeriodCacheKey(range, updatedAt);
-  const slice = useMemo(() => heroSlice(hero, range), [hero, range, periodKey]);
+  const periodKey = heroPeriodCacheKey(selection.period, updatedAt, selection);
+  const slice = useMemo(
+    () => heroSlice(hero, selection.period, customPeriod),
+    [hero, selection.period, customPeriod, periodKey],
+  );
   const incomeLabel =
-    range === "today"
+    selection.period === "today"
       ? t("dashboard.redesign.heroTodayIncome")
-      : range === "week"
+      : selection.period === "week"
         ? t("dashboard.redesign.heroIncomeWeek")
-        : t("dashboard.redesign.heroIncomeMonth");
+        : selection.period === "custom"
+          ? t("dashboard.redesign.heroIncomeCustom")
+          : t("dashboard.redesign.heroIncomeMonth");
   const cashIncomeLabel =
-    range === "today"
+    selection.period === "today"
       ? t("dashboard.redesign.heroCashIncomeToday")
-      : range === "week"
+      : selection.period === "week"
         ? t("dashboard.redesign.heroCashIncomeWeek")
-        : t("dashboard.redesign.heroCashIncomeMonth");
+        : selection.period === "custom"
+          ? t("dashboard.redesign.heroCashIncomeCustom")
+          : t("dashboard.redesign.heroCashIncomeMonth");
   const expensesLabel =
-    range === "today"
+    selection.period === "today"
       ? t("dashboard.redesign.heroExpensesToday")
-      : range === "week"
+      : selection.period === "week"
         ? t("dashboard.redesign.heroExpensesWeek")
-        : t("dashboard.redesign.heroExpensesMonth");
+        : selection.period === "custom"
+          ? t("dashboard.redesign.heroExpensesCustom")
+          : t("dashboard.redesign.heroExpensesMonth");
   const [debtTotal, setDebtTotal] = useState(0);
   const [debtCount, setDebtCount] = useState(0);
   const [debtOpen, setDebtOpen] = useState(false);
@@ -135,7 +154,7 @@ export function DashboardHero({ hero, updatedAt, loading, onRefresh }: Props) {
       </div>
 
       <div className={styles.toolbar}>
-        <DashboardTimeFilter value={range} onChange={setRange} variant="hero" />
+        <DashboardTimeFilter selection={selection} onChange={onSelectionChange} variant="hero" />
         <div className={styles.toolbarActions}>
           <span className={styles.toolBtn}>
             {t("dashboard.redesign.lastUpdate")}: {timeLabel}

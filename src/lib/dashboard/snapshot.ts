@@ -18,6 +18,7 @@ import {
   minutesSinceMidnightIsrael,
   parseCalendarDateToDbDate,
 } from "@/lib/staff/work-date";
+import { customRangeBounds } from "@/lib/dashboard/dashboard-period";
 import { boundsForDashboardRange } from "@/lib/dashboard/time-range";
 import type { CashRow } from "@/lib/dashboard/financial-engine";
 
@@ -29,9 +30,11 @@ export type DashboardWindowCounts = {
   zToday: number;
   zWeek: number;
   zMonth: number;
+  zCustom: number;
   weddingToday: { weddings: number; orders: number; documented: number };
   weddingWeek: { weddings: number; orders: number; documented: number };
   weddingMonth: { weddings: number; orders: number; documented: number };
+  weddingCustom: { weddings: number; orders: number; documented: number };
 };
 
 export type DashboardSnapshot = {
@@ -69,29 +72,42 @@ export type DashboardSnapshot = {
 };
 
 type ShareSlot<T> = { current: Promise<T> | null; value: T | null; at: number };
-const snapshotSlot: ShareSlot<DashboardSnapshot> = { current: null, value: null, at: 0 };
+const snapshotSlots = new Map<string, ShareSlot<DashboardSnapshot>>();
 
-function shareSnapshot(load: () => Promise<DashboardSnapshot>, ttlMs = 8_000): Promise<DashboardSnapshot> {
-  if (snapshotSlot.value && Date.now() - snapshotSlot.at < ttlMs) {
-    return Promise.resolve(snapshotSlot.value);
+function snapshotShareKey(opts?: { fromDate?: string; toDate?: string }): string {
+  if (opts?.fromDate && opts.toDate) return `custom:${opts.fromDate}:${opts.toDate}`;
+  return "preset";
+}
+
+function shareSnapshot(
+  key: string,
+  load: () => Promise<DashboardSnapshot>,
+  ttlMs = 8_000,
+): Promise<DashboardSnapshot> {
+  let slot = snapshotSlots.get(key);
+  if (!slot) {
+    slot = { current: null, value: null, at: 0 };
+    snapshotSlots.set(key, slot);
   }
-  if (!snapshotSlot.current) {
-    snapshotSlot.current = load()
+  if (slot.value && Date.now() - slot.at < ttlMs) {
+    return Promise.resolve(slot.value);
+  }
+  if (!slot.current) {
+    slot.current = load()
       .then((value) => {
-        snapshotSlot.value = value;
-        snapshotSlot.at = Date.now();
+        slot!.value = value;
+        slot!.at = Date.now();
         return value;
       })
       .finally(() => {
-        snapshotSlot.current = null;
+        slot!.current = null;
       });
   }
-  return snapshotSlot.current;
+  return slot.current;
 }
 
 export function clearDashboardSnapshot(): void {
-  snapshotSlot.value = null;
-  snapshotSlot.at = 0;
+  snapshotSlots.clear();
 }
 
 function parseJsonArray<T>(value: unknown): T[] {
@@ -135,11 +151,18 @@ function monthStart(offset = 0) {
   return new Date(d.getFullYear(), d.getMonth() + offset, 1, 0, 0, 0, 0);
 }
 
-export async function loadDashboardSnapshot(): Promise<DashboardSnapshot> {
-  return shareSnapshot(loadDashboardSnapshotUncached);
+export async function loadDashboardSnapshot(opts?: {
+  fromDate?: string;
+  toDate?: string;
+}): Promise<DashboardSnapshot> {
+  const key = snapshotShareKey(opts);
+  return shareSnapshot(key, () => loadDashboardSnapshotUncached(opts));
 }
 
-async function loadDashboardSnapshotUncached(): Promise<DashboardSnapshot> {
+async function loadDashboardSnapshotUncached(opts?: {
+  fromDate?: string;
+  toDate?: string;
+}): Promise<DashboardSnapshot> {
   const chartFrom = new Date();
   chartFrom.setDate(chartFrom.getDate() - 35);
   chartFrom.setHours(0, 0, 0, 0);
@@ -153,7 +176,15 @@ async function loadDashboardSnapshotUncached(): Promise<DashboardSnapshot> {
   const dailyHorizon = new Date(today0);
   dailyHorizon.setDate(dailyHorizon.getDate() + 4);
   const weekFrom = boundsForDashboardRange("week").from;
-  const monthFrom = boundsForDashboardRange("month").from;
+  const monthBounds = boundsForDashboardRange("month");
+  const monthFrom = monthBounds.from;
+  const monthTo = monthBounds.to;
+  const customBounds =
+    opts?.fromDate && opts.toDate ? customRangeBounds(opts.fromDate, opts.toDate) : null;
+  const customFrom = customBounds?.from ?? monthFrom;
+  const customTo = customBounds?.to ?? monthTo;
+  const cashFrom =
+    customBounds && customBounds.from.getTime() < chartFrom.getTime() ? customBounds.from : chartFrom;
   const workDate = parseCalendarDateToDbDate(israelCalendarDateString());
   const nowMin = minutesSinceMidnightIsrael(new Date());
   const widgetToday = new Date();
@@ -169,15 +200,19 @@ async function loadDashboardSnapshotUncached(): Promise<DashboardSnapshot> {
       z_today: number;
       z_week: number;
       z_month: number;
+      z_custom: number;
       weddings_today: number;
       weddings_week: number;
       weddings_month: number;
+      weddings_custom: number;
       orders_today: number;
       orders_week: number;
       orders_month: number;
+      orders_custom: number;
       documented_today: number;
       documented_week: number;
       documented_month: number;
+      documented_custom: number;
       new_customers: number;
       overdue_tasks: number;
       pending_checks: number;
@@ -207,8 +242,12 @@ async function loadDashboardSnapshotUncached(): Promise<DashboardSnapshot> {
             OR ("docDate" IS NULL AND "createdAt" >= ${weekFrom} AND "createdAt" <= ${todayEnd}))) AS z_week,
       (SELECT count(*)::int FROM "FinancialDocument"
         WHERE "documentType" = 'דוח Z'
-          AND (("docDate" >= (${monthFrom} AT TIME ZONE 'UTC')::date AND "docDate" <= (${todayEnd} AT TIME ZONE 'UTC')::date)
-            OR ("docDate" IS NULL AND "createdAt" >= ${monthFrom} AND "createdAt" <= ${todayEnd}))) AS z_month,
+          AND (("docDate" >= (${monthFrom} AT TIME ZONE 'UTC')::date AND "docDate" <= (${monthTo} AT TIME ZONE 'UTC')::date)
+            OR ("docDate" IS NULL AND "createdAt" >= ${monthFrom} AND "createdAt" <= ${monthTo}))) AS z_month,
+      (SELECT count(*)::int FROM "FinancialDocument"
+        WHERE "documentType" = 'דוח Z'
+          AND (("docDate" >= (${customFrom} AT TIME ZONE 'UTC')::date AND "docDate" <= (${customTo} AT TIME ZONE 'UTC')::date)
+            OR ("docDate" IS NULL AND "createdAt" >= ${customFrom} AND "createdAt" <= ${customTo}))) AS z_custom,
       (SELECT count(*)::int FROM "FutureOrder"
         WHERE "orderCategory" = ${ORDER_CATEGORY_WEDDING}
           AND "createdAt" >= ${today0} AND "createdAt" <= ${todayEnd}) AS weddings_today,
@@ -217,7 +256,10 @@ async function loadDashboardSnapshotUncached(): Promise<DashboardSnapshot> {
           AND "createdAt" >= ${weekFrom} AND "createdAt" <= ${todayEnd}) AS weddings_week,
       (SELECT count(*)::int FROM "FutureOrder"
         WHERE "orderCategory" = ${ORDER_CATEGORY_WEDDING}
-          AND "createdAt" >= ${monthFrom} AND "createdAt" <= ${todayEnd}) AS weddings_month,
+          AND "createdAt" >= ${monthFrom} AND "createdAt" <= ${monthTo}) AS weddings_month,
+      (SELECT count(*)::int FROM "FutureOrder"
+        WHERE "orderCategory" = ${ORDER_CATEGORY_WEDDING}
+          AND "createdAt" >= ${customFrom} AND "createdAt" <= ${customTo}) AS weddings_custom,
       (SELECT count(*)::int FROM "FutureOrder"
         WHERE "orderCategory" = ${ORDER_CATEGORY_DAILY}
           AND "createdAt" >= ${today0} AND "createdAt" <= ${todayEnd}) AS orders_today,
@@ -226,7 +268,10 @@ async function loadDashboardSnapshotUncached(): Promise<DashboardSnapshot> {
           AND "createdAt" >= ${weekFrom} AND "createdAt" <= ${todayEnd}) AS orders_week,
       (SELECT count(*)::int FROM "FutureOrder"
         WHERE "orderCategory" = ${ORDER_CATEGORY_DAILY}
-          AND "createdAt" >= ${monthFrom} AND "createdAt" <= ${todayEnd}) AS orders_month,
+          AND "createdAt" >= ${monthFrom} AND "createdAt" <= ${monthTo}) AS orders_month,
+      (SELECT count(*)::int FROM "FutureOrder"
+        WHERE "orderCategory" = ${ORDER_CATEGORY_DAILY}
+          AND "createdAt" >= ${customFrom} AND "createdAt" <= ${customTo}) AS orders_custom,
       (SELECT count(*)::int FROM "FinancialDocument"
         WHERE category = 'הכנסה' AND "sentToCpa" = true
           AND (("docDate" >= (${today0} AT TIME ZONE 'UTC')::date AND "docDate" <= (${todayEnd} AT TIME ZONE 'UTC')::date)
@@ -237,8 +282,12 @@ async function loadDashboardSnapshotUncached(): Promise<DashboardSnapshot> {
             OR ("docDate" IS NULL AND "createdAt" >= ${weekFrom} AND "createdAt" <= ${todayEnd}))) AS documented_week,
       (SELECT count(*)::int FROM "FinancialDocument"
         WHERE category = 'הכנסה' AND "sentToCpa" = true
-          AND (("docDate" >= (${monthFrom} AT TIME ZONE 'UTC')::date AND "docDate" <= (${todayEnd} AT TIME ZONE 'UTC')::date)
-            OR ("docDate" IS NULL AND "createdAt" >= ${monthFrom} AND "createdAt" <= ${todayEnd}))) AS documented_month,
+          AND (("docDate" >= (${monthFrom} AT TIME ZONE 'UTC')::date AND "docDate" <= (${monthTo} AT TIME ZONE 'UTC')::date)
+            OR ("docDate" IS NULL AND "createdAt" >= ${monthFrom} AND "createdAt" <= ${monthTo}))) AS documented_month,
+      (SELECT count(*)::int FROM "FinancialDocument"
+        WHERE category = 'הכנסה' AND "sentToCpa" = true
+          AND (("docDate" >= (${customFrom} AT TIME ZONE 'UTC')::date AND "docDate" <= (${customTo} AT TIME ZONE 'UTC')::date)
+            OR ("docDate" IS NULL AND "createdAt" >= ${customFrom} AND "createdAt" <= ${customTo}))) AS documented_custom,
       (SELECT count(*)::int FROM "Customer" WHERE "createdAt" >= ${nowStart}) AS new_customers,
       (SELECT count(*)::int FROM "TaskGroup"
         WHERE "dueDate" < ${widgetToday}
@@ -274,16 +323,27 @@ async function loadDashboardSnapshotUncached(): Promise<DashboardSnapshot> {
           'source', e.source,
           'zReportId', e."zReportId",
           'expenseType', e."expenseType",
-          'documentId', e."documentId"
+          'documentId', e."documentId",
+          'documentDocDate', d."docDate"
         )), '[]'::json)
         FROM "CashFlowEntry" e
-        WHERE e."entryDate" >= ${chartFrom}) AS cash_rows,
+        LEFT JOIN "FinancialDocument" d ON d.id = e."documentId"
+        WHERE e."entryDate" >= ${cashFrom}
+          OR (d."docDate" IS NOT NULL
+            AND d."docDate" >= (${cashFrom} AT TIME ZONE 'UTC')::date
+            AND d."docDate" <= (${customTo} AT TIME ZONE 'UTC')::date)) AS cash_rows,
       (SELECT coalesce(json_agg(json_build_object('id', d.id, 'metadata', d.metadata)), '[]'::json)
         FROM "FinancialDocument" d
         WHERE d.id IN (
           SELECT DISTINCT e."documentId"
           FROM "CashFlowEntry" e
-          WHERE e."entryDate" >= ${chartFrom}
+          LEFT JOIN "FinancialDocument" fd ON fd.id = e."documentId"
+          WHERE (
+              e."entryDate" >= ${cashFrom}
+              OR (fd."docDate" IS NOT NULL
+                AND fd."docDate" >= (${cashFrom} AT TIME ZONE 'UTC')::date
+                AND fd."docDate" <= (${customTo} AT TIME ZONE 'UTC')::date)
+            )
             AND e."expenseType" IS NULL
             AND e."documentId" IS NOT NULL
         )) AS cash_meta,
@@ -396,6 +456,7 @@ async function loadDashboardSnapshotUncached(): Promise<DashboardSnapshot> {
     zReportId: r.zReportId == null ? null : String(r.zReportId),
     expenseType: r.expenseType == null ? null : String(r.expenseType),
     documentId: r.documentId == null ? null : String(r.documentId),
+    documentDocDate: asDateOrNull(r.documentDocDate),
   }));
 
   const metaByDocId = new Map<string, ExpenseType>();
@@ -484,6 +545,7 @@ async function loadDashboardSnapshotUncached(): Promise<DashboardSnapshot> {
       zToday: Number(row?.z_today ?? 0),
       zWeek: Number(row?.z_week ?? 0),
       zMonth: Number(row?.z_month ?? 0),
+      zCustom: Number(row?.z_custom ?? 0),
       weddingToday: {
         weddings: Number(row?.weddings_today ?? 0),
         orders: Number(row?.orders_today ?? 0),
@@ -498,6 +560,11 @@ async function loadDashboardSnapshotUncached(): Promise<DashboardSnapshot> {
         weddings: Number(row?.weddings_month ?? 0),
         orders: Number(row?.orders_month ?? 0),
         documented: Number(row?.documented_month ?? 0),
+      },
+      weddingCustom: {
+        weddings: Number(row?.weddings_custom ?? 0),
+        orders: Number(row?.orders_custom ?? 0),
+        documented: Number(row?.documented_custom ?? 0),
       },
     },
     newCustomers: Number(row?.new_customers ?? 0),

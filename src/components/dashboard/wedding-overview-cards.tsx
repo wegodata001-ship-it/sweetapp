@@ -1,12 +1,12 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { Gem, Heart, FileBadge } from "lucide-react";
 import { CountUp } from "@/components/count-up";
 import { useI18n } from "@/components/i18n-provider";
-import { DashboardTimeFilter } from "@/components/dashboard/dashboard-time-filter";
+import type { DashboardPeriod } from "@/lib/dashboard/dashboard-period";
 import type { WeddingSectionStats } from "@/lib/dashboard/summary";
-import type { DashboardTimeRange, RangeKeyed } from "@/lib/dashboard/time-range";
+import type { RangeKeyed } from "@/lib/dashboard/time-range";
 import fade from "@/components/dashboard/section-fade.module.css";
 import styles from "./wedding-overview-cards.module.css";
 
@@ -30,11 +30,23 @@ function MiniSpark({ value }: { value: number }) {
   );
 }
 
-export function WeddingOverviewCards({ dataByRange }: { dataByRange: RangeKeyed<WeddingSectionStats> }) {
+export function WeddingOverviewCards({
+  dataByRange,
+  custom,
+  period,
+  periodLabel,
+}: {
+  dataByRange: RangeKeyed<WeddingSectionStats>;
+  custom: WeddingSectionStats;
+  period: DashboardPeriod;
+  periodLabel: string;
+}) {
   const { t } = useI18n();
-  const [range, setRange] = useState<DashboardTimeRange>("month");
 
-  const data = useMemo(() => dataByRange[range], [dataByRange, range]);
+  const data = useMemo(
+    () => (period === "custom" ? custom : dataByRange[period]),
+    [custom, dataByRange, period],
+  );
 
   const cards = [
     { key: "weddings" as const, value: data.weddings, icon: Heart, tone: styles.weddings },
@@ -52,9 +64,9 @@ export function WeddingOverviewCards({ dataByRange }: { dataByRange: RangeKeyed<
     <div className={styles.section}>
       <div className={styles.head}>
         <h2 className={`${styles.title} font-arabic-brand`}>{t("dashboard.redesign.sectionWeddings")}</h2>
-        <DashboardTimeFilter value={range} onChange={setRange} variant="wedding" />
+        <p className={styles.period}>{periodLabel}</p>
       </div>
-      <div key={range} className={`${styles.list} ${fade.fade}`}>
+      <div key={period} className={`${styles.list} ${fade.fade}`}>
         {cards.map((c) => {
           const Icon = c.icon;
           return (

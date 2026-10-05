@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { invalidateDashboardCaches } from "@/lib/dashboard/invalidate";
 import {
   buildItemsFromIncomeExpense,
-  combineIncomeNotes,
   incomeExpenseDepositAmount,
   incomeExpenseGrandTotal,
   isWorkerExpensePayload,
@@ -21,6 +20,7 @@ import {
 import { normalizeExpenseType } from "@/lib/finance/expense-types";
 import { SupplierNameRequiredError, isDatabaseSaveError, resolveExpenseSupplier } from "@/lib/finance/supplier-resolve";
 import { recordSupplierPriceHistoryFromExpense } from "@/lib/procurement/record-expense-prices";
+import { documentNotesForStorage, resolveWrittenDocDate } from "@/lib/finance/document-business-date";
 import { syncFinancialDocumentPaymentTotals } from "@/lib/finance/sync-document-amounts";
 import {
   attachProductsToItems,
@@ -116,7 +116,7 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
             remainingAmount: 0,
             paymentStatus: total <= 0 ? "unpaid" : "paid",
             metadata: asJson(meta),
-            docDate: z.zDate ? new Date(z.zDate) : undefined,
+            docDate: resolveWrittenDocDate(z.zDate) ?? undefined,
             sentToCpa: body.sent_to_cpa ?? undefined,
           },
         });
@@ -209,8 +209,8 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
               depositNote: depositAmount > 0 ? ie.depositNote?.trim() || null : null,
               depositStatus: depositAmount > 0 ? ie.depositStatus || "open" : "open",
               metadata: asJson(meta),
-              notes: combineIncomeNotes(ie),
-              docDate: ie.docDate ? new Date(ie.docDate) : body.doc_date ? new Date(body.doc_date) : undefined,
+              notes: documentNotesForStorage(ie.documentNotes),
+              docDate: resolveWrittenDocDate(ie.docDate, body.doc_date) ?? undefined,
               sentToCpa: body.sent_to_cpa ?? undefined,
               items: {
                 create:
@@ -272,7 +272,7 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
           title: body.title,
           category: body.category,
           docDate:
-            body.doc_date === undefined ? undefined : body.doc_date ? new Date(body.doc_date) : null,
+            body.doc_date === undefined ? undefined : body.doc_date ? resolveWrittenDocDate(body.doc_date) : null,
           sentToCpa: body.sent_to_cpa,
         },
       });

@@ -20,6 +20,7 @@ function row(partial: Partial<FinanceDocumentRow>): FinanceDocumentRow {
     payment_status: "unpaid",
     deposit_amount: 0,
     doc_date: null,
+    notes: null,
     pdf_storage_path: null,
     sent_to_cpa: false,
     sent_to_cpa_at: null,

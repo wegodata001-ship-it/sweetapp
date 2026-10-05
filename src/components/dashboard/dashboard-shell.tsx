@@ -1,10 +1,19 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLiveRefresh } from "@/hooks/use-live-refresh";
 import { useI18n } from "@/components/i18n-provider";
 import type { DashboardHeroSlice, DashboardSummary } from "@/lib/dashboard/summary";
 import { fetchWithDedupe } from "@/lib/client/fetch-cache";
+import {
+  dashboardCacheKey,
+  dashboardPeriodSearch,
+  defaultDashboardPeriod,
+  formatCustomPeriodLabel,
+  localizedMonthName,
+  parseDashboardPeriodSearch,
+  type DashboardPeriodSelection,
+} from "@/lib/dashboard/dashboard-period";
 import { DashboardHero } from "@/components/dashboard/dashboard-hero";
 import { ExpenseCategoryCards } from "@/components/dashboard/expense-category-cards";
 import { ZReportCards } from "@/components/dashboard/z-report-cards";
@@ -20,9 +29,27 @@ function Shimmer({ className }: { className?: string }) {
   return <div className={`animate-pulse rounded-2xl bg-slate-300/50 ${className ?? ""}`} />;
 }
 
-const HERO_KEY = "dashboard-hero";
-const FULL_KEY = "dashboard-full";
 const CACHE_MS = 20_000;
+
+function writePeriodUrl(selection: DashboardPeriodSelection) {
+  if (typeof window === "undefined") return;
+  const qs = dashboardPeriodSearch(selection);
+  const next = qs ? `/?${qs}` : "/";
+  if (`${window.location.pathname}${window.location.search}` !== next) {
+    window.history.replaceState(null, "", next);
+  }
+}
+
+function summaryQuery(selection: DashboardPeriodSelection, section?: "hero"): string {
+  const qs = new URLSearchParams();
+  if (section) qs.set("section", section);
+  qs.set("period", selection.period);
+  if (selection.period === "custom") {
+    qs.set("from", selection.from);
+    qs.set("to", selection.to);
+  }
+  return `/api/dashboard/summary?${qs.toString()}`;
+}
 
 function isAbortError(error: unknown): boolean {
   return (
@@ -32,7 +59,9 @@ function isAbortError(error: unknown): boolean {
 }
 
 export function DashboardShell() {
-  const { t } = useI18n();
+  const { t, bcp47 } = useI18n();
+  const [selection, setSelection] = useState<DashboardPeriodSelection>(defaultDashboardPeriod);
+  const [hydrated, setHydrated] = useState(false);
   const [data, setData] = useState<DashboardSummary | null>(null);
   const [heroReady, setHeroReady] = useState(false);
   const [bodyReady, setBodyReady] = useState(false);
@@ -40,26 +69,37 @@ export function DashboardShell() {
   const [refreshing, setRefreshing] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const generationRef = useRef(0);
+  const selectionRef = useRef(selection);
+  selectionRef.current = selection;
+  const fetchKey =
+    selection.period === "custom" ? `custom:${selection.from}:${selection.to}` : "preset";
 
-  const load = useCallback(async (opts?: { force?: boolean; isCancelled?: () => boolean }) => {
+  const load = useCallback(async (opts?: {
+    force?: boolean;
+    isCancelled?: () => boolean;
+    selection?: DashboardPeriodSelection;
+  }) => {
     const cancelled = () => opts?.isCancelled?.() === true;
+    const sel = opts?.selection ?? selectionRef.current;
+    const heroKey = dashboardCacheKey("dashboard-hero", sel);
+    const fullKey = dashboardCacheKey("dashboard-full", sel);
     abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
     const generation = (generationRef.current += 1);
     if (opts?.force) {
       const { invalidateCacheKey } = await import("@/lib/client/fetch-cache");
-      invalidateCacheKey(HERO_KEY);
-      invalidateCacheKey(FULL_KEY);
+      invalidateCacheKey(heroKey);
+      invalidateCacheKey(fullKey);
     }
     if (cancelled() || controller.signal.aborted) return;
     setError(null);
     setRefreshing(true);
 
     const heroPromise = fetchWithDedupe<DashboardHeroSlice | null>(
-      HERO_KEY,
+      heroKey,
       async () => {
-        const res = await fetch("/api/dashboard/summary?section=hero", {
+        const res = await fetch(summaryQuery(sel, "hero"), {
           credentials: "same-origin",
           signal: controller.signal,
         });
@@ -71,9 +111,9 @@ export function DashboardShell() {
     );
 
     const fullPromise = fetchWithDedupe<DashboardSummary | null>(
-      FULL_KEY,
+      fullKey,
       async () => {
-        const res = await fetch("/api/dashboard/summary", {
+        const res = await fetch(summaryQuery(sel), {
           credentials: "same-origin",
           signal: controller.signal,
         });
@@ -107,12 +147,15 @@ export function DashboardShell() {
                   week: { reportsToday: 0, cashToday: 0, cardToday: 0, checksToday: 0, otherToday: 0 },
                   month: { reportsToday: 0, cashToday: 0, cardToday: 0, checksToday: 0, otherToday: 0 },
                 },
+                zPosCustom: { reportsToday: 0, cashToday: 0, cardToday: 0, checksToday: 0, otherToday: 0 },
                 weddings: { weddings: 0, orders: 0, documented: 0 },
                 weddingsByRange: {
                   today: { weddings: 0, orders: 0, documented: 0 },
                   week: { weddings: 0, orders: 0, documented: 0 },
                   month: { weddings: 0, orders: 0, documented: 0 },
                 },
+                weddingsCustom: { weddings: 0, orders: 0, documented: 0 },
+                customPeriod: hero.customPeriod ?? null,
                 dailyChart: [],
                 tasksChart: { onTime: 0, late: 0, early: 0 },
                 supplierPayments: {
@@ -145,12 +188,27 @@ export function DashboardShell() {
   }, [t]);
 
   useEffect(() => {
+    const next = parseDashboardPeriodSearch(new URLSearchParams(window.location.search));
+    setSelection(next);
+    writePeriodUrl(next);
+    setHydrated(true);
+  }, []);
+
+  useEffect(() => {
+    if (!hydrated) return;
     let cancelled = false;
-    void load({ isCancelled: () => cancelled });
+    void load({ isCancelled: () => cancelled, selection: selectionRef.current });
     return () => {
       cancelled = true;
     };
-  }, [load]);
+  }, [hydrated, fetchKey, load]);
+
+  const periodLabel = useMemo(() => {
+    if (selection.period === "today") return t("dashboard.redesign.filter.today");
+    if (selection.period === "week") return t("dashboard.redesign.filter.week");
+    if (selection.period === "custom") return formatCustomPeriodLabel(selection.from, selection.to, bcp47);
+    return `${t("dashboard.redesign.filter.month")} · ${localizedMonthName(new Date(), bcp47)}`;
+  }, [bcp47, selection, t]);
 
   useLiveRefresh({
     refresh: () => load({ force: true }),
@@ -199,9 +257,15 @@ export function DashboardShell() {
 
       <DashboardHero
         hero={data.heroMetrics}
+        customPeriod={data.customPeriod}
+        selection={selection}
+        onSelectionChange={(next) => {
+          setSelection(next);
+          writePeriodUrl(next);
+        }}
         updatedAt={data.updatedAt}
         loading={refreshing}
-        onRefresh={() => void load({ force: true })}
+        onRefresh={() => void load({ force: true, selection })}
       />
 
       {!bodyReady ? (
@@ -217,10 +281,24 @@ export function DashboardShell() {
         <>
           <section className="grid grid-cols-1 gap-2 lg:grid-cols-4 lg:items-stretch">
             <div className="lg:col-span-2">
-              <ExpenseCategoryCards cards={data.expensesByType} />
+              <ExpenseCategoryCards
+                cards={data.expensesByType}
+                period={selection.period}
+                periodLabel={periodLabel}
+              />
             </div>
-            <ZReportCards dataByRange={data.zPosByRange} />
-            <WeddingOverviewCards dataByRange={data.weddingsByRange} />
+            <ZReportCards
+              dataByRange={data.zPosByRange}
+              custom={data.zPosCustom}
+              period={selection.period}
+              periodLabel={periodLabel}
+            />
+            <WeddingOverviewCards
+              dataByRange={data.weddingsByRange}
+              custom={data.weddingsCustom}
+              period={selection.period}
+              periodLabel={periodLabel}
+            />
           </section>
 
           <section className="grid grid-cols-1 gap-2 xl:grid-cols-[minmax(260px,300px)_minmax(260px,300px)_1fr]">

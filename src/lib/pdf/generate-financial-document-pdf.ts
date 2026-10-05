@@ -25,6 +25,7 @@ import {
 } from "@/lib/pdf/invoice-pdf-draw";
 import { loadInvoicePdfFonts, paymentMethodLabel, safeFilePart, vatLabel, VAT_RATE } from "@/lib/pdf/pdf-helpers";
 import { paymentStatusLabelHe } from "@/lib/finance/payment-status";
+import { resolveDocumentNotes } from "@/lib/finance/document-business-date";
 
 const FOOTER_RESERVE = 56;
 
@@ -216,14 +217,18 @@ export async function generateFinancialDocumentPdfBytes(documentId: string): Pro
   const paymentRows =
     doc.payments.length > 0
       ? doc.payments.map((pay) => ({
-          method: paymentMethodLabel(pay.paymentMethod),
+          method: pay.notes?.trim()
+            ? `${paymentMethodLabel(pay.paymentMethod)} — ${pay.notes.trim()}`
+            : paymentMethodLabel(pay.paymentMethod),
           amount: formatCurrencyILS(pay.amount),
         }))
       : payload?.kind === "income" || payload?.kind === "expense"
         ? (payload as IncomeExpensePayload).payments
             .filter((pay) => parseNum(pay.amount) > 1e-9)
             .map((pay) => ({
-              method: paymentMethodLabel(pay.instrument),
+              method: pay.notes?.trim()
+                ? `${paymentMethodLabel(pay.instrument)} — ${pay.notes.trim()}`
+                : paymentMethodLabel(pay.instrument),
               amount: formatCurrencyILS(parseNum(pay.amount)),
             }))
         : [];
@@ -250,9 +255,13 @@ export async function generateFinancialDocumentPdfBytes(documentId: string): Pro
     }
   }
 
-  if (doc.notes?.trim()) {
+  const documentNote = resolveDocumentNotes(
+    payload && payload.kind !== "zreport" ? payload.documentNotes : "",
+    doc.notes,
+  );
+  if (documentNote) {
     ensureSpace(40);
-    y = await drawLabeledSection(page, fonts, "הערות", [{ label: "מסמך", value: doc.notes.trim() }], PDF_MARGIN, y, CONTENT_W);
+    y = await drawLabeledSection(page, fonts, "הערות", [{ label: "", value: documentNote }], PDF_MARGIN, y, CONTENT_W);
   }
 
   await drawFooter(page, { en: fonts.en, enBold: fonts.enBold });

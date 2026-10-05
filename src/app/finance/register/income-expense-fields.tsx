@@ -24,6 +24,7 @@ import { ProductLinePicker } from "@/components/finance/product-line-picker";
 import { SupplierCatalogPanel } from "@/components/finance/supplier-catalog-panel";
 import { FloatingSelect } from "@/components/ui/floating-select";
 import { useI18n } from "@/components/i18n-provider";
+import { DOCUMENT_NOTES_MAX } from "@/lib/finance/document-business-date";
 import { getDocumentTypeOptions } from "@/lib/finance/document-type-labels";
 import { documentTypeForEmployeePay } from "@/lib/finance/employee-pay-types";
 import { EXPENSE_TYPE_I18N, EXPENSE_TYPE_VALUES, type ExpenseType } from "@/lib/finance/expense-types";
@@ -1296,6 +1297,18 @@ export function IncomeExpenseFields({
             </div>
         </div>
       </fieldset>
+      <label className={`mt-3 block ${labelClass}`}>
+        {t("register.document.notes")}
+        <textarea
+          value={value.documentNotes}
+          onChange={(e) => setPatch({ documentNotes: e.target.value })}
+          className={`${inputClass} min-h-[72px] resize-y`}
+          rows={3}
+          maxLength={DOCUMENT_NOTES_MAX}
+          placeholder={t("register.document.notesPlaceholder")}
+          disabled={disabled}
+        />
+      </label>
     </section>
     </ProductPickerCatalogProvider>
   );

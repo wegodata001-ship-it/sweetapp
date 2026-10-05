@@ -14,7 +14,9 @@ import {
   type TodayPnl,
   type ZPosMetrics,
 } from "@/lib/dashboard/financial-engine";
+import { customRangeBounds, type DashboardPeriodSelection } from "@/lib/dashboard/dashboard-period";
 import { type RangeKeyed } from "@/lib/dashboard/time-range";
+import type { CustomPeriodMetrics } from "@/lib/dashboard/financial-engine";
 export type DashboardSectionAudit = {
   section: string;
   timeMs: number;
@@ -45,8 +47,11 @@ export type DashboardSummary = {
   expensesByType: ExpenseCategoryMetrics[];
   zPos: ZPosMetrics;
   zPosByRange: RangeKeyed<ZPosMetrics>;
+  zPosCustom: ZPosMetrics;
   weddings: WeddingSectionStats;
   weddingsByRange: RangeKeyed<WeddingSectionStats>;
+  weddingsCustom: WeddingSectionStats;
+  customPeriod: CustomPeriodMetrics | null;
   dailyChart: DailyPnlPoint[];
   todayPnl: TodayPnl;
   monthPnl: TodayPnl;
@@ -87,12 +92,15 @@ function emptySummary(): DashboardSummary {
       week: { reportsToday: 0, cashToday: 0, cardToday: 0, checksToday: 0, otherToday: 0 },
       month: { reportsToday: 0, cashToday: 0, cardToday: 0, checksToday: 0, otherToday: 0 },
     },
+    zPosCustom: { reportsToday: 0, cashToday: 0, cardToday: 0, checksToday: 0, otherToday: 0 },
     weddings: { weddings: 0, orders: 0, documented: 0 },
     weddingsByRange: {
       today: { weddings: 0, orders: 0, documented: 0 },
       week: { weddings: 0, orders: 0, documented: 0 },
       month: { weddings: 0, orders: 0, documented: 0 },
     },
+    weddingsCustom: { weddings: 0, orders: 0, documented: 0 },
+    customPeriod: null,
     dailyChart,
     todayPnl: { income: 0, expenses: 0, profit: 0 },
     monthPnl: { income: 0, expenses: 0, profit: 0 },
@@ -141,26 +149,62 @@ function emptySummary(): DashboardSummary {
 
 export type DashboardHeroSlice = Pick<
   DashboardSummary,
-  "updatedAt" | "dbUnavailable" | "heroMetrics" | "todayPnl" | "monthPnl" | "strip"
+  "updatedAt" | "dbUnavailable" | "heroMetrics" | "todayPnl" | "monthPnl" | "strip" | "customPeriod"
 >;
 
+export type DashboardComputeOptions = {
+  audit?: DashboardSectionAudit[];
+  period?: DashboardPeriodSelection;
+};
+
+function snapshotOptsFromPeriod(period?: DashboardPeriodSelection) {
+  if (period?.period === "custom") return { fromDate: period.from, toDate: period.to };
+  return undefined;
+}
+
+function customEngineInput(
+  period: DashboardPeriodSelection | undefined,
+  zCustom: number,
+) {
+  if (period?.period !== "custom") return null;
+  const bounds = customRangeBounds(period.from, period.to);
+  if (!bounds) return null;
+  return {
+    from: bounds.from,
+    to: bounds.to,
+    fromYmd: period.from,
+    toYmd: period.to,
+    zReports: zCustom,
+  };
+}
+
 /** כרטיס עליון — רק תזרים + מנוע כספי (מהיר יותר מ-summary מלא) */
-export async function computeDashboardHeroSlice(locale = "he"): Promise<DashboardHeroSlice> {
+export async function computeDashboardHeroSlice(
+  locale = "he",
+  options?: DashboardComputeOptions,
+): Promise<DashboardHeroSlice> {
   try {
-    const snap = await loadDashboardSnapshot();
-    const { zToday, zWeek, zMonth } = snap.window;
+    const snap = await loadDashboardSnapshot(snapshotOptsFromPeriod(options?.period));
+    const { zToday, zWeek, zMonth, zCustom } = snap.window;
     const { cashRows, metaByDocId } = snap;
 
-    const engine = runFinancialEngine(cashRows, metaByDocId, locale, {
-      today: zToday,
-      week: zWeek,
-      month: zMonth,
-    });
+    const engine = runFinancialEngine(
+      cashRows,
+      metaByDocId,
+      locale,
+      {
+        today: zToday,
+        week: zWeek,
+        month: zMonth,
+      },
+      customEngineInput(options?.period, zCustom),
+    );
 
     return {
       updatedAt: new Date().toISOString(),
       dbUnavailable: false,
       heroMetrics: engine.heroMetrics,
+      customPeriod: engine.customPeriod,
       todayPnl: engine.todayPnl,
       monthPnl: {
         income: engine.monthIncome,
@@ -183,6 +227,7 @@ export async function computeDashboardHeroSlice(locale = "he"): Promise<Dashboar
         updatedAt: empty.updatedAt,
         dbUnavailable: empty.dbUnavailable,
         heroMetrics: empty.heroMetrics,
+        customPeriod: empty.customPeriod,
         todayPnl: empty.todayPnl,
         monthPnl: empty.monthPnl,
         strip: empty.strip,
@@ -194,10 +239,10 @@ export async function computeDashboardHeroSlice(locale = "he"): Promise<Dashboar
 
 export async function computeDashboardSummary(
   locale = "he",
-  options?: { audit?: DashboardSectionAudit[] },
+  options?: DashboardComputeOptions,
 ): Promise<DashboardSummary> {
   try {
-    return await loadSummary(locale, options?.audit);
+    return await loadSummary(locale, options?.audit, options?.period);
   } catch (e) {
     if (isDbConnectionError(e)) {
       console.error("[dashboard/summary] database unreachable", e);
@@ -224,12 +269,16 @@ async function timedSection<T>(
   return value;
 }
 
-async function loadSummary(locale: string, audit?: DashboardSectionAudit[]): Promise<DashboardSummary> {
+async function loadSummary(
+  locale: string,
+  audit?: DashboardSectionAudit[],
+  period?: DashboardPeriodSelection,
+): Promise<DashboardSummary> {
   const today0 = new Date();
   today0.setHours(0, 0, 0, 0);
 
   const snap = await timedSection(audit, "SNAPSHOT", 1, async () => {
-    const value = await loadDashboardSnapshot();
+    const value = await loadDashboardSnapshot(snapshotOptsFromPeriod(period));
     return {
       value,
       rowsRead:
@@ -245,7 +294,8 @@ async function loadSummary(locale: string, audit?: DashboardSectionAudit[]): Pro
     return { value, rowsRead: value?.rows.length ?? 0 };
   });
 
-  const { zToday, zWeek, zMonth, weddingToday, weddingWeek, weddingMonth } = snap.window;
+  const { zToday, zWeek, zMonth, zCustom, weddingToday, weddingWeek, weddingMonth, weddingCustom } =
+    snap.window;
   const { cashRows, metaByDocId } = snap;
   const newCustomers = snap.newCustomers;
   const notifyWidgets = snap.notifyWidgets;
@@ -278,11 +328,17 @@ async function loadSummary(locale: string, audit?: DashboardSectionAudit[]): Pro
     );
   }
 
-  const engine = runFinancialEngine(cashRows, metaByDocId, locale, {
-    today: zToday,
-    week: zWeek,
-    month: zMonth,
-  });
+  const engine = runFinancialEngine(
+    cashRows,
+    metaByDocId,
+    locale,
+    {
+      today: zToday,
+      week: zWeek,
+      month: zMonth,
+    },
+    customEngineInput(period, zCustom),
+  );
   engine.newCustomers = newCustomers;
 
   const supplierPayments = aggregateSupplierPayments(supplierExpenseDocs, today0);
@@ -443,8 +499,11 @@ async function loadSummary(locale: string, audit?: DashboardSectionAudit[]): Pro
     expensesByType: engine.expensesByType,
     zPos: engine.zPos,
     zPosByRange: engine.zPosByRange,
+    zPosCustom: engine.zPosCustom,
     weddings,
     weddingsByRange,
+    weddingsCustom: weddingCustom,
+    customPeriod: engine.customPeriod,
     dailyChart: engine.dailyChart,
     todayPnl: engine.todayPnl,
     heroMetrics: engine.heroMetrics,

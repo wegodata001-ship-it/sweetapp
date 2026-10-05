@@ -28,12 +28,13 @@ describe("boundsForDashboardRange", () => {
     assert.equal(to.getMonth(), 9);
   });
 
-  it("month is first of current month through today", () => {
+  it("month is the full current calendar month", () => {
     const { from, to } = boundsForDashboardRange("month", anchor);
     assert.equal(from.getDate(), 1);
     assert.equal(from.getMonth(), 9);
     assert.equal(from.getHours(), 0);
-    assert.equal(to.getDate(), 1);
+    assert.equal(to.getDate(), 31);
     assert.equal(to.getMonth(), 9);
+    assert.equal(to.getHours(), 23);
   });
 });

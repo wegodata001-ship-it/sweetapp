@@ -26,6 +26,13 @@
   margin-bottom: 0;
 }
 
+.period {
+  margin: 0.2rem 0 0;
+  font-size: 10px;
+  font-weight: 700;
+  color: rgba(165, 243, 252, 0.7);
+}
+
 .grid {
   display: grid;
   flex: 1;

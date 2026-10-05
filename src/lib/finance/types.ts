@@ -86,6 +86,7 @@ export type FinanceDocumentRow = {
   deposit_note?: string | null;
   deposit_status?: string | null;
   doc_date: string | null;
+  notes: string | null;
   /** Legacy PDF path; may be empty when document is DB-only. */
   pdf_storage_path: string | null;
   sent_to_cpa: boolean;

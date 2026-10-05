@@ -204,4 +204,25 @@ describe("hero period filter", () => {
       assert.deepEqual(got, expected, range);
     }
   });
+
+  it("uses custom period metrics without changing preset cash formula", () => {
+    const custom = {
+      from: "2026-09-01",
+      to: "2026-09-30",
+      income: 10000,
+      incomeByMethod: { cash: 10000, card: 0, check: 0, other: 0 },
+      cashIncome: 10000,
+      cashExpenses: 2000,
+      expenses: 2000,
+      cashBalance: 8000,
+    };
+    const slice = heroSlice(emptyHero(), "custom", custom);
+    assert.deepEqual(slice, {
+      cashBalance: 8000,
+      income: 10000,
+      cashIncome: 10000,
+      expenses: 2000,
+    });
+    assert.notEqual(heroPeriodCacheKey("custom", "t", { from: "2026-09-01", to: "2026-09-30" }), heroPeriodCacheKey("month", "t"));
+  });
 });

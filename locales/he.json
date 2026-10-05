@@ -465,6 +465,9 @@
       "heroIncomeWeek": "הכנסות השבוע",
       "heroCashIncomeWeek": "הכנסות מזומן השבוע",
       "heroExpensesWeek": "הוצאות השבוע",
+      "heroIncomeCustom": "הכנסות בתקופה",
+      "heroCashIncomeCustom": "הכנסות מזומן בתקופה",
+      "heroExpensesCustom": "הוצאות בתקופה",
       "heroProfitLossMonth": "רווח / הפסד החודש",
       "oweOthers": "כמה אני חייב לאחרים",
       "oweOthersName": "שם",
@@ -562,10 +565,16 @@
       "chartDaily": "יומי — 14 ימים",
       "filter": {
         "today": "היום",
-        "week": "השבוע",
+        "week": "השבוע הזה",
         "7d": "7 ימים",
         "30d": "30 יום",
-        "month": "החודש"
+        "month": "החודש הזה",
+        "custom": "טווח מותאם אישית",
+        "fromDate": "מתאריך",
+        "toDate": "עד תאריך",
+        "apply": "הצג",
+        "invalidDate": "תאריך לא תקין",
+        "orderError": "תאריך ההתחלה חייב להיות לפני תאריך הסיום"
       },
       "chartTasks": "ביצוע משימות יומי",
       "tasksOnTime": "בזמן",
@@ -1454,10 +1463,15 @@
       "intro": "רישום הוצאות לפי סוג תשלום — ספקים, יומי, עובדים, חיצוני והשקעות.",
       "heading": "רישום הוצאות"
     },
+    "document": {
+      "notes": "הערות למסמך (אופציונלי)",
+      "notesPlaceholder": "הוסף הערה כללית למסמך..."
+    },
     "event": {
       "title": "פרטי אירוע",
       "trayQty": "כמות מגשים / כלים",
-      "returnDate": "תאריך החזרה"
+      "returnDate": "תאריך החזרה",
+      "notes": "הערות"
     },
     "lines": {
       "title": "שורות פריטים",
@@ -1521,6 +1535,7 @@
     "filterCustomer": "לקוח",
     "filterSupplier": "ספק",
     "filterSearchPlaceholder": "מספר מסמך, שם, או טקסט חופשי…",
+    "documentNotes": "הערות למסמך",
     "thNumber": "מס' מסמך",
     "thDate": "תאריך",
     "thCustomer": "לקוח / ספק",

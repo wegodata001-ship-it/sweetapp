@@ -1,4 +1,5 @@
 import { parsePayload, type FinanceDocumentPayload } from "@/lib/finance/document-payload";
+import { resolveDocumentNotes } from "@/lib/finance/document-business-date";
 import type { FinanceDocumentRow } from "@/lib/finance/types";
 import type { FinancialDocument as PrismaFinancialDocument } from "@prisma/client";
 
@@ -17,6 +18,9 @@ export function prismaDocToFinanceRow(row: PrismaFinancialDocumentWithCustomer):
   const rawMeta = row.metadata;
   const payload: FinanceDocumentPayload | null =
     rawMeta == null ? null : parsePayload(rawMeta as unknown);
+  if (payload && payload.kind !== "zreport") {
+    payload.documentNotes = resolveDocumentNotes(payload.documentNotes, row.notes);
+  }
   const depositSource = row as PrismaFinancialDocumentWithCustomer & {
     depositAmount?: number | null;
     depositType?: string | null;
@@ -54,6 +58,10 @@ export function prismaDocToFinanceRow(row: PrismaFinancialDocumentWithCustomer):
     deposit_note: depositSource.depositNote ?? (payload && payload.kind !== "zreport" ? payload.depositNote : null),
     deposit_status: depositSource.depositStatus ?? (payload && payload.kind !== "zreport" ? payload.depositStatus : null),
     doc_date: docDateStr,
+    notes:
+      payload && payload.kind !== "zreport"
+        ? resolveDocumentNotes(payload.documentNotes, row.notes) || null
+        : resolveDocumentNotes("", row.notes) || null,
     pdf_storage_path: row.pdfStoragePath,
     sent_to_cpa: row.sentToCpa,
     sent_to_cpa_at: row.sentToCpaAt ? row.sentToCpaAt.toISOString() : null,
