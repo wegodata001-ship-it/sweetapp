@@ -2,7 +2,7 @@
 
 import { CheckCircle2, FileSpreadsheet, FileText, Loader2, ScanLine, XCircle } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { PdfPreviewModal } from "@/components/pdf-preview-modal";
 import {
   ExpenseScanDialog,
@@ -23,6 +23,7 @@ import {
   emptyZReportPayload,
   incomeExpenseTotalToPay,
   isWorkerExpensePayload,
+  normalizePartyOnlyExpensePayload,
   normalizeWorkerExpensePayload,
   workerPayAmountNum,
   newLineId,
@@ -486,6 +487,23 @@ function FinanceRegisterPageInner() {
       node.includes("נדרש") ||
       node.includes("לא יכול"));
   const [publishing, setPublishing] = useState(false);
+  const expensePublishLock = useRef(false);
+
+  const documentSaveErrorMessage = (error: string | undefined): string => {
+    const raw = error?.trim() ?? "";
+    if (!raw) return t("register.errors.saveFailed");
+    if (raw.includes("לא יכול לעלות") || raw.includes("وسائل الدفع")) {
+      return t("register.validations.paymentExceedsTotal");
+    }
+    if (raw.includes("שם ספק") || raw.includes("supplier")) {
+      return t("register.errors.supplierNameRequired");
+    }
+    if (raw.includes("יש להזין סכום") || raw.includes("סכום לא תקין") || raw.includes("المبلغ")) {
+      return t("register.validations.amountInvalid");
+    }
+    if (raw.includes("לא נשמר") || raw.includes("שגיאה")) return t("register.errors.saveFailed");
+    return raw;
+  };
 
   const validatePaymentMethodsTotal = (payload: IncomeExpensePayload): string | null => {
     const docTotal = incomeExpenseTotalToPay(payload);
@@ -824,13 +842,17 @@ function FinanceRegisterPageInner() {
   };
 
   const publishExpenseDoc = async () => {
+    if (expensePublishLock.current) return;
+    expensePublishLock.current = true;
     setPublishing(true);
     setArchiveFeedback(null);
     try {
-      const prepared = normalizeWorkerExpensePayload({
-        ...expenseForm,
-        kind: "expense",
-      });
+      const prepared = normalizePartyOnlyExpensePayload(
+        normalizeWorkerExpensePayload({
+          ...expenseForm,
+          kind: "expense",
+        }),
+      );
       if (isWorkerExpensePayload(prepared)) {
         if (!prepared.employeeId?.trim()) {
           showErrorModal(t("register.employeePay.validationEmployee"), "expense");
@@ -844,6 +866,11 @@ function FinanceRegisterPageInner() {
 
       if (normalizeExpenseType(prepared.expenseType) === "SUPPLIER_PAYMENTS" && !prepared.counterpartyName?.trim() && !prepared.supplierId?.trim()) {
         showErrorModal(t("register.errors.supplierNameRequired"), "expense");
+        return;
+      }
+
+      if (incomeExpenseTotalToPay(prepared) < 1e-6) {
+        showErrorModal(t("register.validations.amountInvalid"), "expense");
         return;
       }
 
@@ -874,7 +901,7 @@ function FinanceRegisterPageInner() {
           payload,
         });
         if (!res.ok) {
-          showErrorModal(res.error ?? t("register.errors.updateFailed"), "expense");
+          showErrorModal(documentSaveErrorMessage(res.error) || t("register.errors.updateFailed"), "expense");
           return;
         }
         finishDocumentSaveWithBackgroundPdf(editingDocId, {
@@ -896,7 +923,7 @@ function FinanceRegisterPageInner() {
         payload,
       });
       if (!res.ok || !res.id) {
-        showErrorModal(res.error ?? t("register.errors.saveFailed"), "expense");
+        showErrorModal(documentSaveErrorMessage(res.error), "expense");
         return;
       }
       finishDocumentSaveWithBackgroundPdf(res.id, {
@@ -911,6 +938,7 @@ function FinanceRegisterPageInner() {
     } catch (e) {
       showErrorModal(e instanceof Error ? e.message : t("register.errors.saveFailed"), "expense");
     } finally {
+      expensePublishLock.current = false;
       setPublishing(false);
     }
   };
@@ -1664,7 +1692,7 @@ function FinanceRegisterPageInner() {
               ) : editingDocId ? (
                 t("register.actions.updateDoc")
               ) : (
-                t("register.actions.publishDoc")
+                t("register.actions.saveExpense")
               )}
             </button>
           </div>

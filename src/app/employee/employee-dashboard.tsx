@@ -17,20 +17,25 @@ import { useAuth } from "@/components/auth-provider";
 import { useI18n } from "@/components/i18n-provider";
 import { useToast } from "@/components/toast-provider";
 import { useEmployeeMiddayToast } from "@/hooks/use-employee-midday-toast";
-import { useEmployeeTodayMinutes } from "@/hooks/use-employee-today-minutes";
 import { computeEmployeeTaskDayStats } from "@/lib/employee-experience/task-stats";
+import type { EmployeeTaskDayStats } from "@/lib/employee-experience/task-stats";
+import {
+  writeEmployeeTasksCache,
+  type EmployeeTasksCachePayload,
+} from "@/lib/work-tasks/my-tasks-client-cache";
 import { EMPLOYEE_WORK_SESSION_STARTED_AT_KEY } from "@/lib/employee-experience/storage-keys";
 import { EmployeeDailyProgress } from "@/components/employee/employee-daily-progress";
 import { EmployeeGreetingHeader } from "@/components/employee/employee-greeting-header";
 import { EmployeeLiveStatus } from "@/components/employee/employee-live-status";
 import { EmployeeMotivationCard } from "@/components/employee/employee-motivation-card";
 import { EmployeeProfileStrip } from "@/components/employee/employee-profile-strip";
+import { TodayMinutesLive } from "@/components/employee/today-minutes-live";
 import { MyNotesWidget } from "@/components/my-notes/my-notes-widget";
 import type { SerializedWorkEmployeeTask } from "@/lib/work-tasks/serialize-work-task";
 import { WorkflowRunCard } from "@/components/workflows/workflow-run-card";
 import type { WorkflowRunDetailDto } from "@/lib/workflows/serialize";
 import type { WorkSessionDto } from "@/lib/work-sessions/serialize";
-import { cappedOpenMinutes, MAX_SHIFT_MINUTES, MAX_SHIFT_MS } from "@/lib/work-sessions/max-shift";
+import { MAX_SHIFT_MINUTES, MAX_SHIFT_MS } from "@/lib/work-sessions/max-shift";
 
 type DashboardData = {
   session: WorkSessionDto | null;
@@ -56,8 +61,9 @@ function fmtHMM(minutes: number): string {
  * - End-of-day "Clock Out" button.
  *
  * State strategy:
- *  - One `setInterval(setNow, 1000)` for the live timer.
- *  - Re-fetch dashboard every 30s and on focus to stay honest after sleeps.
+ *  - The live minute counter ticks inside TodayMinutesLive, not on this page.
+ *  - Dashboard and tasks load in parallel. The page spinner waits only for the dashboard.
+ *  - Re-fetch every 30s and on focus to stay honest after sleeps.
  */
 export function EmployeeDashboard() {
   const { t, dir, bcp47 } = useI18n();
@@ -67,11 +73,16 @@ export function EmployeeDashboard() {
 
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
-  const [now, setNow] = useState(() => Date.now());
+  const [tasksLoading, setTasksLoading] = useState(true);
   const [clockingOut, setClockingOut] = useState(false);
   const [workTasks, setWorkTasks] = useState<SerializedWorkEmployeeTask[]>([]);
+  const [taskStats, setTaskStats] = useState<EmployeeTaskDayStats | null>(null);
   const askedServerToClose = useRef(false);
-  const { todayMinutes } = useEmployeeTodayMinutes(true);
+  const freshUntil = useRef(0);
+  const roleRef = useRef(user?.role);
+  const userIdRef = useRef(user?.id);
+  roleRef.current = user?.role;
+  userIdRef.current = user?.id;
 
   const middayLine = useMemo(() => t("employee.experience.middayToast"), [t]);
   useEmployeeMiddayToast({
@@ -81,9 +92,9 @@ export function EmployeeDashboard() {
     middayMessage: middayLine,
   });
 
-  const load = useCallback(async () => {
+  const loadDashboard = useCallback(async () => {
     try {
-      const res = await fetch(`/api/me/dashboard?_=${Date.now()}`, {
+      const res = await fetch("/api/me/dashboard", {
         credentials: "same-origin",
         cache: "no-store",
       });
@@ -91,50 +102,65 @@ export function EmployeeDashboard() {
         | { ok: true; data: DashboardData }
         | { ok: false; error?: string }
         | null;
-      if (json?.ok) {
-        setData(json.data);
+      if (!json?.ok) return;
+      setData(json.data);
+      if (roleRef.current === "EMPLOYEE" && json.data.session?.clock_in) {
         try {
-          const tr = await fetch("/api/work/my-tasks", { credentials: "same-origin", cache: "no-store" });
-          const tj = (await tr.json()) as { data?: SerializedWorkEmployeeTask[] };
-          setWorkTasks(tj.data ?? []);
+          if (!sessionStorage.getItem(EMPLOYEE_WORK_SESSION_STARTED_AT_KEY)) {
+            sessionStorage.setItem(EMPLOYEE_WORK_SESSION_STARTED_AT_KEY, json.data.session.clock_in);
+          }
         } catch {
           /* */
         }
-        if (user?.role === "EMPLOYEE" && json.data.session?.clock_in) {
-          try {
-            if (!sessionStorage.getItem(EMPLOYEE_WORK_SESSION_STARTED_AT_KEY)) {
-              sessionStorage.setItem(EMPLOYEE_WORK_SESSION_STARTED_AT_KEY, json.data.session.clock_in);
-            }
-          } catch {
-            /* */
-          }
+      }
+      if (!json.data.session && roleRef.current === "EMPLOYEE") {
+        if (json.data.auto_closed || askedServerToClose.current) {
+          showToast({ tone: "success", title: t("employee.dashboard.autoShiftEnded") });
         }
-        if (!json.data.session && user?.role === "EMPLOYEE") {
-          if (json.data.auto_closed || askedServerToClose.current) {
-            showToast({ tone: "success", title: t("employee.dashboard.autoShiftEnded") });
-          }
-          router.push("/employee/clock");
-          router.refresh();
-        }
+        router.push("/employee/clock");
+        router.refresh();
       }
     } finally {
       setLoading(false);
     }
-  }, [router, showToast, t, user?.role]);
+  }, [router, showToast, t]);
 
-  useEffect(() => {
+  const loadTasks = useCallback(async () => {
     try {
-      sessionStorage.removeItem("wego:employee-tasks-cache");
+      const res = await fetch("/api/work/my-tasks", {
+        credentials: "same-origin",
+        cache: "no-store",
+      });
+      const json = (await res.json().catch(() => null)) as EmployeeTasksCachePayload | null;
+      if (!json) return;
+      const open =
+        json.open?.tasks ?? (json.data ?? []).filter((task) => task.status !== "COMPLETED");
+      setWorkTasks(open);
+      setTaskStats(json.stats ?? (json.data ? computeEmployeeTaskDayStats(json.data) : null));
+      const uid = userIdRef.current;
+      if (uid) writeEmployeeTasksCache(uid, json);
     } catch {
-      /* */
+      /* secondary widget — the home screen stays up */
+    } finally {
+      setTasksLoading(false);
     }
-    queueMicrotask(() => {
-      void load();
-    });
-  }, [load]);
+  }, []);
+
+  const load = useCallback(async () => {
+    await Promise.all([loadDashboard(), loadTasks()]);
+  }, [loadDashboard, loadTasks]);
 
   useEffect(() => {
-    const onFocus = () => void load();
+    freshUntil.current = Date.now() + 2000;
+    void loadDashboard();
+    void loadTasks();
+  }, [loadDashboard, loadTasks]);
+
+  useEffect(() => {
+    const onFocus = () => {
+      if (Date.now() < freshUntil.current) return;
+      void load();
+    };
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
   }, [load]);
@@ -147,33 +173,30 @@ export function EmployeeDashboard() {
     return () => window.clearInterval(id);
   }, [load]);
 
-  useEffect(() => {
-    const id = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(id);
-  }, []);
-
   const session = data?.session ?? null;
   const sessionStartMs = session ? new Date(session.clock_in).getTime() : null;
-
-  // Live "time so far in current session" plus already-completed minutes today.
-  const liveMinutes = useMemo(() => {
-    if (!sessionStartMs) return 0;
-    return cappedOpenMinutes(sessionStartMs, now);
-  }, [now, sessionStartMs]);
+  const completedMinutes = data?.today.completed_minutes ?? 0;
 
   useEffect(() => {
     if (!sessionStartMs || askedServerToClose.current) return;
-    if (now < sessionStartMs + MAX_SHIFT_MS) return;
-    askedServerToClose.current = true;
-    void load();
-  }, [load, now, sessionStartMs]);
+    const remain = sessionStartMs + MAX_SHIFT_MS - Date.now();
+    if (remain <= 0) {
+      askedServerToClose.current = true;
+      void load();
+      return;
+    }
+    const id = window.setTimeout(() => {
+      askedServerToClose.current = true;
+      void load();
+    }, Math.min(remain, 2_147_483_647));
+    return () => window.clearTimeout(id);
+  }, [load, sessionStartMs]);
 
-  const todayMinutesLive = (data?.today.completed_minutes ?? 0) + liveMinutes;
   const activeWorkTask = useMemo(
     () => workTasks.find((x) => x.status === "IN_PROGRESS") ?? null,
     [workTasks],
   );
-  const workTaskStats = useMemo(() => computeEmployeeTaskDayStats(workTasks), [workTasks]);
+  const workTaskStats = taskStats;
 
   const clockInTime = session
     ? new Date(session.clock_in).toLocaleTimeString(bcp47, {
@@ -262,49 +285,63 @@ export function EmployeeDashboard() {
 
       <div className="space-y-3">
         <EmployeeLiveStatus activeTask={activeWorkTask} />
-        {workTasks.length > 0 ? (
+        {tasksLoading && !workTaskStats ? (
+          <div className="h-24 animate-pulse rounded-2xl bg-slate-100" aria-hidden />
+        ) : workTaskStats && (workTasks.length > 0 || workTaskStats.total > 0) ? (
           <>
             <EmployeeDailyProgress stats={workTaskStats} />
             <EmployeeMotivationCard stats={workTaskStats} />
-            <EmployeeProfileStrip todayMinutes={todayMinutes} stats={workTaskStats} />
           </>
         ) : null}
       </div>
 
-      {/* KPI cards */}
-      <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <KpiCard
-          label={t("employee.dashboard.kpiToday")}
-          value={fmtHMM(todayMinutesLive)}
-          accent="blue"
-          icon={<Clock3 className="h-5 w-5" aria-hidden />}
-        />
-        <KpiCard
-          label={t("employee.dashboard.kpiLive")}
-          value={fmtHMM(liveMinutes)}
-          accent="indigo"
-          pulse
-          icon={<Sparkles className="h-5 w-5" aria-hidden />}
-        />
-        <KpiCard
-          label={t("employee.dashboard.kpiOpenTasks")}
-          value={String(data?.counts.open_tasks ?? 0)}
-          accent="emerald"
-          icon={<ClipboardList className="h-5 w-5" aria-hidden />}
-        />
-        <KpiCard
-          label={t("employee.dashboard.kpiLateTasks")}
-          value={String(data?.counts.late_tasks ?? 0)}
-          accent={data && data.counts.late_tasks > 0 ? "indigo" : "slate"}
-          icon={
-            data && data.counts.late_tasks > 0 ? (
-              <AlertTriangle className="h-5 w-5" aria-hidden />
-            ) : (
-              <CheckCircle2 className="h-5 w-5" aria-hidden />
-            )
-          }
-        />
-      </section>
+      <TodayMinutesLive
+        completedMinutes={completedMinutes}
+        clockIn={session?.clock_in ?? null}
+        render={(todayMinutes) => {
+          const liveMinutes = session ? Math.max(0, todayMinutes - completedMinutes) : 0;
+          return (
+            <>
+              {workTaskStats && (workTasks.length > 0 || workTaskStats.total > 0) ? (
+                <EmployeeProfileStrip todayMinutes={todayMinutes} stats={workTaskStats} />
+              ) : null}
+              <section className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+                <KpiCard
+                  label={t("employee.dashboard.kpiToday")}
+                  value={fmtHMM(todayMinutes)}
+                  accent="blue"
+                  icon={<Clock3 className="h-5 w-5" aria-hidden />}
+                />
+                <KpiCard
+                  label={t("employee.dashboard.kpiLive")}
+                  value={fmtHMM(liveMinutes)}
+                  accent="indigo"
+                  pulse
+                  icon={<Sparkles className="h-5 w-5" aria-hidden />}
+                />
+                <KpiCard
+                  label={t("employee.dashboard.kpiOpenTasks")}
+                  value={String(data?.counts.open_tasks ?? 0)}
+                  accent="emerald"
+                  icon={<ClipboardList className="h-5 w-5" aria-hidden />}
+                />
+                <KpiCard
+                  label={t("employee.dashboard.kpiLateTasks")}
+                  value={String(data?.counts.late_tasks ?? 0)}
+                  accent={data && data.counts.late_tasks > 0 ? "indigo" : "slate"}
+                  icon={
+                    data && data.counts.late_tasks > 0 ? (
+                      <AlertTriangle className="h-5 w-5" aria-hidden />
+                    ) : (
+                      <CheckCircle2 className="h-5 w-5" aria-hidden />
+                    )
+                  }
+                />
+              </section>
+            </>
+          );
+        }}
+      />
 
       {/* Active task hero */}
       <section>

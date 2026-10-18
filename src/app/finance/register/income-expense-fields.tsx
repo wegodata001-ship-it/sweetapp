@@ -27,7 +27,7 @@ import { useI18n } from "@/components/i18n-provider";
 import { DOCUMENT_NOTES_MAX } from "@/lib/finance/document-business-date";
 import { getDocumentTypeOptions } from "@/lib/finance/document-type-labels";
 import { documentTypeForEmployeePay } from "@/lib/finance/employee-pay-types";
-import { EXPENSE_TYPE_I18N, EXPENSE_TYPE_VALUES, type ExpenseType } from "@/lib/finance/expense-types";
+import { EXPENSE_TYPE_I18N, EXPENSE_TYPE_VALUES, isPartyOnlyExpenseType, type ExpenseType } from "@/lib/finance/expense-types";
 import { REGISTER_LABEL_KEYS as LK } from "@/lib/i18n/register-label-keys";
 import type { ProductPickerRow } from "@/lib/finance/product-picker-catalog";
 import {
@@ -42,6 +42,7 @@ import {
   lineNetTotal,
   lineVatTotal,
   newPaymentId,
+  normalizePartyOnlyExpensePayload,
   paymentLinesTotal,
   PAYMENT_METHOD_LABELS,
   PAYMENT_INSTRUMENT_OPTIONS,
@@ -99,11 +100,7 @@ export function IncomeExpenseFields({
   const activeExpenseType = value.expenseType ?? "SUPPLIER_PAYMENTS";
   const isSupplierExpense = isExpense && activeExpenseType === "SUPPLIER_PAYMENTS";
   const isWorkerExpense = isExpense && activeExpenseType === "WORKER_PAYMENTS";
-  const isPartyOnlyExpense =
-    isExpense &&
-    (activeExpenseType === "DAILY_PAYMENTS" ||
-      activeExpenseType === "EXTERNAL_PAYMENTS" ||
-      activeExpenseType === "INVESTMENTS");
+  const isPartyOnlyExpense = isExpense && isPartyOnlyExpenseType(activeExpenseType);
   const [focusLineId, setFocusLineId] = useState<string | null>(null);
   const [customerSuggestions, setCustomerSuggestions] = useState<string[]>([]);
   const [procurementSuppliers, setProcurementSuppliers] = useState<{ id: string; name: string; phone: string | null }[]>([]);
@@ -133,13 +130,14 @@ export function IncomeExpenseFields({
     procurementSuppliers.find((supplier) => normalizeSupplierName(supplier.name) === supplierQueryKey) ?? null;
   const catalogTargetLineId = focusLineId ?? value.lines[0]?.id ?? null;
 
+  const summaryPayload = isPartyOnlyExpense ? normalizePartyOnlyExpensePayload(value) : value;
   const lineTotals = value.lines.map((row) => lineGrossTotal(row.quantity, row.price, row.vatMode));
   const netLineTotals = value.lines.map((row) => lineNetTotal(row.quantity, row.price, row.vatMode));
   const vatLineTotals = value.lines.map((row) => lineVatTotal(row.quantity, row.price, row.vatMode));
-  const vatTotal = incomeExpenseVatTotal(value);
-  const grandTotal = incomeExpenseGrandTotal(value);
+  const vatTotal = incomeExpenseVatTotal(summaryPayload);
+  const grandTotal = incomeExpenseGrandTotal(summaryPayload);
   const depositAmount = incomeExpenseDepositAmount(value);
-  const totalToPay = incomeExpenseTotalToPay(value);
+  const totalToPay = incomeExpenseTotalToPay(summaryPayload);
   const showDepositBox = !isExpense && (value.clientMode === "event" || value.includeDeposit);
 
   const setPatch = (patch: Partial<IncomeExpensePayload>) => onChange({ ...value, ...patch });
@@ -189,7 +187,7 @@ export function IncomeExpenseFields({
       patch.employeePayAmount = value.employeePayAmount ?? "";
       patch.employeePayNotes = value.employeePayNotes ?? "";
     }
-    if (type === "DAILY_PAYMENTS" || type === "EXTERNAL_PAYMENTS" || type === "INVESTMENTS") {
+    if (isPartyOnlyExpenseType(type)) {
       patch.supplierId = null;
       patch.employeeId = null;
     }

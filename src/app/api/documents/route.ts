@@ -4,6 +4,8 @@ import {
   incomeExpenseDepositAmount,
   incomeExpenseGrandTotal,
   isWorkerExpensePayload,
+  normalizePartyOnlyExpensePayload,
+  normalizeWorkerExpensePayload,
   paymentLinesTotal,
   workerPayAmountNum,
   type FinanceDocumentPayload,
@@ -178,7 +180,9 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true, id: doc.id });
     }
 
-    const ie = meta as IncomeExpensePayload;
+    const ie = normalizePartyOnlyExpensePayload(
+      normalizeWorkerExpensePayload(meta as IncomeExpensePayload),
+    );
     if (isWorkerExpensePayload(ie)) {
       if (!ie.employeeId?.trim()) {
         return NextResponse.json({ ok: false, error: "יש לבחור עובד" }, { status: 400 });

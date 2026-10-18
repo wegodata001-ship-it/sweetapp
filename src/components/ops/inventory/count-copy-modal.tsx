@@ -1,15 +1,17 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Check, ClipboardCopy, Loader2, X } from "lucide-react";
 import { useI18n } from "@/components/i18n-provider";
 import { useToast } from "@/components/toast-provider";
 import {
+  collapseIdenticalCopySnapshots,
   formatAllCountSessionsCopyText,
   formatCopyCountDate,
   formatCopyQuantity,
   formatCountSessionCopyText,
   resolveCopyProductName,
+  uniqueCopyProductsByRecordId,
   type CountCopySession,
 } from "@/lib/inventory/count-copy-service";
 import { localYmd } from "@/components/ops/inventory-count/utils";
@@ -73,6 +75,7 @@ export function CountCopyModal({ open, onClose, locations }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [sessions, setSessions] = useState<CountCopySession[] | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const copyLock = useRef(false);
 
   useEffect(() => {
     if (!open) return;
@@ -109,7 +112,7 @@ export function CountCopyModal({ open, onClose, locations }: Props) {
         setError(j.error ?? tC("loadFailed"));
         return;
       }
-      setSessions(j.data?.sessions ?? []);
+      setSessions(collapseIdenticalCopySnapshots(j.data?.sessions ?? []));
     } catch {
       setError(tC("loadFailed"));
     } finally {
@@ -122,27 +125,33 @@ export function CountCopyModal({ open, onClose, locations }: Props) {
     window.setTimeout(() => setCopiedId((cur) => (cur === id ? null : cur)), 1600);
   };
 
-  const handleCopySession = async (session: CountCopySession) => {
-    const text = formatCountSessionCopyText(session, locale);
-    const ok = await copyToClipboard(text);
-    if (ok) {
-      flashCopied(session.id);
-      showToast({ tone: "success", title: tC("copiedOne"), durationMs: 2000 });
-    } else {
-      showToast({ tone: "error", title: tC("copyFailed"), durationMs: 3000 });
+  const writeCopy = async (id: string, text: string, titleKey: "copiedOne" | "copiedAll") => {
+    if (copyLock.current) return;
+    copyLock.current = true;
+    try {
+      const ok = await copyToClipboard(text);
+      if (ok) {
+        flashCopied(id);
+        showToast({
+          tone: "success",
+          title: tC(titleKey),
+          durationMs: titleKey === "copiedAll" ? 2500 : 2000,
+        });
+      } else {
+        showToast({ tone: "error", title: tC("copyFailed"), durationMs: 3000 });
+      }
+    } finally {
+      copyLock.current = false;
     }
   };
 
-  const handleCopyAll = async () => {
+  const handleCopySession = (session: CountCopySession) => {
+    void writeCopy(session.id, formatCountSessionCopyText(session, locale), "copiedOne");
+  };
+
+  const handleCopyAll = () => {
     if (!sessions || sessions.length === 0) return;
-    const text = formatAllCountSessionsCopyText(sessions, locale);
-    const ok = await copyToClipboard(text);
-    if (ok) {
-      flashCopied("__all__");
-      showToast({ tone: "success", title: tC("copiedAll"), durationMs: 2500 });
-    } else {
-      showToast({ tone: "error", title: tC("copyFailed"), durationMs: 3000 });
-    }
+    void writeCopy("__all__", formatAllCountSessionsCopyText(sessions, locale), "copiedAll");
   };
 
   if (!open) return null;
@@ -251,7 +260,7 @@ export function CountCopyModal({ open, onClose, locations }: Props) {
                     <div className="flex items-center justify-between gap-2 border-b border-[#e7ecf5] bg-white px-3 py-2">
                       <button
                         type="button"
-                        onClick={() => void handleCopySession(session)}
+                        onClick={() => handleCopySession(session)}
                         className="inline-flex h-10 touch-manipulation items-center gap-1.5 rounded-xl border border-[#e7ecf5] bg-white px-3 text-[11px] font-black text-[#6c4cff]"
                       >
                         {copiedId === session.id ? (
@@ -271,7 +280,7 @@ export function CountCopyModal({ open, onClose, locations }: Props) {
                       </div>
                     </div>
                     <ul className="max-h-[min(28rem,55dvh)] space-y-0.5 overflow-y-auto overflow-x-hidden overscroll-contain px-3 py-2">
-                      {session.products.map((product, index) => {
+                      {uniqueCopyProductsByRecordId(session.products).map((product, index) => {
                         const name = resolveCopyProductName(product, locale);
                         return (
                           <li
@@ -296,7 +305,7 @@ export function CountCopyModal({ open, onClose, locations }: Props) {
         <footer className="shrink-0 border-t border-[#e7ecf5] bg-white px-4 pt-2 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
           <button
             type="button"
-            onClick={() => void handleCopyAll()}
+            onClick={() => handleCopyAll()}
             disabled={!sessions || sessions.length === 0}
             className="flex h-14 w-full touch-manipulation items-center justify-center gap-2 rounded-2xl bg-[#6c4cff] text-base font-black text-white shadow-md disabled:opacity-40"
           >

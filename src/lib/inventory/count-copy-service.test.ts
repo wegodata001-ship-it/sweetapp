@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   buildCopyProductRows,
+  collapseIdenticalCopySnapshots,
   formatAllCountSessionsCopyText,
   formatCopyCountDate,
   formatCopyQuantity,
@@ -17,6 +18,8 @@ import {
   sessionLinesToExplicitCountMap,
   countedCopyLabel,
   totalCopyLabel,
+  uniqueCopyProductsByRecordId,
+  type CountCopyProduct,
   type CountCopySession,
 } from "./count-copy-service";
 
@@ -479,5 +482,188 @@ describe("count-copy location products + not counted", () => {
     assert.doesNotMatch(text, /נספר/);
     assert.doesNotMatch(text, /לא נספר/);
     assert.doesNotMatch(text, /סה״כ/);
+  });
+});
+
+function copyProduct(
+  id: string,
+  name: string,
+  totalQuantity: number,
+  quantity: number | null = totalQuantity,
+): CountCopyProduct {
+  return {
+    inventoryProductId: id,
+    name,
+    nameHe: name,
+    nameAr: name,
+    nameEn: null,
+    quantity,
+    totalQuantity,
+  };
+}
+
+function copySession(
+  id: string,
+  overrides: Partial<CountCopySession> = {},
+): CountCopySession {
+  return {
+    id,
+    sessionNumber: 1,
+    locationId: "loc-ajwa",
+    locationName: "قائمة مخزن العجوت اول البلد (رامي جودة)",
+    countDate: "2026-10-05T11:18:45.690Z",
+    createdAt: "2026-10-05T11:18:45.690Z",
+    products: [],
+    ...overrides,
+  };
+}
+
+function productLines(text: string): string[] {
+  return text.split("\n").filter((line) => /^\d+\./.test(line));
+}
+
+describe("count-copy duplicate snapshots", () => {
+  const shelf23 = Array.from({ length: 23 }, (_, i) =>
+    copyProduct(`p${i + 1}`, `منتج ${i + 1}`, i === 4 ? 0 : i + 1),
+  );
+
+  it("three identical location-day saves copy as one list of 23", () => {
+    const sessions = [
+      copySession("s464", {
+        sessionNumber: 464,
+        createdAt: "2026-10-05T11:18:45.690Z",
+        products: shelf23,
+      }),
+      copySession("s467", {
+        sessionNumber: 467,
+        createdAt: "2026-10-05T13:14:10.897Z",
+        products: shelf23.map((p) => ({ ...p, quantity: p.quantity === 0 ? 0 : null })),
+      }),
+      copySession("s475", {
+        sessionNumber: 475,
+        createdAt: "2026-10-05T19:26:48.328Z",
+        products: shelf23,
+      }),
+    ];
+    const collapsed = collapseIdenticalCopySnapshots(sessions);
+    assert.equal(collapsed.length, 1);
+    assert.equal(collapsed[0]!.id, "s475");
+    const text = formatAllCountSessionsCopyText(sessions, "ar");
+    const lines = productLines(text);
+    assert.equal(lines.length, 23);
+    assert.equal(text.split("قائمة مخزن العجوت اول البلد (رامي جودة)").length - 1, 1);
+    assert.equal([...text.matchAll(/^5\/10$/gm)].length, 1);
+    assert.equal(lines[0], "1. منتج 1 - 1");
+    assert.equal(lines[4], "5. منتج 5 - 0");
+    assert.equal(lines[22], "23. منتج 23 - 23");
+    assert.doesNotMatch(text, /---/);
+    assert.equal(formatAllCountSessionsCopyText(sessions, "ar"), text);
+  });
+
+  it("keeps separate rows that share a display name but not a record id", () => {
+    const products = [
+      copyProduct("line-a", "كروسون", 4),
+      copyProduct("line-b", "كروسون", 9),
+    ];
+    assert.equal(uniqueCopyProductsByRecordId(products).length, 2);
+    const text = formatCountSessionCopyText(
+      copySession("s", { products }),
+      "ar",
+    );
+    assert.match(text, /1\. كروسون - 4/);
+    assert.match(text, /2\. كروسون - 9/);
+  });
+
+  it("drops a repeated record id inside one count and keeps shelf order", () => {
+    const products = [
+      copyProduct("p1", "أول", 3),
+      copyProduct("p1", "أول", 3),
+      copyProduct("p1", "أول", 3),
+      copyProduct("p2", "ثان", 0),
+    ];
+    const rows = buildCopyProductRows({
+      orderedProductIds: ["p1", "p1", "p2", "p1"],
+      productsById: new Map([
+        ["p1", { name: "أول", nameHe: "أول", nameAr: "أول", nameEn: null }],
+        ["p2", { name: "ثان", nameHe: "ثان", nameAr: "ثان", nameEn: null }],
+      ]),
+      explicitCountsByProductId: new Map([
+        ["p1", 3],
+        ["p2", 0],
+      ]),
+      totalsByProductId: new Map([
+        ["p1", 3],
+        ["p2", 0],
+      ]),
+    });
+    assert.deepEqual(
+      rows.map((r) => r.inventoryProductId),
+      ["p1", "p2"],
+    );
+    const text = formatCountSessionCopyText(copySession("s", { products }), "ar");
+    assert.deepEqual(productLines(text), ["1. أول - 3", "2. ثان - 0"]);
+  });
+
+  it("keeps other locations, other days, and different quantities", () => {
+    const base = shelf23;
+    const otherLocation = copySession("fridge", {
+      locationId: "loc-fridge",
+      locationName: "مخزون الثلاجة اول البلد (رامي جودة)",
+      products: base,
+    });
+    const nextIsraelDay = copySession("next", {
+      countDate: "2026-10-05T21:30:00.000Z",
+      createdAt: "2026-10-05T21:30:00.000Z",
+      products: base,
+    });
+    const differentQty = copySession("qty", {
+      id: "qty",
+      createdAt: "2026-10-05T12:00:00.000Z",
+      products: base.map((p, i) => (i === 0 ? { ...p, totalQuantity: 99 } : p)),
+    });
+    const same = copySession("same", { products: base });
+    const collapsed = collapseIdenticalCopySnapshots([
+      same,
+      otherLocation,
+      nextIsraelDay,
+      differentQty,
+    ]);
+    assert.equal(collapsed.length, 4);
+    const text = formatAllCountSessionsCopyText(
+      [same, otherLocation, nextIsraelDay, differentQty],
+      "ar",
+    );
+    assert.equal(text.split("\n\n---\n\n").length, 4);
+    assert.match(text, /مخزون الثلاجة/);
+    assert.match(text, /99/);
+  });
+
+  it("copies an empty count once and a 100-product count once", () => {
+    const empty = [
+      copySession("e1", { products: [] }),
+      copySession("e2", { createdAt: "2026-10-05T12:00:00.000Z", products: [] }),
+      copySession("e3", { createdAt: "2026-10-05T13:00:00.000Z", products: [] }),
+    ];
+    const emptyText = formatAllCountSessionsCopyText(empty, "ar");
+    assert.equal(productLines(emptyText).length, 0);
+    assert.equal(emptyText.split("---").length, 1);
+    assert.match(emptyText, /قائمة مخزن العجوت اول البلد \(رامي جودة\)/);
+
+    const hundred = Array.from({ length: 100 }, (_, i) =>
+      copyProduct(`h${i + 1}`, `صنف ${i + 1}`, i),
+    );
+    const big = [1, 2, 3].map((n) =>
+      copySession(`h${n}`, {
+        createdAt: `2026-10-05T1${n}:00:00.000Z`,
+        products: hundred,
+      }),
+    );
+    const bigText = formatAllCountSessionsCopyText(big, "ar");
+    const lines = productLines(bigText);
+    assert.equal(lines.length, 100);
+    assert.equal(lines[0], "1. صنف 1 - 0");
+    assert.equal(lines[99], "100. صنف 100 - 99");
+    assert.equal(bigText.split("---").length, 1);
+    assert.equal(lines.filter((line) => line.startsWith("1. ")).length, 1);
   });
 });

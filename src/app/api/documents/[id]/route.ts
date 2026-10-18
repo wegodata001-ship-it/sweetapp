@@ -5,6 +5,8 @@ import {
   incomeExpenseDepositAmount,
   incomeExpenseGrandTotal,
   isWorkerExpensePayload,
+  normalizePartyOnlyExpensePayload,
+  normalizeWorkerExpensePayload,
   paymentLinesTotal,
   workerPayAmountNum,
   type FinanceDocumentPayload,
@@ -129,7 +131,9 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
           uploadedById: session?.sub ?? null,
         });
       } else {
-        const ie = meta as IncomeExpensePayload;
+        const ie = normalizePartyOnlyExpensePayload(
+          normalizeWorkerExpensePayload(meta as IncomeExpensePayload),
+        );
         if (isWorkerExpensePayload(ie)) {
           if (!ie.employeeId?.trim()) {
             return NextResponse.json({ ok: false, error: "יש לבחור עובד" }, { status: 400 });
@@ -208,7 +212,7 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
               depositType: depositAmount > 0 ? ie.depositType?.trim() || null : null,
               depositNote: depositAmount > 0 ? ie.depositNote?.trim() || null : null,
               depositStatus: depositAmount > 0 ? ie.depositStatus || "open" : "open",
-              metadata: asJson(meta),
+              metadata: asJson(ie),
               notes: documentNotesForStorage(ie.documentNotes),
               docDate: resolveWrittenDocDate(ie.docDate, body.doc_date) ?? undefined,
               sentToCpa: body.sent_to_cpa ?? undefined,

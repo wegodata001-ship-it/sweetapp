@@ -1,0 +1,7 @@
+.playwright-cli
+exports
+scripts/manual-receipt-acceptance.ts
+scripts/phase3-finance-after.ts
+scripts/phase3-finance-snapshot.ts
+scripts/phase3-vercel-errors.ts
+heb.traineddata

@@ -26,3 +26,8 @@ export function isExpenseType(v: unknown): v is ExpenseType {
 export function normalizeExpenseType(v: unknown): ExpenseType {
   return isExpenseType(v) ? v : DEFAULT_EXPENSE_TYPE;
 }
+
+/** הוצאה בלי כרטסת ספק/עובד — סכום + צד, לא מחירון. */
+export function isPartyOnlyExpenseType(v: unknown): boolean {
+  return v === "DAILY_PAYMENTS" || v === "EXTERNAL_PAYMENTS" || v === "INVESTMENTS";
+}

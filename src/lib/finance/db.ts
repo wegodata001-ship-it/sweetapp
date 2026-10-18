@@ -320,6 +320,7 @@ export async function insertDirectCashFlow(params: {
   description: string;
   side: "debit" | "credit";
   amount: number;
+  expenseType?: string | null;
 }): Promise<{ ok: boolean; error?: string }> {
   const raw = params.amount;
   const amt = raw >= 0 ? raw : -raw;
@@ -335,6 +336,7 @@ export async function insertDirectCashFlow(params: {
       description: params.description.trim() || "רישום ישירות",
       entryDate: params.entry_date,
       isDirect: true,
+      expenseType: params.side === "debit" ? params.expenseType ?? null : null,
     }),
     credentials: "same-origin",
   });

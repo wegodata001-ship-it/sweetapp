@@ -344,6 +344,7 @@ export default function CashflowPage() {
 
   const handleDirectSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (savingDirect) return;
     const parsed = parseNum(directAmount);
     const amt = parsed >= 0 ? parsed : -parsed;
     if (!directDate || !Number.isFinite(amt) || amt <= 0) {
@@ -351,22 +352,26 @@ export default function CashflowPage() {
       return;
     }
     setSavingDirect(true);
-    const res = await insertDirectCashFlow({
-      entry_date: directDate,
-      description: directDesc,
-      side: directSide,
-      amount: amt,
-    });
-    setSavingDirect(false);
-    if (!res.ok) {
-      setNotice(res.error ?? t("common.error"));
-      return;
+    try {
+      const res = await insertDirectCashFlow({
+        entry_date: directDate,
+        description: directDesc,
+        side: directSide,
+        amount: amt,
+        expenseType: directSide === "debit" && filterExpenseType ? filterExpenseType : null,
+      });
+      if (!res.ok) {
+        setNotice(res.error ?? t("common.error"));
+        return;
+      }
+      setNotice(null);
+      setDirectOpen(false);
+      setDirectDesc("");
+      setDirectAmount("");
+      await loadAll().catch(() => undefined);
+    } finally {
+      setSavingDirect(false);
     }
-    setNotice(null);
-    setDirectOpen(false);
-    setDirectDesc("");
-    setDirectAmount("");
-    await loadAll().catch(() => undefined);
   };
 
   const filterInputClass =
@@ -388,6 +393,7 @@ export default function CashflowPage() {
       description: desc,
       side,
       amount: amt,
+      expenseType: side === "debit" ? row.expense_type ?? null : null,
     });
     if (!res.ok) {
       setNotice(res.error ?? t("common.error"));

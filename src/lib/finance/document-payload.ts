@@ -4,7 +4,12 @@ import {
   type EmployeePayType,
 } from "@/lib/finance/employee-pay-types";
 import { documentNotesForStorage } from "@/lib/finance/document-business-date";
-import { DEFAULT_EXPENSE_TYPE, normalizeExpenseType, type ExpenseType } from "@/lib/finance/expense-types";
+import {
+  DEFAULT_EXPENSE_TYPE,
+  isPartyOnlyExpenseType,
+  normalizeExpenseType,
+  type ExpenseType,
+} from "@/lib/finance/expense-types";
 
 export type { ExpenseType };
 
@@ -293,6 +298,37 @@ export function workerExpenseLines(payload: IncomeExpensePayload): FinanceLineIt
       supplierProductId: null,
     },
   ];
+}
+
+/**
+ * مدفوعات يومية / خارجية / استثمار: المستخدم غالباً يملأ مبلغ الدفع فقط.
+ * بدون سطر منتجات يكون إجمالي المستند 0 فيُرفض الحفظ. انسخ المبلغ إلى سطر واحد.
+ */
+export function normalizePartyOnlyExpensePayload(payload: IncomeExpensePayload): IncomeExpensePayload {
+  if (payload.kind !== "expense" || !isPartyOnlyExpenseType(payload.expenseType)) return payload;
+  const lineTotal = payload.lines.reduce(
+    (sum, row) => sum + lineGrossTotal(row.quantity, row.price, row.vatMode),
+    0,
+  );
+  const paid = paymentLinesTotal(payload);
+  if (lineTotal > 1e-6 || paid <= 1e-6) return payload;
+  const first = payload.lines[0];
+  const label =
+    first?.itemName.trim() || payload.counterpartyName.trim() || payload.documentType || "סיכום";
+  return {
+    ...payload,
+    lines: [
+      {
+        id: first?.id ?? newLineId(),
+        itemName: label,
+        quantity: "1",
+        price: String(paid),
+        vatMode: first?.vatMode ?? "includes_vat",
+        lineNote: first?.lineNote ?? "",
+        supplierProductId: first?.supplierProductId ?? null,
+      },
+    ],
+  };
 }
 
 export function normalizeWorkerExpensePayload(payload: IncomeExpensePayload): IncomeExpensePayload {

@@ -1,14 +1,27 @@
 "use client";
 
-import { KeyRound, Timer } from "lucide-react";
+import { KeyRound, RefreshCw, Timer } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { SerializedWorkEmployeeTask } from "@/lib/work-tasks/serialize-work-task";
-import { myTasksFingerprint } from "@/lib/work-tasks/my-tasks-snapshot";
+import type { EmployeeTaskDayStats } from "@/lib/employee-experience/task-stats";
+import {
+  appendTaskPage,
+  myTasksFingerprint,
+  replaceTaskById,
+  statsAfterComplete,
+  statsAfterStart,
+  type MyTasksListPage,
+} from "@/lib/work-tasks/my-tasks-snapshot";
+import {
+  invalidateEmployeeTasksCache,
+  readEmployeeTasksCache,
+  writeEmployeeTasksCache,
+  type EmployeeTasksCachePayload,
+} from "@/lib/work-tasks/my-tasks-client-cache";
 import { computeCountdownTimer } from "@/lib/tasks/countdown-timer";
 import { TASK_BLOCK_REASONS } from "@/lib/work-tasks/task-timing";
 import { playEmployeeSound } from "@/lib/employee-experience/sounds";
-import { computeEmployeeTaskDayStats } from "@/lib/employee-experience/task-stats";
 import { EMPLOYEE_WORK_SESSION_STARTED_AT_KEY } from "@/lib/employee-experience/storage-keys";
 import { EmployeeTaskCard } from "@/components/tasks/employee-task-card";
 import { EmployeeTasksSession } from "@/components/tasks/employee-tasks-session";
@@ -41,36 +54,38 @@ type CompleteModalState = {
   error: string | null;
 };
 
-type SnapshotPayload = {
+type SnapshotPayload = EmployeeTasksCachePayload & {
   ok?: boolean;
-  data?: SerializedWorkEmployeeTask[];
-  shift?: { clock_in: string } | null;
-  today?: { completed_minutes: number };
-  auto_closed?: boolean;
-  shift_open?: boolean;
+  scope?: "open" | "completed";
+  tasks?: SerializedWorkEmployeeTask[];
+  total?: number;
+  next_cursor?: string | null;
 };
 
-function sortTasksForFocus(tasks: SerializedWorkEmployeeTask[]): SerializedWorkEmployeeTask[] {
-  const rank = (s: string) => {
-    if (s === "IN_PROGRESS") return 0;
-    if (s === "PENDING") return 1;
-    if (s === "COMPLETED") return 2;
-    return 3;
-  };
-  return [...tasks].sort((a, b) => {
-    const dr = rank(a.status) - rank(b.status);
-    if (dr !== 0) return dr;
-    return a.order_index - b.order_index;
-  });
-}
+const EMPTY_STATS: EmployeeTaskDayStats = {
+  total: 0,
+  completed: 0,
+  pending: 0,
+  inProgress: 0,
+  lateWhileActive: 0,
+  progressPct: 0,
+  avgCompletedMinutes: null,
+};
 
 export function EmployeeTasksClient() {
   const { t, dir, bcp47 } = useI18n();
   const router = useRouter();
   const { showToast } = useToast();
   const { user, refresh: refreshAuth } = useAuth();
-  const [tasks, setTasks] = useState<SerializedWorkEmployeeTask[]>([]);
+  const [openTasks, setOpenTasks] = useState<SerializedWorkEmployeeTask[]>([]);
+  const [completedTasks, setCompletedTasks] = useState<SerializedWorkEmployeeTask[]>([]);
+  const [openCursor, setOpenCursor] = useState<string | null>(null);
+  const [completedCursor, setCompletedCursor] = useState<string | null>(null);
+  const [totals, setTotals] = useState({ open: 0, completed_today: 0 });
+  const [stats, setStats] = useState<EmployeeTaskDayStats>(EMPTY_STATS);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState<"open" | "completed" | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [needAuth, setNeedAuth] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -81,11 +96,17 @@ export function EmployeeTasksClient() {
   const [clockIn, setClockIn] = useState<string | null>(null);
   const [completedMinutes, setCompletedMinutes] = useState(0);
   const actionLock = useRef(false);
-  const tasksRef = useRef(tasks);
+  const openRef = useRef(openTasks);
+  const completedRef = useRef(completedTasks);
+  const statsRef = useRef(stats);
+  const loadLock = useRef(false);
+  const bootedFor = useRef<string | null>(null);
   const printRef = useRef("");
   const tRef = useRef(t);
   const redirectedRef = useRef(false);
-  tasksRef.current = tasks;
+  openRef.current = openTasks;
+  completedRef.current = completedTasks;
+  statsRef.current = stats;
   tRef.current = t;
   const forcedPw = user?.mustChangePassword === true;
 
@@ -98,12 +119,27 @@ export function EmployeeTasksClient() {
   });
 
   const applySnapshot = useCallback((j: SnapshotPayload) => {
-    const next = j.data ?? [];
-    const print = myTasksFingerprint(next);
+    const openPage: MyTasksListPage | undefined = j.open;
+    const completedPage: MyTasksListPage | undefined = j.completed;
+    const nextOpen = openPage?.tasks ?? (j.data ?? []).filter((task) => task.status !== "COMPLETED");
+    const nextCompleted =
+      completedPage?.tasks ?? (j.data ?? []).filter((task) => task.status === "COMPLETED");
+    const print = myTasksFingerprint([...nextOpen, ...nextCompleted]);
     if (print !== printRef.current) {
       printRef.current = print;
-      setTasks(next);
+      setOpenTasks(nextOpen);
+      setCompletedTasks(nextCompleted);
     }
+    if (openPage) setOpenCursor(openPage.next_cursor);
+    if (completedPage) setCompletedCursor(completedPage.next_cursor);
+    if (j.totals) setTotals(j.totals);
+    else {
+      setTotals({
+        open: openPage?.total ?? nextOpen.length,
+        completed_today: completedPage?.total ?? nextCompleted.length,
+      });
+    }
+    if (j.stats) setStats(j.stats);
     if (j.today?.completed_minutes != null) {
       setCompletedMinutes(j.today.completed_minutes);
     }
@@ -122,7 +158,9 @@ export function EmployeeTasksClient() {
     return j;
   }, []);
 
-  const load = useCallback(async (opts?: { silent?: boolean }) => {
+  const load = useCallback(async (opts?: { silent?: boolean; userId?: string | null }) => {
+    if (loadLock.current) return;
+    loadLock.current = true;
     if (!opts?.silent) setError(null);
     try {
       const res = await fetch("/api/work/my-tasks", {
@@ -141,6 +179,7 @@ export function EmployeeTasksClient() {
       const j = (await res.json()) as SnapshotPayload;
       setNeedAuth(false);
       applySnapshot(j);
+      if (opts?.userId) writeEmployeeTasksCache(opts.userId, j);
       if (j.shift_open === false && !redirectedRef.current) {
         redirectedRef.current = true;
         router.push(j.auto_closed ? "/employee/clock?ended=auto" : "/employee/clock");
@@ -148,32 +187,77 @@ export function EmployeeTasksClient() {
     } catch {
       setError(tRef.current("employee.tasks.loadError"));
     } finally {
+      loadLock.current = false;
       setLoading(false);
+      setRefreshing(false);
     }
   }, [applySnapshot, router]);
 
+  const loadMore = useCallback(async (scope: "open" | "completed") => {
+    const cursor = scope === "open" ? openCursor : completedCursor;
+    if (!cursor || loadingMore || loadLock.current) return;
+    setLoadingMore(scope);
+    try {
+      const qs = new URLSearchParams({ scope, cursor });
+      const res = await fetch(`/api/work/my-tasks?${qs.toString()}`, {
+        credentials: "same-origin",
+        cache: "no-store",
+      });
+      const j = (await res.json()) as SnapshotPayload;
+      if (!res.ok || j.ok === false) {
+        setError(tRef.current("employee.tasks.loadError"));
+        return;
+      }
+      const incoming = j.tasks ?? [];
+      if (scope === "open") {
+        setOpenTasks((current) => appendTaskPage(current, incoming));
+        setOpenCursor(j.next_cursor ?? null);
+        if (typeof j.total === "number") setTotals((cur) => ({ ...cur, open: j.total! }));
+      } else {
+        setCompletedTasks((current) => appendTaskPage(current, incoming));
+        setCompletedCursor(j.next_cursor ?? null);
+        if (typeof j.total === "number") {
+          setTotals((cur) => ({ ...cur, completed_today: j.total! }));
+        }
+      }
+      invalidateEmployeeTasksCache();
+    } catch {
+      setError(tRef.current("employee.tasks.loadError"));
+    } finally {
+      setLoadingMore(null);
+    }
+  }, [completedCursor, loadingMore, openCursor]);
+
   useEffect(() => {
-    queueMicrotask(() => {
-      void load();
-    });
-  }, [load]);
+    const uid = user?.id;
+    if (!uid || bootedFor.current === uid) return;
+    bootedFor.current = uid;
+    const cached = readEmployeeTasksCache(uid);
+    if (cached) {
+      applySnapshot(cached);
+      setLoading(false);
+    }
+    void load({ silent: Boolean(cached), userId: uid });
+  }, [applySnapshot, load, user?.id]);
 
   useEffect(() => {
     const h = window.setInterval(() => {
       if (document.visibilityState === "hidden") return;
-      void load({ silent: true });
+      void load({ silent: true, userId: user?.id });
     }, 45_000);
     return () => window.clearInterval(h);
-  }, [load]);
+  }, [load, user?.id]);
 
   const startWork = useCallback(async (id: string) => {
     if (actionLock.current) return;
     actionLock.current = true;
     setBusyId(id);
     setError(null);
-    const snapshot = tasksRef.current;
+    const previous = openRef.current.find((task) => task.id === id);
+    const snapshotOpen = openRef.current;
+    const statsBefore = statsRef.current;
     const optimisticAt = new Date().toISOString();
-    setTasks((current) =>
+    setOpenTasks((current) =>
       current.map((task) =>
         task.id === id
           ? {
@@ -185,6 +269,7 @@ export function EmployeeTasksClient() {
           : task,
       ),
     );
+    if (previous) setStats((current) => statsAfterStart(current, previous.status));
     try {
       const res = await fetch(`/api/work/tasks/${encodeURIComponent(id)}/start`, {
         method: "POST",
@@ -198,16 +283,18 @@ export function EmployeeTasksClient() {
       };
       if (res.ok && j.ok !== false && j.data) {
         const confirmed = j.data;
-        setTasks((current) => {
-          const next = current.map((task) => (task.id === id ? { ...task, ...confirmed } : task));
-          printRef.current = myTasksFingerprint(next);
+        setOpenTasks((current) => {
+          const next = replaceTaskById(current, confirmed);
+          printRef.current = myTasksFingerprint([...next, ...completedRef.current]);
           return next;
         });
+        invalidateEmployeeTasksCache();
         playEmployeeSound("start");
         showToast({ tone: "success", title: tRef.current("employee.experience.taskStartedToast") });
         return;
       }
-      setTasks(snapshot);
+      setOpenTasks(snapshotOpen);
+      setStats(statsBefore);
       if (j.code === "SHIFT_ENDED") {
         showToast({ tone: "success", title: tRef.current("employee.dashboard.autoShiftEnded") });
         router.push("/employee/clock");
@@ -219,7 +306,8 @@ export function EmployeeTasksClient() {
       }
       setError(msg);
     } catch {
-      setTasks(snapshot);
+      setOpenTasks(snapshotOpen);
+      setStats(statsBefore);
       setError(tRef.current("employee.tasks.errors.startFailed"));
     } finally {
       actionLock.current = false;
@@ -276,21 +364,29 @@ export function EmployeeTasksClient() {
       };
 
       if (res.ok && raw.ok !== false) {
-        const completed = raw.completedTask ?? raw.data;
-        setTasks((current) => {
-          const next = current.map((row) =>
-            row.id === task.id && completed
-              ? { ...row, ...completed }
-              : row.id === task.id
-                ? { ...row, status: "COMPLETED", completed_at: new Date().toISOString() }
-                : row,
-          );
-          if (raw.nextTask && !next.some((row) => row.id === raw.nextTask!.id)) {
-            next.push(raw.nextTask);
-          }
-          printRef.current = myTasksFingerprint(next);
-          return next;
+        const completed =
+          raw.completedTask ??
+          raw.data ?? {
+            ...task,
+            status: "COMPLETED",
+            completed_at: new Date().toISOString(),
+          };
+        setOpenTasks((current) => {
+          const without = current.filter((row) => row.id !== task.id);
+          const withNext =
+            raw.nextTask && !without.some((row) => row.id === raw.nextTask!.id)
+              ? appendTaskPage(without, [raw.nextTask])
+              : without;
+          printRef.current = myTasksFingerprint([...withNext, completed, ...completedRef.current]);
+          return withNext;
         });
+        setCompletedTasks((current) => [completed, ...current.filter((row) => row.id !== completed.id)]);
+        setTotals((current) => ({
+          open: Math.max(0, current.open - (task.status === "COMPLETED" ? 0 : 1)),
+          completed_today: current.completed_today + (task.status === "COMPLETED" ? 0 : 1),
+        }));
+        setStats((current) => statsAfterComplete(current, task.status));
+        invalidateEmployeeTasksCache();
         setCompleteModal(null);
         playEmployeeSound("complete");
         setCompletedEarly(wasOnTime && !delayReason);
@@ -369,12 +465,34 @@ export function EmployeeTasksClient() {
   }, [completeModal, bcp47, t]);
 
   const activeTask = useMemo(
-    () => tasks.find((x) => x.status === "IN_PROGRESS") ?? null,
-    [tasks],
+    () => openTasks.find((x) => x.status === "IN_PROGRESS") ?? null,
+    [openTasks],
   );
+  const dayStats = stats;
+  const visibleCount = openTasks.length + completedTasks.length;
 
-  const sortedTasks = useMemo(() => sortTasksForFocus(tasks), [tasks]);
-  const dayStats = useMemo(() => computeEmployeeTaskDayStats(tasks), [tasks]);
+  const renderTaskCard = (task: SerializedWorkEmployeeTask) => {
+    const isActive = activeTask?.id === task.id;
+    const hasDifferentActive = Boolean(activeTask && activeTask.id !== task.id);
+    const canStart = (task.status === "PENDING" || task.status === "DELAYED") && !hasDifferentActive;
+    const canComplete = task.status === "IN_PROGRESS";
+    const isCollapsed = Boolean(activeTask && !isActive);
+    return (
+      <li key={task.id} className={isActive ? "motion-safe:animate-[etask-expand_0.35s_ease-out]" : undefined}>
+        <EmployeeTaskCard
+          task={task}
+          isActive={isActive}
+          isCollapsed={isCollapsed}
+          busy={busyId === task.id}
+          canStart={canStart}
+          canComplete={canComplete}
+          onStart={startWork}
+          onComplete={openCompleteModal}
+          completedByName={user?.fullName ?? null}
+        />
+      </li>
+    );
+  };
 
   if (needAuth) {
     return (
@@ -410,14 +528,30 @@ export function EmployeeTasksClient() {
         name={user?.fullName ?? ""}
         subtitle={t("employee.tasks.focusHint")}
         action={
-          <button
-            type="button"
-            onClick={() => setPwOpen(true)}
-            className="inline-flex min-h-[44px] items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-700 hover:bg-slate-50"
-          >
-            <KeyRound className="h-4 w-4" aria-hidden />
-            {t("employee.tasks.changePassword")}
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                if (!user?.id || loadLock.current) return;
+                invalidateEmployeeTasksCache();
+                setRefreshing(true);
+                void load({ silent: true, userId: user.id });
+              }}
+              disabled={refreshing}
+              className="inline-flex min-h-[44px] items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+            >
+              <RefreshCw className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} aria-hidden />
+              {t("employee.tasks.refresh")}
+            </button>
+            <button
+              type="button"
+              onClick={() => setPwOpen(true)}
+              className="inline-flex min-h-[44px] items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-700 hover:bg-slate-50"
+            >
+              <KeyRound className="h-4 w-4" aria-hidden />
+              {t("employee.tasks.changePassword")}
+            </button>
+          </div>
         }
       />
 
@@ -432,8 +566,8 @@ export function EmployeeTasksClient() {
         />
       </div>
 
-      {!loading && tasks.length > 0 ? (
-        <EmployeeTasksSession tasks={tasks} activeTask={activeTask} />
+      {!loading && visibleCount > 0 ? (
+        <EmployeeTasksSession tasks={[...openTasks, ...completedTasks]} activeTask={activeTask} />
       ) : null}
 
       {error && !needAuth ? (
@@ -442,40 +576,57 @@ export function EmployeeTasksClient() {
         </p>
       ) : null}
 
-      {loading && tasks.length === 0 ? (
+      {loading && visibleCount === 0 ? (
         <ul className="mt-4 space-y-4 px-3 sm:mt-6 sm:px-4" aria-busy="true" aria-label={t("employee.tasks.loadingTasks")}>
           {[0, 1, 2].map((i) => (
             <li key={i} className="h-28 animate-pulse rounded-3xl bg-slate-100" />
           ))}
         </ul>
-      ) : tasks.length === 0 ? (
+      ) : visibleCount === 0 ? (
         <EmployeeEmptyTasks className="mx-3 sm:mx-4" />
       ) : (
-        <ul className="mt-4 space-y-4 px-3 sm:mt-6 sm:space-y-5 sm:px-4">
-          {sortedTasks.map((task) => {
-            const isActive = activeTask?.id === task.id;
-            const hasDifferentActive = Boolean(activeTask && activeTask.id !== task.id);
-            const canStart = (task.status === "PENDING" || task.status === "DELAYED") && !hasDifferentActive;
-            const canComplete = task.status === "IN_PROGRESS";
-            const isCollapsed = Boolean(activeTask && !isActive);
-
-            return (
-              <li key={task.id} className={isActive ? "motion-safe:animate-[etask-expand_0.35s_ease-out]" : undefined}>
-                <EmployeeTaskCard
-                  task={task}
-                  isActive={isActive}
-                  isCollapsed={isCollapsed}
-                  busy={busyId === task.id}
-                  canStart={canStart}
-                  canComplete={canComplete}
-                  onStart={startWork}
-                  onComplete={openCompleteModal}
-                  completedByName={user?.fullName ?? null}
-                />
-              </li>
-            );
-          })}
-        </ul>
+        <div className="mt-4 space-y-6 px-3 sm:mt-6 sm:px-4">
+          <section>
+            <h2 className="mb-3 text-sm font-black text-slate-700">
+              {t("employee.tasks.openTotal", { n: totals.open })}
+            </h2>
+            <ul className="space-y-4 sm:space-y-5">
+              {openTasks.map((task) => renderTaskCard(task))}
+            </ul>
+            {openCursor ? (
+              <button
+                type="button"
+                onClick={() => void loadMore("open")}
+                disabled={loadingMore === "open"}
+                className="mt-3 flex min-h-[44px] w-full items-center justify-center rounded-2xl border border-slate-200 bg-white text-sm font-black text-slate-700 disabled:opacity-50"
+              >
+                {loadingMore === "open" ? t("employee.tasks.loadingMore") : t("employee.tasks.loadMore")}
+              </button>
+            ) : null}
+          </section>
+          {totals.completed_today > 0 || completedTasks.length > 0 ? (
+            <section>
+              <h2 className="mb-3 text-sm font-black text-slate-700">
+                {t("employee.tasks.completedToday", { n: totals.completed_today })}
+              </h2>
+              <ul className="space-y-4 sm:space-y-5">
+                {completedTasks.map((task) => renderTaskCard(task))}
+              </ul>
+              {completedCursor ? (
+                <button
+                  type="button"
+                  onClick={() => void loadMore("completed")}
+                  disabled={loadingMore === "completed"}
+                  className="mt-3 flex min-h-[44px] w-full items-center justify-center rounded-2xl border border-slate-200 bg-white text-sm font-black text-slate-700 disabled:opacity-50"
+                >
+                  {loadingMore === "completed"
+                    ? t("employee.tasks.loadingMore")
+                    : t("employee.tasks.loadMore")}
+                </button>
+              ) : null}
+            </section>
+          ) : null}
+        </div>
       )}
 
       <ChangePasswordDialog

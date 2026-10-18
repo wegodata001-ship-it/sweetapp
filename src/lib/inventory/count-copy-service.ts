@@ -24,6 +24,7 @@ import {
   orderedProductIdsOnShelf,
   resolveShelf,
 } from "@/lib/inventory/shelf-service";
+import { israelYmd } from "@/lib/inventory/count-history-audit";
 
 export type CountCopyProduct = {
   inventoryProductId: string;
@@ -125,8 +126,92 @@ export function sessionLinesToExplicitCountMap(
 }
 
 /**
+ * אותו inventoryProductId לא מופיע פעמיים.
+ * שורות עם מזהים שונים נשארות גם אם שם התצוגה זהה.
+ * הסדר הוא סדר ההופעה הראשון.
+ */
+export function uniqueCopyProductsByRecordId(
+  products: CountCopyProduct[],
+): CountCopyProduct[] {
+  const seen = new Set<string>();
+  const out: CountCopyProduct[] = [];
+  for (const product of products) {
+    const id = product.inventoryProductId?.trim() ?? "";
+    if (id) {
+      if (seen.has(id)) continue;
+      seen.add(id);
+    }
+    out.push(product);
+  }
+  return out;
+}
+
+/** מפתח יום+מיקום. היום הוא לוח ישראל, כמו שאר מודול הספירה. */
+export function copySnapshotGroupKey(session: CountCopySession): string {
+  const loc = session.locationId?.trim() || `name:${session.locationName.trim()}`;
+  const parsed = new Date(session.countDate);
+  const day = Number.isNaN(parsed.getTime()) ? session.countDate : israelYmd(parsed);
+  return `${loc}|${day}`;
+}
+
+/**
+ * חתימת המבנה שמועתק בפועל: מזהה רשומת מוצר + הכמות שמופיעה בטקסט.
+ * לא כולל שם מוצר — שמות זהים אינם סיבה לאיחוד.
+ */
+export function copySnapshotStructureKey(session: CountCopySession): string {
+  return uniqueCopyProductsByRecordId(session.products)
+    .map((p) => `${p.inventoryProductId}\u0000${p.totalQuantity}`)
+    .join("\u0001");
+}
+
+function laterCopySession(a: CountCopySession, b: CountCopySession): CountCopySession {
+  const at = new Date(a.createdAt).getTime();
+  const bt = new Date(b.createdAt).getTime();
+  if (Number.isFinite(at) && Number.isFinite(bt) && at !== bt) return bt > at ? b : a;
+  return b.id > a.id ? b : a;
+}
+
+/**
+ * כמה שמירות באותו מקום ובאותו יום מייצרות אותו צילום מדף (אותם מזהי מוצר
+ * ואותן כמויות מועתקות). «העתק הכל» היה משרשר את הצילום פעם לכל שמירה.
+ * מאחדים רק כשהמבנה זהה. מקום אחר, יום אחר, או כמות אחרת — נשארים בנפרד.
+ */
+export function collapseIdenticalCopySnapshots(
+  sessions: CountCopySession[],
+): CountCopySession[] {
+  const groups = new Map<string, CountCopySession[]>();
+  const order: string[] = [];
+  for (const session of sessions) {
+    const key = copySnapshotGroupKey(session);
+    if (!groups.has(key)) {
+      groups.set(key, []);
+      order.push(key);
+    }
+    groups.get(key)!.push(session);
+  }
+
+  const out: CountCopySession[] = [];
+  for (const key of order) {
+    const group = groups.get(key)!;
+    if (group.length === 1) {
+      out.push(group[0]!);
+      continue;
+    }
+    const structure = copySnapshotStructureKey(group[0]!);
+    const identical = group.every((s) => copySnapshotStructureKey(s) === structure);
+    if (!identical) {
+      out.push(...group);
+      continue;
+    }
+    out.push(group.reduce(laterCopySession));
+  }
+  return out;
+}
+
+/**
  * בונה שורות העתקה: כל מוצרי המיקום בסדר מסך הספירה,
  * עם כמות מהסשן או null (= לא נספר).
+ * מזהה מוצר כפול ברשימת הסדר לא יוצר שורה נוספת.
  */
 export function buildCopyProductRows(params: {
   orderedProductIds: string[];
@@ -135,7 +220,10 @@ export function buildCopyProductRows(params: {
   totalsByProductId?: Map<string, number>;
 }): CountCopyProduct[] {
   const rows: CountCopyProduct[] = [];
+  const seen = new Set<string>();
   for (const id of params.orderedProductIds) {
+    if (seen.has(id)) continue;
+    seen.add(id);
     const meta = params.productsById.get(id);
     if (!meta) continue;
     const hasCount = params.explicitCountsByProductId.has(id);
@@ -223,7 +311,7 @@ export function formatCountSessionCopyText(
     session.locationName.trim() || "—",
     formatCopyCountDate(session.countDate),
   ].join("\n");
-  const body = session.products.map((p, index) => {
+  const body = uniqueCopyProductsByRecordId(session.products).map((p, index) => {
     const name = resolveCopyProductName(p, language);
     return `${index + 1}. ${name} - ${formatCopyQuantity(p.totalQuantity)}`;
   });
@@ -234,7 +322,7 @@ export function formatAllCountSessionsCopyText(
   sessions: CountCopySession[],
   language?: string | null,
 ): string {
-  return sessions
+  return collapseIdenticalCopySnapshots(sessions)
     .map((s) => formatCountSessionCopyText(s, language))
     .join("\n\n---\n\n");
 }
@@ -455,5 +543,5 @@ export async function listSessionsForCopy(params: {
     });
   }
 
-  return result;
+  return collapseIdenticalCopySnapshots(result);
 }
