@@ -1,5 +1,6 @@
 import { prismaAny } from "@/lib/prisma";
 import type { ResolvedShelf } from "@/lib/inventory/shelf-service";
+import { israelYmd } from "@/lib/inventory/count-history-audit";
 
 /**
  * הסרת מוצר מסבב ספירה — Soft Delete בלבד.
@@ -29,26 +30,19 @@ export function shelfLocationKey(shelf: Pick<ResolvedShelf, "id" | "name">): str
   return `name:${shelf.name.trim().toLowerCase()}`;
 }
 
-/** תאריך מקומי כ־YYYY-MM-DD (ללא הסטת אזור זמן דרך toISOString) */
-function localDay(d: Date): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-}
-
 /**
  * נרמול יום הספירה. מקבל "YYYY-MM-DD" מהלקוח; כל קלט אחר (או חסר)
- * נופל להיום — כך שקריאות ישנות ללא countDate ממשיכות לעבוד.
+ * נופל ליום העסקים בישראל (Asia/Jerusalem) — אותו מפתח ב־exclusion
+ * בשמירה ובטעינה מחדש, גם כשהשרת רץ ב־UTC.
  */
 export function normalizeCountDay(raw: string | null | undefined): string {
   const value = raw?.trim();
   if (value && /^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
   if (value) {
     const parsed = new Date(value);
-    if (!Number.isNaN(parsed.getTime())) return localDay(parsed);
+    if (!Number.isNaN(parsed.getTime())) return israelYmd(parsed);
   }
-  return localDay(new Date());
+  return israelYmd(new Date());
 }
 
 export function resolveCountRoundScope(

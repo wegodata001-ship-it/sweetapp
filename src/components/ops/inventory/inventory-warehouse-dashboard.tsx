@@ -24,7 +24,7 @@ import { useToast } from "@/components/toast-provider";
 import { useLiveRefresh } from "@/hooks/use-live-refresh";
 import { signalLiveRefresh } from "@/lib/client/live-data";
 import type { ShelfSummary } from "@/components/ops/inventory-count/types";
-import { localYmd } from "@/components/ops/inventory-count/utils";
+import { israelCalendarDateString } from "@/lib/staff/work-date";
 import {
   canEditWeekdayMinimums,
   canRemoveCountRow,
@@ -151,7 +151,8 @@ export function InventoryWarehouseDashboard() {
   const [filterMinProducts, setFilterMinProducts] = useState("");
   const [filterLastCountFrom, setFilterLastCountFrom] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("displayOrder");
-  const countDate = localYmd(new Date());
+  /** יום עסקים בישראל — אותו מפתח ל־exclusion / שמירה / טעינה מחדש */
+  const countDate = israelCalendarDateString(new Date());
 
   const [actionShelf, setActionShelf] = useState<ShelfGridModel | null>(null);
   const [addProductsOpen, setAddProductsOpen] = useState(false);

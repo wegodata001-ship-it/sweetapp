@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prismaAny } from "@/lib/prisma";
 import { requireDb } from "@/lib/api-route";
 import { getSessionFromCookie } from "@/lib/auth/get-session";
+import { mergeShelfProductOrder } from "@/lib/inventory/count-list-persist";
 import {
   ensureProductOnShelf,
   orderedProductIdsOnShelf,
@@ -44,13 +45,8 @@ export async function PATCH(req: NextRequest) {
     }
     const locationId = shelf.id;
 
-    const uniqueFront = [...new Set(productIds)];
     const shelfOrdered = await orderedProductIdsOnShelf(shelf);
-    const shelfSet = new Set(shelfOrdered);
-    const front = uniqueFront.filter((id) => shelfSet.has(id));
-    const frontSet = new Set(front);
-    const rest = shelfOrdered.filter((id) => !frontSet.has(id));
-    const ordered = [...front, ...rest];
+    const ordered = mergeShelfProductOrder(productIds, shelfOrdered);
 
     if (ordered.length === 0) {
       return NextResponse.json({ ok: false, error: "לא נמצאו מוצרים" }, { status: 400 });

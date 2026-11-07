@@ -292,13 +292,27 @@ function ShelfCountModalInner({
   const listRef = useRef<HTMLDivElement>(null);
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const orderTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** סדר ממתין לשמירה — לא נאבד ב־debounce / סגירת מודאל */
+  const pendingOrderIdsRef = useRef<string[] | null>(null);
+  /** מוצרים שהוסרו בסבב הנוכחי — נשמרים שוב ב־«שמור ספירה» למקרה שה־POST המיידי נקטע */
+  const pendingExcludedIdsRef = useRef<Set<string>>(new Set());
   const rowRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const qtyInputRefs = useRef<Map<string, HTMLInputElement>>(new Map());
   const loadingMoreRef = useRef(false);
   const hadSuccessfulLoadRef = useRef(false);
   const loadAbortRef = useRef<AbortController | null>(null);
   const tRef = useRef(t);
+  const persistScopeRef = useRef({
+    countDate,
+    locationId: locationId?.trim() || "",
+    shelfName: shelfName.trim(),
+  });
   tRef.current = t;
+  persistScopeRef.current = {
+    countDate,
+    locationId: locationId?.trim() || "",
+    shelfName: shelfName.trim(),
+  };
 
   const markTouched = useCallback((productId: string) => {
     setTouchedIds((prev) => {
@@ -577,9 +591,45 @@ function ShelfCountModalInner({
 
   useEffect(() => {
     if (!open) return;
+    pendingOrderIdsRef.current = null;
+    pendingExcludedIdsRef.current = new Set();
     void runCountLoad("initial");
     return () => {
       loadAbortRef.current?.abort();
+      // אל תאבד סדר/הסרות ממתינים בסגירת המודאל — שלח עם keepalive
+      if (orderTimer.current) {
+        clearTimeout(orderTimer.current);
+        orderTimer.current = null;
+      }
+      const scope = persistScopeRef.current;
+      const pendingOrder = pendingOrderIdsRef.current;
+      if (pendingOrder && pendingOrder.length > 0) {
+        void fetch("/api/inventory/product-order", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          credentials: "same-origin",
+          keepalive: true,
+          body: JSON.stringify({
+            productIds: pendingOrder,
+            locationId: scope.locationId || undefined,
+            location: scope.shelfName || undefined,
+          }),
+        }).catch(() => undefined);
+      }
+      for (const productId of pendingExcludedIdsRef.current) {
+        void fetch("/api/inventory/count-exclusions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "same-origin",
+          keepalive: true,
+          body: JSON.stringify({
+            inventoryProductId: productId,
+            locationId: scope.locationId || undefined,
+            location: scope.shelfName || undefined,
+            countDate: scope.countDate,
+          }),
+        }).catch(() => undefined);
+      }
     };
   }, [open, runCountLoad]);
 
@@ -912,30 +962,96 @@ function ShelfCountModalInner({
     [markTouched, workers],
   );
 
-  const persistProductOrder = useCallback(
-    (orderedIds: string[]) => {
-      if (orderTimer.current) clearTimeout(orderTimer.current);
-      orderTimer.current = setTimeout(() => {
-        void (async () => {
-          try {
-            await fetch("/api/inventory/product-order", {
-              method: "PATCH",
-              headers: { "Content-Type": "application/json" },
-              credentials: "same-origin",
-              body: JSON.stringify({
-                productIds: orderedIds,
-                locationId: locationId?.trim() || undefined,
-                location: shelfName.trim() || undefined,
-              }),
-            });
-          } catch {
-            /* שמירת סדר לא חוסמת ספירה */
-          }
-        })();
-      }, ORDER_SAVE_MS);
+  const writeProductOrder = useCallback(
+    async (orderedIds: string[]): Promise<boolean> => {
+      if (orderedIds.length === 0) return true;
+      try {
+        const res = await fetch("/api/inventory/product-order", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          credentials: "same-origin",
+          keepalive: true,
+          body: JSON.stringify({
+            productIds: orderedIds,
+            locationId: locationId?.trim() || undefined,
+            location: shelfName.trim() || undefined,
+          }),
+        });
+        const j = (await res.json()) as { ok?: boolean };
+        if (!res.ok || !j.ok) return false;
+        if (pendingOrderIdsRef.current === orderedIds) {
+          pendingOrderIdsRef.current = null;
+        }
+        return true;
+      } catch {
+        return false;
+      }
     },
     [locationId, shelfName],
   );
+
+  const flushProductOrder = useCallback(async (): Promise<boolean> => {
+    if (orderTimer.current) {
+      clearTimeout(orderTimer.current);
+      orderTimer.current = null;
+    }
+    const orderedIds = pendingOrderIdsRef.current;
+    if (!orderedIds || orderedIds.length === 0) return true;
+    return writeProductOrder(orderedIds);
+  }, [writeProductOrder]);
+
+  const persistProductOrder = useCallback(
+    (orderedIds: string[]) => {
+      pendingOrderIdsRef.current = orderedIds;
+      if (orderTimer.current) clearTimeout(orderTimer.current);
+      orderTimer.current = setTimeout(() => {
+        orderTimer.current = null;
+        const ids = pendingOrderIdsRef.current;
+        if (!ids) return;
+        void writeProductOrder(ids);
+      }, ORDER_SAVE_MS);
+    },
+    [writeProductOrder],
+  );
+
+  const writeCountExclusion = useCallback(
+    async (productId: string): Promise<{ ok: boolean; error?: string }> => {
+      try {
+        const res = await fetch("/api/inventory/count-exclusions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "same-origin",
+          keepalive: true,
+          body: JSON.stringify({
+            inventoryProductId: productId,
+            locationId: locationId?.trim() || undefined,
+            location: shelfName.trim() || undefined,
+            countDate,
+          }),
+        });
+        const j = (await res.json()) as { ok?: boolean; error?: string };
+        if (!res.ok || !j.ok) {
+          return { ok: false, error: j.error };
+        }
+        return { ok: true };
+      } catch {
+        return { ok: false };
+      }
+    },
+    [countDate, locationId, shelfName],
+  );
+
+  const flushPendingExclusions = useCallback(async (): Promise<boolean> => {
+    const ids = [...pendingExcludedIdsRef.current];
+    if (ids.length === 0) return true;
+    for (const productId of ids) {
+      const result = await writeCountExclusion(productId);
+      if (!result.ok) return false;
+    }
+    // נשמרו ב־DB — אין צורך לשלוח שוב ב־keepalive בסגירה
+    pendingExcludedIdsRef.current = new Set();
+    return true;
+  }, [writeCountExclusion]);
 
   const reorderProduct = useCallback(
     (fromId: string, toId: string) => {
@@ -1015,7 +1131,10 @@ function ShelfCountModalInner({
       });
       rowRefs.current.delete(productId);
 
+      pendingExcludedIdsRef.current.add(productId);
+
       const rollback = () => {
+        pendingExcludedIdsRef.current.delete(productId);
         setProducts((prev) => {
           if (prev.some((p) => p.id === productId)) return prev;
           const next = [...prev];
@@ -1032,21 +1151,10 @@ function ShelfCountModalInner({
       };
 
       try {
-        const res = await fetch("/api/inventory/count-exclusions", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          credentials: "same-origin",
-          body: JSON.stringify({
-            inventoryProductId: productId,
-            locationId: locationId?.trim() || undefined,
-            location: shelfName.trim() || undefined,
-            countDate,
-          }),
-        });
-        const j = (await res.json()) as { ok?: boolean; error?: string };
-        if (!res.ok || !j.ok) {
+        const result = await writeCountExclusion(productId);
+        if (!result.ok) {
           rollback();
-          setError(j.error ?? t("removeRowFailed"));
+          setError(result.error ?? t("removeRowFailed"));
           return;
         }
         setLastRemoved(snapshot);
@@ -1061,13 +1169,11 @@ function ShelfCountModalInner({
     },
     [
       actualById,
-      countDate,
-      locationId,
       products,
       scheduleShelfRefresh,
-      shelfName,
       t,
       workerQtyByProduct,
+      writeCountExclusion,
     ],
   );
 
@@ -1090,6 +1196,7 @@ function ShelfCountModalInner({
         setError(j.error ?? t("removeRowFailed"));
         return;
       }
+      pendingExcludedIdsRef.current.delete(productId);
       setProducts((prev) => {
         if (prev.some((p) => p.id === productId)) return prev;
         const next = [...prev];
@@ -1356,7 +1463,10 @@ function ShelfCountModalInner({
         }
       }
 
-      if (lines.length === 0) {
+      const hasPendingOrder = Boolean(pendingOrderIdsRef.current?.length);
+      const hasPendingExclusions = pendingExcludedIdsRef.current.size > 0;
+
+      if (lines.length === 0 && !hasPendingOrder && !hasPendingExclusions) {
         setError(t("nothingToSave"));
         return false;
       }
@@ -1366,6 +1476,26 @@ function ShelfCountModalInner({
       setNotice(null);
       setSavingIds(new Set(lines.map((line) => line.inventoryProductId)));
       try {
+        // סדר + הסרות חייבים להישמר ב־DB לפני הודעת הצלחה — לא רק ב־React state
+        const orderOk = await flushProductOrder();
+        if (!orderOk) {
+          setError(t("saveFailed"));
+          return false;
+        }
+        const exclusionsOk = await flushPendingExclusions();
+        if (!exclusionsOk) {
+          setError(t("removeRowFailed"));
+          return false;
+        }
+
+        if (lines.length === 0) {
+          setConfirmCloseOpen(false);
+          setNotice(t("savedSuccess"));
+          scheduleShelfRefresh();
+          if (opts?.closeAfterSave) onClose();
+          return true;
+        }
+
         const res = await fetch("/api/inventory/monthly-count", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -1505,6 +1635,8 @@ function ShelfCountModalInner({
       countDate,
       countBaseByProduct,
       dirtyProductIds,
+      flushPendingExclusions,
+      flushProductOrder,
       hasWorkers,
       loadPhase,
       baselineValidated,

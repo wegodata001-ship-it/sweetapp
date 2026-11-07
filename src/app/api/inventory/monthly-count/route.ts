@@ -35,6 +35,7 @@ import {
   normalizeCountDay,
   resolveCountRoundScope,
 } from "@/lib/inventory/count-exclusions";
+import { applyExclusionsToOrderedIds } from "@/lib/inventory/count-list-persist";
 import { loadExistingCountToday, type ExistingCountToday } from "@/lib/inventory/count-round-guard";
 import { ACTIVE_COUNT_LINE_WHERE } from "@/lib/inventory/count-session-status";
 import { scheduleCountSessionCompletedAlert } from "@/lib/inventory/count-session-alert";
@@ -143,16 +144,22 @@ async function loadLatestCountsForProducts(productIds: string[]): Promise<Map<st
   return countsByProduct;
 }
 
+type PlacementRowData = PlacementWeekdayMinimums & {
+  inventoryProductId: string;
+  displayOrder: number;
+};
+
 async function loadPlacementWeekdayData(
   locationId: string | null,
   productIds: string[],
-): Promise<Map<string, PlacementWeekdayMinimums>> {
-  const out = new Map<string, PlacementWeekdayMinimums>();
+): Promise<Map<string, PlacementRowData>> {
+  const out = new Map<string, PlacementRowData>();
   if (!locationId || productIds.length === 0) return out;
   const rows = (await prismaAny.inventoryProductOnLocation.findMany({
     where: { locationId, inventoryProductId: { in: productIds } },
     select: {
       inventoryProductId: true,
+      displayOrder: true,
       minimumQuantity: true,
       minimumSun: true,
       minimumMon: true,
@@ -162,7 +169,7 @@ async function loadPlacementWeekdayData(
       minimumFri: true,
       minimumSat: true,
     },
-  })) as (PlacementWeekdayMinimums & { inventoryProductId: string })[];
+  })) as PlacementRowData[];
   for (const r of rows) {
     out.set(r.inventoryProductId, r);
   }
@@ -173,7 +180,7 @@ function mapProductRow(
   p: ProductRow,
   shelf: { id: string | null; name: string },
   countsByProduct: Map<string, CountQtyRow[]>,
-  placementWeekdays: Map<string, PlacementWeekdayMinimums>,
+  placementWeekdays: Map<string, PlacementRowData>,
   countDay: string,
 ) {
   const counts = countsByProduct.get(p.id) ?? [];
@@ -216,7 +223,8 @@ function mapProductRow(
     minimumQuantity: locationMin,
     productMinimumQuantity: p.minimumQuantity,
     maximumQuantity: p.maximumQuantity,
-    displayOrder: p.displayOrder ?? 0,
+    /** סדר תצוגה של המקום (placement) — לא displayOrder הגלובלי של המוצר */
+    displayOrder: placement?.displayOrder ?? p.displayOrder ?? 0,
     lastCountedAt: latestForShelf?.countDate
       ? new Date(latestForShelf.countDate).toISOString()
       : null,
@@ -415,11 +423,7 @@ export async function GET(req: NextRequest) {
     };
 
     // סדר לפי placement.displayOrder של המקום — לא גלובלי בין מחסנים
-    let orderedIds = roster.orderedIds;
-    if (excludedProductIds.length > 0) {
-      const excluded = new Set(excludedProductIds);
-      orderedIds = orderedIds.filter((id) => !excluded.has(id));
-    }
+    let orderedIds = applyExclusionsToOrderedIds(roster.orderedIds, excludedProductIds);
     if (q || category) {
       const matched = (await prismaAny.inventoryProduct.findMany({
         where,
