@@ -302,17 +302,21 @@ function ShelfCountModalInner({
   const hadSuccessfulLoadRef = useRef(false);
   const loadAbortRef = useRef<AbortController | null>(null);
   const tRef = useRef(t);
+  /** Snapshot לסcope שמירת סדר/החרגות ב־cleanup — מתעדכן ב־effect בלבד (לא ב־render) */
   const persistScopeRef = useRef({
     countDate,
     locationId: locationId?.trim() || "",
     shelfName: shelfName.trim(),
   });
   tRef.current = t;
-  persistScopeRef.current = {
-    countDate,
-    locationId: locationId?.trim() || "",
-    shelfName: shelfName.trim(),
-  };
+
+  useEffect(() => {
+    persistScopeRef.current = {
+      countDate,
+      locationId: locationId?.trim() || "",
+      shelfName: shelfName.trim(),
+    };
+  }, [countDate, locationId, shelfName]);
 
   const markTouched = useCallback((productId: string) => {
     setTouchedIds((prev) => {
